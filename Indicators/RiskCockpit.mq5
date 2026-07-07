@@ -21,6 +21,7 @@
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
 #property version "1.40"
+#property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
 #property indicator_chart_window
@@ -236,7 +237,7 @@ CCanvasKit g_kit;
 #define RC_R_CARD     10   // inner card corner radius
 // v1.4 dev : optional BUILD tag in the title bar (per modern phase during dev :
 // "R1", "R2"...). EMPTY = clean release (no tag drawn). NOT the Market version.
-#define RC_BUILD_TAG  ""
+#define RC_BUILD_TAG  "R3"
 
 void InitTheme(void) {
     // G3 : route through EffectiveTheme so the settings popup can switch
