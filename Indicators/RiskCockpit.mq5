@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "1.30"
+#property version "1.40"
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
 #property indicator_chart_window
@@ -234,10 +234,9 @@ CCanvasKit g_kit;
 #define RC_KIT_MARGIN 16   // shadow / rounding room around the panel
 #define RC_R_PANEL    13   // panel corner radius
 #define RC_R_CARD     10   // inner card corner radius
-// v1.4 dev : visible BUILD tag in the title bar (increments per modern phase :
-// R1, R2...). NOT the Market version (#property version stays "1.30" until ship).
-// Lets JR see at a glance which build is actually running after an F7 + reload.
-#define RC_BUILD_TAG  "R1"
+// v1.4 dev : optional BUILD tag in the title bar (per modern phase during dev :
+// "R1", "R2"...). EMPTY = clean release (no tag drawn). NOT the Market version.
+#define RC_BUILD_TAG  ""
 
 void InitTheme(void) {
     // G3 : route through EffectiveTheme so the settings popup can switch
@@ -1744,8 +1743,12 @@ void RepaintCanvas(const int x, const int y, const int w) {
     cy += RC_SECTION_HEIGHT + positions_h;
     // dividers above footer / tf bar / recent bar
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
-    cy += InpRowHeight * footer_rows;
+    cy += InpRowHeight * footer_rows;                       // -> timeframe bar row
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+    // v1.4 R2 : segmented TF track - a dark rounded pill behind the TF buttons,
+    // so the light (surface_hi) inactive buttons read as segments + cyan = active.
+    g_kit.RoundFill(px + 28, cy + 3, 322, InpRowHeight - 6, (InpRowHeight - 6) / 2,
+                    ColorToARGB(g_theme.bg_deep, 255));
     cy += InpRowHeight;
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
 
@@ -1782,8 +1785,6 @@ void BuildPanel(void) {
     g_kit.Create(RC_PREFIX + "ui", x - RC_KIT_MARGIN, y - RC_KIT_MARGIN,
                  w + 2 * RC_KIT_MARGIN, total_h + 2 * RC_KIT_MARGIN);
     RepaintCanvas(x, y, w);
-    PrintFormat("RC build %s : body-canvas %s (%dx%d) - if you still see the flat panel, remove + re-drag the indicator.",
-                RC_BUILD_TAG, (g_kit.Ready() ? "OK" : "FAILED"), g_kit.W(), g_kit.H());
     CreateFxCanvas(x, y, w, total_h); // v1.4 : glow ring around the panel (breach pulse)
 
     int cy = y;
@@ -1844,8 +1845,9 @@ void DrawTitleBar(int x, int y, int w) {
     string title = "RISKCOCKPIT";
 
     DrawLabel(RC_PREFIX + "title_text", title_x, y + 8, title, g_theme.accent, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);
-    // v1.4 dev : discreet build tag just right of the brand (dim, small).
-    DrawLabel(RC_PREFIX + "build", title_x + 104, y + 12, RC_BUILD_TAG, g_theme.text_dim, RC_FONT_SIZE_LABEL, RC_FONT_UI);
+    // v1.4 : discreet dev build tag just right of the brand (empty in release).
+    if (StringLen(RC_BUILD_TAG) > 0)
+        DrawLabel(RC_PREFIX + "build", title_x + 104, y + 12, RC_BUILD_TAG, g_theme.text_dim, RC_FONT_SIZE_LABEL, RC_FONT_UI);
 
     // R2 : settings GEAR button (U+2699) just right of the title. "Segoe UI
     // Symbol" renders the gear reliably on Windows ; the rest of the panel keeps
@@ -2144,7 +2146,7 @@ void DrawHardLock(const string msg, bool show_unlock) {
     ObjectSetString(0, txt_id, OBJPROP_TEXT, msg);
     ObjectSetInteger(0, txt_id, OBJPROP_COLOR, (color)0x00FFFFFF); // V1.29 B : white on the red STOP box (was g_theme.bg = black in dark theme)
     ObjectSetInteger(0, txt_id, OBJPROP_FONTSIZE, 11);
-    ObjectSetString(0, txt_id, OBJPROP_FONT, RC_FONT);
+    ObjectSetString(0, txt_id, OBJPROP_FONT, RC_FONT_UI);
     ObjectSetInteger(0, txt_id, OBJPROP_ANCHOR, ANCHOR_CENTER);
     ObjectSetInteger(0, txt_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
     ObjectSetInteger(0, txt_id, OBJPROP_SELECTABLE, false);
@@ -2158,7 +2160,7 @@ void DrawHardLock(const string msg, bool show_unlock) {
         ObjectSetInteger(0, unlock_id, OBJPROP_XSIZE, 160);
         ObjectSetInteger(0, unlock_id, OBJPROP_YSIZE, 22);
         ObjectSetString(0, unlock_id, OBJPROP_TEXT, armed ? Tr("disc_unlock_confirm") : Tr("disc_unlock"));
-        ObjectSetString(0, unlock_id, OBJPROP_FONT, RC_FONT);
+        ObjectSetString(0, unlock_id, OBJPROP_FONT, RC_FONT_UI);
         ObjectSetInteger(0, unlock_id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
         ObjectSetInteger(0, unlock_id, OBJPROP_COLOR, (color)0x00FFFFFF); // V1.29 B : white Unlock label (readable in dark theme)
         ObjectSetInteger(0, unlock_id, OBJPROP_BGCOLOR, armed ? g_theme.warn : g_theme.bg_section);
@@ -2249,7 +2251,7 @@ void DrawTiltBanner(void) {
     ObjectSetString(0, tiltx_id, OBJPROP_TEXT, Tr("disc_tilt") + (g_disc_revenge ? "  (revenge)" : ""));
     ObjectSetInteger(0, tiltx_id, OBJPROP_COLOR, g_theme.bg);
     ObjectSetInteger(0, tiltx_id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
-    ObjectSetString(0, tiltx_id, OBJPROP_FONT, RC_FONT);
+    ObjectSetString(0, tiltx_id, OBJPROP_FONT, RC_FONT_UI);
     ObjectSetInteger(0, tiltx_id, OBJPROP_ANCHOR, ANCHOR_CENTER);
     ObjectSetInteger(0, tiltx_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
     ObjectSetInteger(0, tiltx_id, OBJPROP_SELECTABLE, false);
@@ -2293,7 +2295,7 @@ void DrawViolationToggle(const string key, int x, int y, int h, bool active) {
     ObjectSetInteger(0, id, OBJPROP_XSIZE, 16);
     ObjectSetInteger(0, id, OBJPROP_YSIZE, h);
     ObjectSetString(0, id, OBJPROP_TEXT, (active ? "X" : " "));
-    ObjectSetString(0, id, OBJPROP_FONT, RC_FONT);
+    ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
     ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
     ObjectSetInteger(0, id, OBJPROP_COLOR, (active ? g_theme.bg : g_theme.text_dim));
     ObjectSetInteger(0, id, OBJPROP_BGCOLOR, (active ? g_theme.red : g_theme.surface_hi));
@@ -2340,7 +2342,7 @@ int DrawPositionsSection(int x, int y, int w) {
         ObjectSetInteger(0, rowbtn, OBJPROP_XSIZE, 210);
         ObjectSetInteger(0, rowbtn, OBJPROP_YSIZE, InpRowHeight);
         ObjectSetString(0, rowbtn, OBJPROP_TEXT, " ");
-        ObjectSetString(0, rowbtn, OBJPROP_FONT, RC_FONT);
+        ObjectSetString(0, rowbtn, OBJPROP_FONT, RC_FONT_UI);
         ObjectSetInteger(0, rowbtn, OBJPROP_FONTSIZE, RC_FONT_SIZE);
         ObjectSetInteger(0, rowbtn, OBJPROP_COLOR, g_theme.text);
         ObjectSetInteger(0, rowbtn, OBJPROP_BGCOLOR, rbg);
@@ -4735,7 +4737,7 @@ void DrawCopyEdit(const string id, int x, int y, int w, int h, const string text
     // every 500 ms doesn't wipe the user's selection mid-copy.
     if (fresh || ObjectGetString(0, id, OBJPROP_TEXT) != text)
         ObjectSetString(0, id, OBJPROP_TEXT, text);
-    ObjectSetString (0, id, OBJPROP_FONT, RC_FONT);
+    ObjectSetString (0, id, OBJPROP_FONT, RC_FONT_UI);
     ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
     ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.accent);
     ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.bg_section);
@@ -5406,7 +5408,7 @@ void DrawTimeframeBar(int x, int y, int w) {
         ObjectSetInteger(0, id, OBJPROP_XSIZE, btn_w);
         ObjectSetInteger(0, id, OBJPROP_YSIZE, btn_h);
         ObjectSetString(0, id, OBJPROP_TEXT, tfs[i]);
-        ObjectSetString(0, id, OBJPROP_FONT, RC_FONT);
+        ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
         ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
         const bool active = (tfvals[i] == cur);
         ObjectSetInteger(0, id, OBJPROP_COLOR,        active ? g_theme.bg     : g_theme.text);
@@ -5427,7 +5429,7 @@ void DrawTimeframeBar(int x, int y, int w) {
     ObjectSetInteger(0, be_id, OBJPROP_XSIZE, 44);
     ObjectSetInteger(0, be_id, OBJPROP_YSIZE, btn_h);
     ObjectSetString(0, be_id, OBJPROP_TEXT, "BE");
-    ObjectSetString(0, be_id, OBJPROP_FONT, RC_FONT);
+    ObjectSetString(0, be_id, OBJPROP_FONT, RC_FONT_UI);
     ObjectSetInteger(0, be_id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
     ObjectSetInteger(0, be_id, OBJPROP_COLOR,        g_be_visible ? g_theme.bg       : g_theme.text);
     ObjectSetInteger(0, be_id, OBJPROP_BGCOLOR,      g_be_visible ? g_theme.accent2  : g_theme.surface_hi);
@@ -5585,7 +5587,7 @@ void DrawBreakevenLines(void) {
                         "Basket perfectly hedged. Locked P&L : $" + DoubleToString(flat_pnl, 2));
         ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.warn);
         ObjectSetInteger(0, id, OBJPROP_FONTSIZE, 11);
-        ObjectSetString(0, id, OBJPROP_FONT, RC_FONT);
+        ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
         ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
     }
@@ -5605,7 +5607,7 @@ void DrawBreakevenLines(void) {
                         DoubleToString(-total_float, 2) + " " + Tr("be_toflat"));
         ObjectSetInteger(0, pid, OBJPROP_COLOR, (total_float >= 0.0 ? g_theme.ok : g_theme.red));
         ObjectSetInteger(0, pid, OBJPROP_FONTSIZE, 10);
-        ObjectSetString(0, pid, OBJPROP_FONT, RC_FONT);
+        ObjectSetString(0, pid, OBJPROP_FONT, RC_FONT_UI);
         ObjectSetInteger(0, pid, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, pid, OBJPROP_HIDDEN, true);
     }
@@ -5629,7 +5631,7 @@ void DrawRecentSymbolsBar(int x, int y, int w) {
             ObjectSetInteger(0, id, OBJPROP_XSIZE, btn_w);
             ObjectSetInteger(0, id, OBJPROP_YSIZE, btn_h);
             ObjectSetString(0, id, OBJPROP_TEXT, g_recent_syms[i]);
-            ObjectSetString(0, id, OBJPROP_FONT, RC_FONT);
+            ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
             ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
             ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.text);
             ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.surface_hi);
@@ -5654,7 +5656,7 @@ void DrawRecentSymbolsBar(int x, int y, int w) {
         ObjectSetInteger(0, rc_id, OBJPROP_XSIZE, 74);
         ObjectSetInteger(0, rc_id, OBJPROP_YSIZE, InpRowHeight - 6);
         ObjectSetString(0, rc_id, OBJPROP_TEXT, Tr("recenter"));
-        ObjectSetString(0, rc_id, OBJPROP_FONT, RC_FONT);
+        ObjectSetString(0, rc_id, OBJPROP_FONT, RC_FONT_UI);
         ObjectSetInteger(0, rc_id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 2);
         ObjectSetInteger(0, rc_id, OBJPROP_COLOR, g_theme.text);
         ObjectSetInteger(0, rc_id, OBJPROP_BGCOLOR, g_theme.surface_hi);
@@ -5679,7 +5681,7 @@ void DrawRecentSymbolsBar(int x, int y, int w) {
     ObjectSetInteger(0, asl_id, OBJPROP_XSIZE, 84);
     ObjectSetInteger(0, asl_id, OBJPROP_YSIZE, InpRowHeight - 6);
     ObjectSetString(0, asl_id, OBJPROP_TEXT, "Auto-SL OFF");
-    ObjectSetString(0, asl_id, OBJPROP_FONT, RC_FONT);
+    ObjectSetString(0, asl_id, OBJPROP_FONT, RC_FONT_UI);
     ObjectSetInteger(0, asl_id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 2);
     ObjectSetInteger(0, asl_id, OBJPROP_COLOR, g_theme.text_dim);
     ObjectSetInteger(0, asl_id, OBJPROP_BGCOLOR, g_theme.bg_section);
@@ -5756,7 +5758,7 @@ void DrawSetButton(const string id, int x, int y, int w, int h, const string tex
     ObjectSetInteger(0, id, OBJPROP_XSIZE, w);
     ObjectSetInteger(0, id, OBJPROP_YSIZE, h);
     ObjectSetString(0, id, OBJPROP_TEXT, text);
-    ObjectSetString(0, id, OBJPROP_FONT, RC_FONT);
+    ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
     ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
     ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.text);
     ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.surface_hi);      // premium (v1.4) : raised control
@@ -6307,7 +6309,7 @@ void DrawMpButton(const string id, int x, int y, int w, int h, const string text
     ObjectSetInteger(0, id, OBJPROP_XSIZE, w);
     ObjectSetInteger(0, id, OBJPROP_YSIZE, h);
     ObjectSetString(0, id, OBJPROP_TEXT, text);
-    ObjectSetString(0, id, OBJPROP_FONT, RC_FONT);
+    ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
     ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
     ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.text);
     ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.bg_section);
