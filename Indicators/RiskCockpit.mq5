@@ -29,6 +29,8 @@
 
 #include <..\Libraries\CChallengeProfileCatalog.mqh>
 #include <..\Libraries\CPyramidEngine.mqh>
+#include <Canvas\Canvas.mqh>            // v1.4 : CCanvas FX overlay (risk-breach glow ring)
+#include <..\Libraries\JR_CanvasUI.mqh> // v1.4 : reusable modern-UI canvas kit (brand design language)
 
 // V1.29 : EMBED the header logo so BUYERS see it. A Market product ships only the
 // .ex5 - an external MQL5\Images\ file is NOT delivered, so the runtime path load
@@ -100,132 +102,185 @@ enum ENUM_FN_ACCT_SIZE {
 // clang-format off
 
 #ifdef __MQL5__
-input group "===== Account profile ====="
+input group "1 - ACCOUNT PROFILE"
 #endif
-input ENUM_FN_PLAN         InpPlan         = FN_PLAN_STELLAR_LITE;  // Plan
-input ENUM_FN_PHASE        InpPhase        = FN_PHASE_FUNDED;       // Phase
-input ENUM_FN_ACCT_SIZE    InpAccountSize  = FN_SIZE_25K;            // Account size (preset dropdown, no manual entry)
-input ENUM_FN_ACCOUNT_TYPE InpAccountType  = FN_ACCOUNT_SWAP;       // Account type
+input ENUM_FN_PLAN         InpPlan        = FN_PLAN_STELLAR_LITE; // Prop-firm plan (Stellar 1-Step / 2-Step / Lite / Instant / Free)
+input ENUM_FN_PHASE        InpPhase       = FN_PHASE_FUNDED;      // Phase : Challenge P1/P2 or Funded (drives which rules apply)
+input ENUM_FN_ACCT_SIZE    InpAccountSize = FN_SIZE_25K;          // Account balance (USD ; preset dropdown, no typos)
+input ENUM_FN_ACCOUNT_TYPE InpAccountType = FN_ACCOUNT_SWAP;      // Account type (Swap / Swap-Free / Raw ...)
 
 #ifdef __MQL5__
-input group "===== Add-ons (toggle the ones you purchased) ====="
+input group "2 - ADD-ONS (toggle what you purchased)"
 #endif
-input bool InpAddon_Lifetime95 = true;   // Lifetime Payout 95 %
-input bool InpAddon_NoMinDays  = true;   // No Minimum Trading Days
-input bool InpAddon_SwapFree   = false;  // Swap-Free
-input bool InpAddon_10PctDD    = false;  // 10 % Total Loss Limit (Lite only)
-input bool InpAddon_DoubleUp   = false;  // Double Up
-input bool InpAddon_BiWeekly   = false;  // Bi-Weekly Reward
+input bool InpAddon_Lifetime95 = true;   // Lifetime Payout 95% add-on
+input bool InpAddon_NoMinDays  = true;   // No Minimum Trading Days add-on
+input bool InpAddon_SwapFree   = false;  // Swap-Free add-on
+input bool InpAddon_10PctDD    = false;  // 10% Total Loss Limit (Lite only)
+input bool InpAddon_DoubleUp   = false;  // Double Up add-on
+input bool InpAddon_BiWeekly   = false;  // Bi-Weekly Reward add-on
 
 #ifdef __MQL5__
-input group "===== Trader strategy ====="
+input group "3 - STRATEGY (your trading plan)"
 #endif
-input int    InpMaxParallelPositions = 5;    // Max parallel positions you plan to open
-input double InpSlPricePct           = 1.0;  // SL distance as % of current price (locked V1: 1.0 = safest)
-input double InpTpPricePct           = 0.1;  // TP distance as % of current price (scalping default)
-input double InpMaxMarginPerTradePct = 25.0; // Max margin per INDIVIDUAL trade (FN rec 20-30%, 25 = safe default)
-input double InpMaxRiskPerTradePct   = 1.0;  // Max risk per INDIVIDUAL trade (strategy ceiling; B9 = min(cap/N, this))
-input bool   InpEnablePyramidSafe    = false;// Safe pyramiding advisor (decreasing-lot + unified stop, art. 22187)
-input double InpPyramidLotRatio      = 0.66; // V_next = V_current * ratio (must be < 1 for decreasing risk)
-input double InpPyramidSafetyPct     = 10.0; // % of initial R kept beyond breakeven on new unified stop
+input int    InpMaxParallelPositions = 5;    // Max parallel positions you plan to open (count)
+input double InpSlPricePct           = 1.0;  // SL distance (% of price ; V1 locked 1.0 = safest)
+input double InpTpPricePct           = 0.1;  // TP distance (% of price ; scalping default)
+input double InpMaxMarginPerTradePct = 25.0; // Max margin per single trade (% ; FN rec 20-30)
+input double InpMaxRiskPerTradePct   = 1.0;  // Max risk per single trade (% ; ceiling = min(cap/N, this))
+input bool   InpEnablePyramidSafe    = false;// Safe pyramiding advisor (decreasing-lot + unified stop)
+input double InpPyramidLotRatio      = 0.66; // Pyramid lot ratio (V_next = V_cur x ratio ; < 1 = decreasing)
+input double InpPyramidSafetyPct     = 10.0; // Pyramid safety (% of initial R kept beyond breakeven)
 
 #ifdef __MQL5__
-input group "===== Post-violation tightening (FN 2nd-strike caps) ====="
+input group "4 - POST-VIOLATION CAPS (FN 2nd-strike)"
 #endif
-input bool   InpMarginViolationActive = false; // Margin violation suffered -> cumulative margin cap tightens
-input bool   InpRiskViolationActive   = false; // Risk violation suffered   -> cumulative risk cap tightens
-input double InpMarginCapViolated     = 30.0;  // Tightened cumulative margin cap (FN 2nd strike = 30%)
-input double InpRiskCapViolated       = 1.0;   // Tightened cumulative risk cap   (FN 2nd strike = 1%)
+input bool   InpMarginViolationActive = false; // Had a margin violation -> tighten cumulative margin cap
+input bool   InpRiskViolationActive   = false; // Had a risk violation   -> tighten cumulative risk cap
+input double InpMarginCapViolated     = 30.0;  // Tightened cumulative margin cap (% ; FN 2nd strike = 30)
+input double InpRiskCapViolated       = 1.0;   // Tightened cumulative risk cap   (% ; FN 2nd strike = 1)
 
 #ifdef __MQL5__
-input group "===== Alerts ====="
+input group "5 - ALERTS"
 #endif
-input bool   InpEnableSound      = true;          // Sound alerts on warn/red transitions
-input string InpSoundOK          = "alert.wav";
-input string InpSoundWarn        = "alert2.wav";
-input string InpSoundRed         = "stops.wav";
+input bool   InpEnableSound      = true;          // Sound alert on warn/red transitions
+input string InpSoundOK          = "alert.wav";   // Sound file : back to OK
+input string InpSoundWarn        = "alert2.wav";  // Sound file : warning
+input string InpSoundRed         = "stops.wav";   // Sound file : breach / red
 input bool   InpEnableTelegram   = false;         // Telegram alerts (V2)
-input string InpTelegramBotToken = "";            // bot token
-input string InpTelegramChatId   = "";            // chat id
+input string InpTelegramBotToken = "";            // Telegram bot token
+input string InpTelegramChatId   = "";            // Telegram chat id
 
 #ifdef __MQL5__
-input group "===== Trading-days counter ====="
+input group "6 - TRADING-DAYS COUNTER"
 #endif
-input string InpCycleStartIso = "2026-05-09";     // YYYY-MM-DD : start date for the "Days traded" counter only
+input string InpCycleStartIso = "2026-05-09";     // Cycle start (YYYY-MM-DD ; 'Days traded' counter only)
 
 #ifdef __MQL5__
-input group "===== Display ====="
+input group "7 - DISPLAY & PANEL"
 #endif
-input bool           InpShowNews    = true;       // N1 : show economic-calendar news on the chart
-input ENUM_RC_THEME InpTheme       = RC_THEME_GLASS_DARK;
-input ENUM_RC_LANG  InpLang        = RC_LANG_EN;       // LOT 4 : UI language (EN / FR / ES)
-input int            InpAnchorX     = 20;         // X offset from chart top-left
-input int            InpAnchorY     = 100;        // Y offset (clears MT5 one-click trading panel)
-input int            InpPanelWidth  = 620;        // P5 : a bit wider so all the row content fits
-input int            InpRowHeight   = 22;
-input int            InpRefreshMs   = 500;
-input bool           InpComfortScale = true;      // FIX 6 : keep padding above/below candles (never glued to the edge)
-input double         InpComfortMarginPct = 15.0;  // FIX 6 : comfort padding as % of the visible range (top & bottom)
-input bool           InpDisciplineLockEnabled = true; // B-DISCIPLINE-LOCK master switch (daily-DD + tilt + cooldown + self-lock)
+input bool          InpShowNews              = true;                // Show economic-calendar news on the chart
+input ENUM_RC_THEME InpTheme                 = RC_THEME_GLASS_DARK; // Panel theme (Glass Dark / Glass Light)
+input ENUM_RC_LANG  InpLang                  = RC_LANG_EN;          // UI language (EN / FR / ES)
+input int           InpAnchorX               = 20;                  // Panel X offset from chart top-left (px)
+input int           InpAnchorY               = 100;                 // Panel Y offset (px ; clears MT5 one-click panel)
+input int           InpPanelWidth            = 620;                 // Panel width (px)
+input int           InpRowHeight             = 22;                  // Panel row height (px)
+input int           InpRefreshMs             = 500;                 // Panel refresh interval (ms)
+input bool          InpComfortScale          = true;                // Keep padding above/below candles (never glued)
+input double        InpComfortMarginPct      = 15.0;                // Comfort padding (% of visible range, top & bottom)
+input bool          InpDisciplineLockEnabled = true;                // Master switch : discipline lock (DD + tilt + cooldown + self-lock)
 
 #ifdef __MQL5__
-input group "===== Discipline lock (anti-tilt, advisory) ====="
+input group "8 - DISCIPLINE LOCK (anti-tilt, advisory)"
 #endif
-input int InpTiltTradesN    = 5;   // V1.24 G1 Tilt : > this many trades within the window = warn
-input int InpTiltWindowMin  = 15;  // V1.24 G1 Tilt : rapid-trade window (minutes)
-input int InpCooldownLosses = 3;   // V1.24 G1 Cooldown : consecutive losing trades that trigger it
-input int InpCooldownMin    = 30;  // V1.24 G1 Cooldown : minutes to wait after the streak
-input int InpSelfLockHours  = 2;   // V1.24 G1 Self-lock : default duration of the "Lock me" button (hours)
+input int InpTiltTradesN    = 5;   // Tilt : more than this many trades in the window = warn (count)
+input int InpTiltWindowMin  = 15;  // Tilt : rapid-trade window (minutes)
+input int InpCooldownLosses = 3;   // Cooldown : consecutive losing trades that trigger it (count)
+input int InpCooldownMin    = 30;  // Cooldown : minutes to wait after the streak
+input int InpSelfLockHours  = 2;   // Self-lock : default duration of the "Lock me" button (hours)
 
 // clang-format on
 
 //+------------------------------------------------------------------+
-//| Theme colors (hex form, 0x00BBGGRR)                              |
+//| Theme colors - PREMIUM restyle (v1.4). Values set in InitTheme    |
+//| with C'r,g,b' literals (slate + cyan + semantic risk). The new    |
+//| surface/gradient tokens feed the P1 CCanvas backdrop ; the legacy |
+//| fields (bg / bg_section / border / accent / text / ok / warn /    |
+//| red / bar_bg) keep every existing draw call working unchanged.    |
 //+------------------------------------------------------------------+
 struct ThemeColors {
-    color bg;         // panel background
+    // --- base surface stack (deep -> lifted ; premium slate) ---
+    color bg_deep;    // deepest shade : drop-shadow, gradient bottom, edit fields
+    color bg;         // panel base background (gradient bottom band)
+    color bg_lift;    // lifted base (gradient top band)
     color bg_section; // section header background
-    color border;     // outer border
+    color surface;    // bento card fill
+    color surface_hi; // raised / hover card fill
+    // --- lines ---
+    color border;     // card + outer border
+    color border_hi;  // brighter border (hover / focus)
+    // --- accents & text ---
     color accent;     // primary accent (cyan)
-    color accent2;    // secondary accent (magenta)
+    color accent2;    // secondary accent (indigo)
     color text;       // main text
-    color text_dim;   // dim text
-    color ok;         // green
-    color warn;       // amber
-    color red;        // red
-    color bar_bg;     // empty bar fill
+    color label;      // muted label text (between text and text_dim)
+    color text_dim;   // dimmest text
+    // --- semantic risk (gauge : safe -> warn -> breach) ---
+    color ok;         // green  (safe)
+    color warn;       // amber  (warning)
+    color red;        // red    (breach)
+    color bar_bg;     // empty meter-bar track
 };
 
 ThemeColors g_theme;
+
+// PREMIUM (v1.4) : CCanvas FX overlay. A soft glow ring around the panel that
+// pulses RED when a risk / margin / DD rule is breaching. The bitmap's CENTER
+// is fully transparent, so it never covers panel content (draw + click safe) ;
+// its opaque glow lives in a margin band around the panel edge (over the chart).
+// Named "RC_fx" -> dragged by MovePanelBy, cleared by DestroyAllObjects, and the
+// GPU resource is freed in OnDeinit / before every re-create.
+CCanvas g_fx;
+bool    g_fx_on = false;
+bool    g_fx_was_breach = false;   // gate idle GPU updates (only redraw while breaching / on clear)
+int     g_fx_w  = 0;
+int     g_fx_h  = 0;
+#define RC_FX_MARGIN 12
+
+// v1.4 MODERN : the panel body is drawn in ONE CCanvasKit bitmap (rounded card,
+// soft gradient, drop shadow, hairline dividers, rounded-end meters + pills).
+// It sits UNDER the text (OBJ_LABEL) and controls, and under g_fx (the glow).
+CCanvasKit g_kit;
+#define RC_KIT_MARGIN 16   // shadow / rounding room around the panel
+#define RC_R_PANEL    13   // panel corner radius
+#define RC_R_CARD     10   // inner card corner radius
+// v1.4 dev : visible BUILD tag in the title bar (increments per modern phase :
+// R1, R2...). NOT the Market version (#property version stays "1.30" until ship).
+// Lets JR see at a glance which build is actually running after an F7 + reload.
+#define RC_BUILD_TAG  "R1"
 
 void InitTheme(void) {
     // G3 : route through EffectiveTheme so the settings popup can switch
     // dark/light at runtime without re-opening MT5 Inputs.
     if (EffectiveTheme() == RC_THEME_GLASS_DARK) {
-        g_theme.bg = (color)0x000A0604;         // very dark blue-black
-        g_theme.bg_section = (color)0x00140C08; // slightly lighter
-        g_theme.border = (color)0x00FFCC00;     // cyan-ish
-        g_theme.accent = (color)0x00FFFF00;     // cyan
-        g_theme.accent2 = (color)0x00FF00FF;    // magenta
-        g_theme.text = (color)0x00F0F0F0;       // near-white
-        g_theme.text_dim = (color)0x00909090;
-        g_theme.ok = (color)0x0060D030;   // green
-        g_theme.warn = (color)0x0000AAFF; // amber
-        g_theme.red = (color)0x004040FF;  // red
-        g_theme.bar_bg = (color)0x00302418;
+        // PREMIUM slate + cyan + semantic (aligned with StrategyDeck for a
+        // coherent product family). C'r,g,b' = plain RGB, easier to reason about.
+        g_theme.bg_deep    = C'10,14,22';    // deepest (shadow, gradient bottom, edits)
+        g_theme.bg         = C'15,23,42';    // base
+        g_theme.bg_lift    = C'22,32,56';    // gradient top
+        g_theme.bg_section = C'20,28,48';    // section header
+        g_theme.surface    = C'30,41,59';    // bento card
+        g_theme.surface_hi = C'34,46,69';    // raised / hover
+        g_theme.border     = C'51,65,85';    // border
+        g_theme.border_hi  = C'61,79,110';   // border hover
+        g_theme.accent     = C'56,189,248';  // cyan
+        g_theme.accent2    = C'129,140,248'; // indigo
+        g_theme.text       = C'232,238,247'; // near-white
+        g_theme.label      = C'159,176,200'; // muted label
+        g_theme.text_dim   = C'100,116,139'; // dim
+        g_theme.ok         = C'52,211,153';  // green  (safe)
+        g_theme.warn       = C'251,191,36';  // amber  (warn)
+        g_theme.red        = C'248,113,113'; // red    (breach)
+        g_theme.bar_bg     = C'22,32,56';    // meter track
     } else // GLASS_LIGHT
     {
-        g_theme.bg = (color)0x00F0F0F0;
-        g_theme.bg_section = (color)0x00D8D8D8;
-        g_theme.border = (color)0x00B08040;
-        g_theme.accent = (color)0x00A85000;     // darker azure-blue (readable on light)
-        g_theme.accent2 = (color)0x008000C0;
-        g_theme.text = (color)0x00202020;
-        g_theme.text_dim = (color)0x00606060;
-        g_theme.ok = (color)0x00308010;         // V1.28 : darker green for light bg
-        g_theme.warn = (color)0x000070C0;        // V1.28 : darker amber/gold (bright 0x00AAFF was unreadable on light)
-        g_theme.red = (color)0x002020D0;         // V1.28 : deeper red for light bg
-        g_theme.bar_bg = (color)0x00C0C0C0;
+        g_theme.bg_deep    = C'226,232,240';
+        g_theme.bg         = C'241,245,249';
+        g_theme.bg_lift    = C'248,250,252';
+        g_theme.bg_section = C'226,232,240';
+        g_theme.surface    = C'255,255,255';
+        g_theme.surface_hi = C'241,245,249';
+        g_theme.border     = C'203,213,225';
+        g_theme.border_hi  = C'148,163,184';
+        g_theme.accent     = C'2,132,199';   // cyan-700 (readable on light)
+        g_theme.accent2    = C'79,70,229';   // indigo-600
+        g_theme.text       = C'15,23,42';
+        g_theme.label      = C'71,85,105';
+        g_theme.text_dim   = C'100,116,139';
+        g_theme.ok         = C'22,163,74';   // green-600
+        g_theme.warn       = C'202,138,4';   // amber-600
+        g_theme.red        = C'220,38,38';   // red-600
+        g_theme.bar_bg     = C'226,232,240';
     }
 }
 
@@ -238,9 +293,13 @@ void InitTheme(void) {
 #define RC_TITLE_CLOCK_W 120 // FIX 7 : reserved right zone for the clock (news/weekend/LIVE) so it never overlaps the balance
 #define RC_LOGO_FILE "RiskCockpit_logo.bmp" // fixed header logo asset under MQL5\Images\ (not a user input)
 #define RC_SECTION_HEIGHT 22
-#define RC_FONT "Consolas"
+#define RC_FONT "Consolas"                  // numeric / tabular data (right-aligned)
+#define RC_FONT_NUM "Consolas"               // alias : numbers
+#define RC_FONT_UI "Segoe UI"                // labels / body (premium restyle P2)
+#define RC_FONT_UI_SB "Segoe UI Semibold"    // titles / emphasis
 #define RC_FONT_SIZE 9
 #define RC_FONT_SIZE_TITLE 11
+#define RC_FONT_SIZE_LABEL 8                 // small muted labels
 #define RC_MAX_POSITIONS 10
 
 //+------------------------------------------------------------------+
@@ -522,6 +581,11 @@ void DestroyAllObjects(void);
 void BuildPanel(void);
 void RefreshPanel(void);
 void DrawTitleBar(int x, int y, int w);
+bool RiskIsBreaching(void);                        // v1.4 FX overlay
+void RenderFx(void);                               // v1.4 FX overlay
+void CreateFxCanvas(int x, int y, int w, int h);   // v1.4 FX overlay
+void RepaintCanvas(int x, int y, int w);           // v1.4 modern body canvas
+void RiskFillColors(const ENUM_RC_STATUS s, color &a, color &b); // v1.4 modern body canvas
 void DrawAccountStrip(int x, int y, int w);
 void DrawSectionHeader(const string id, int x, int y, int w, const string title, color accent);
 void   DrawTimeframeBar(int x, int y, int w);   // LOT 4 : M1/M5/M15/M30/H1/H4/D1 quick-switch
@@ -931,6 +995,8 @@ int OnInit(void) {
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason) {
     EventKillTimer();
+    if (g_fx_on) { g_fx.Destroy(); g_fx_on = false; } // v1.4 : free the FX bitmap resource
+    g_kit.Destroy();                                   // v1.4 : free the modern body canvas
     // FIX 6 : restore native auto-scale on removal, but only if the comfort scale we
     // applied is still the active one (don't clobber the user's manual zoom).
     if (g_eff_comfort && g_cs_max > g_cs_min) {
@@ -967,6 +1033,8 @@ void OnTimer(void) {
     // rebuilds it via ApplySettingsChange), so we just skip the refresh.
     if (g_settings_open) { ChartRedraw(0); return; }
     RefreshPanel();
+    RepaintCanvas(g_anchor_x, g_anchor_y, InpPanelWidth); // v1.4 : redraw modern body with fresh values
+    RenderFx();            // v1.4 : refresh the breach-glow pulse
     UpdateClockBlinker();
     // FIX (LOT 1) : calendar scan is HEAVY (CalendarValueHistory + per-chart loop) ;
     // news change hourly at most, so throttle the chart-side refresh to every 30 s.
@@ -1462,7 +1530,7 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
             PersistBE(); // LOT 6 : survive re-attach
             DrawBreakevenLines();
             // re-tint the BE button in-place (no full panel rebuild).
-            ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR, g_be_visible ? g_theme.accent2 : g_theme.bg);
+            ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR, g_be_visible ? g_theme.accent2 : g_theme.surface_hi);
             ObjectSetInteger(0, sparam, OBJPROP_COLOR,   g_be_visible ? g_theme.bg      : g_theme.text);
             ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
             ChartRedraw(0);
@@ -1539,6 +1607,152 @@ void DestroyAllObjects(void) {
 }
 
 //+------------------------------------------------------------------+
+//| v1.4 FX overlay : is any breach-critical rule at RED right now ?  |
+//| (cumulative margin / cumulative risk / daily DD / overall DD)     |
+//+------------------------------------------------------------------+
+bool RiskIsBreaching(void) {
+    for (int i = 0; i < RC_RULE_COUNT; ++i) {
+        if (!g_rows[i].applies) continue;
+        if (g_rows[i].status != RC_STATUS_RED) continue;
+        const string k = g_rows[i].key;
+        if (k == "rule_margin_cum" || k == "rule_risk_cum" ||
+            k == "rule_daily_dd"   || k == "rule_overall_dd")
+            return true;
+    }
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| v1.4 FX overlay : redraw the glow into the RC_fx bitmap. Clear    |
+//| everywhere except a fading RED halo in the outer margin band that |
+//| breathes via GetTickCount. No breach -> the bitmap stays empty.   |
+//+------------------------------------------------------------------+
+void RenderFx(void) {
+    if (!g_fx_on) return;
+    const bool breach = RiskIsBreaching();
+    if (!breach && !g_fx_was_breach) return; // already clear -> skip the GPU update
+    g_fx_was_breach = breach;
+    g_fx.Erase(ColorToARGB(clrBlack, 0)); // fully transparent
+    if (breach) {
+        const uint   ms   = GetTickCount();
+        const double ph   = (double)(ms % 1600) / 1600.0;          // 1.6 s cycle
+        const double s    = 0.5 - 0.5 * MathCos(ph * 2.0 * M_PI);  // 0..1 smooth breath
+        const int    peak = (int)(80.0 + 150.0 * s);               // 80..230 alpha near the edge
+        const int    m    = RC_FX_MARGIN;
+        // Concentric 1px outlines inside the margin band : brightest next to the
+        // panel edge (i = m-1), fading to nothing at the bitmap edge (i = 0). The
+        // panel body occupies the centre and is never painted -> content stays clear.
+        for (int i = 0; i < m; ++i) {
+            const int a = (int)(peak * (double)(i + 1) / (double)m);
+            g_fx.Rectangle(i, i, g_fx_w - 1 - i, g_fx_h - 1 - i, ColorToARGB(g_theme.red, (uchar)a));
+        }
+    }
+    g_fx.Update(true);
+}
+
+//+------------------------------------------------------------------+
+//| v1.4 FX overlay : (re)create the RC_fx bitmap around the panel.   |
+//| Freed + recreated on every BuildPanel so it tracks size + anchor. |
+//+------------------------------------------------------------------+
+void CreateFxCanvas(int x, int y, int w, int h) {
+    const int m = RC_FX_MARGIN;
+    if (g_fx_on) g_fx.Destroy();   // free the previous GPU resource before re-creating
+    g_fx_w = w + 2 * m;
+    g_fx_h = h + 2 * m;
+    if (!g_fx.CreateBitmapLabel(0, 0, RC_PREFIX + "fx", x - m, y - m, g_fx_w, g_fx_h,
+                                COLOR_FORMAT_ARGB_NORMALIZE)) {
+        g_fx_on = false;           // canvas unavailable -> silently skip the FX
+        return;
+    }
+    ObjectSetInteger(0, RC_PREFIX + "fx", OBJPROP_BACK, false);
+    ObjectSetInteger(0, RC_PREFIX + "fx", OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, RC_PREFIX + "fx", OBJPROP_HIDDEN, true);
+    ObjectSetInteger(0, RC_PREFIX + "fx", OBJPROP_ZORDER, 0); // clicks pass to the controls
+    g_fx_on = true;
+    RenderFx();
+}
+
+//+------------------------------------------------------------------+
+//| v1.4 MODERN : per-status meter fill (2-stop gradient, safe->red). |
+//+------------------------------------------------------------------+
+void RiskFillColors(const ENUM_RC_STATUS s, color &a, color &b) {
+    switch (s) {
+        case RC_STATUS_RED:  a = C'239,68,68';  b = C'248,113,113'; break;
+        case RC_STATUS_WARN: a = C'245,158,11'; b = C'251,191,36';  break;
+        case RC_STATUS_OK:   a = C'16,185,129'; b = C'52,211,153';  break;
+        default:             a = g_theme.text_dim;   b = g_theme.text_dim; break;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| v1.4 MODERN : repaint the whole panel BODY into g_kit. Mirrors    |
+//| BuildPanel's section walk so the canvas meters / pills line up    |
+//| with the OBJ_LABEL rows drawn on top. Called on build + refresh.  |
+//| Text + controls live ON TOP (created after g_kit) ; the old       |
+//| rectangle-label backgrounds sit UNDER it (hidden) - R2 removes.   |
+//+------------------------------------------------------------------+
+void RepaintCanvas(const int x, const int y, const int w) {
+    if (!g_kit.Ready()) return;
+    const int M = RC_KIT_MARGIN;
+    const int rules_h     = (g_eff_risktools ? RC_RULE_COUNT * InpRowHeight : 0);
+    const int positions_h = RC_MAX_POSITIONS * InpRowHeight;
+    const int footer_rows = (InpEnablePyramidSafe ? 4 : 3);
+    const int total_h = RC_TITLE_HEIGHT + InpRowHeight
+                        + (g_eff_risktools ? RC_SECTION_HEIGHT : 0) + rules_h
+                        + RC_SECTION_HEIGHT + positions_h
+                        + InpRowHeight * footer_rows + InpRowHeight + InpRowHeight;
+
+    g_kit.Begin();
+    const int px = M, py = M;                     // panel top-left inside the bitmap
+    g_kit.SoftShadow(px, py, w, total_h, RC_R_PANEL, g_theme.bg_deep, 9, 95);
+    g_kit.Card(px, py, w, total_h, RC_R_PANEL, g_theme.bg_lift, g_theme.bg, g_theme.border_hi);
+
+    int cy = py;
+    // title band + divider under it
+    g_kit.RoundFill(px + 1, py + 1, w - 2, RC_TITLE_HEIGHT - 1, RC_R_PANEL - 1,
+                    ColorToARGB(g_theme.surface_hi, 235));
+    cy += RC_TITLE_HEIGHT;
+    g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+    cy += InpRowHeight;                            // account strip
+    g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+
+    if (g_eff_risktools) {
+        g_kit.RoundFill(px + 6, cy + 5, 3, RC_SECTION_HEIGHT - 10, 1, ColorToARGB(g_theme.accent, 255));
+        cy += RC_SECTION_HEIGHT;
+        for (int i = 0; i < RC_RULE_COUNT; ++i) {
+            const int ry = cy + i * InpRowHeight;
+            const string k = g_rows[i].key;
+            if (k == "rule_margin_pt" || k == "rule_newsstats") continue; // text-only rows
+            const int bx = px + 360;
+            const int bw = w - 360 - 80 - RC_PAD;
+            const int bh = 8;
+            const int by = ry + (InpRowHeight - bh) / 2;
+            if (g_rows[i].applies) {
+                const double ratio = (g_rows[i].max_pct > 0.0 ? g_rows[i].value_pct / g_rows[i].max_pct : 0.0);
+                color fa, fb; RiskFillColors(g_rows[i].status, fa, fb);
+                g_kit.Meter(bx, by, bw, bh, ratio, g_theme.bar_bg, fa, fb);
+                g_kit.RoundFill(px + w - 70, ry + 3, 60, InpRowHeight - 6, (InpRowHeight - 6) / 2,
+                                ColorToARGB(StatusColor(g_rows[i].status), 255)); // status pill bg
+            } else {
+                g_kit.Meter(bx, by, bw, bh, 0.0, g_theme.bar_bg, g_theme.text_dim, g_theme.text_dim);
+            }
+        }
+        cy += rules_h;
+    }
+    // positions header tick + section
+    g_kit.RoundFill(px + 6, cy + 5, 3, RC_SECTION_HEIGHT - 10, 1, ColorToARGB(g_theme.accent2, 255));
+    cy += RC_SECTION_HEIGHT + positions_h;
+    // dividers above footer / tf bar / recent bar
+    g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+    cy += InpRowHeight * footer_rows;
+    g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+    cy += InpRowHeight;
+    g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+
+    g_kit.Commit();
+}
+
+//+------------------------------------------------------------------+
 //| Build static skeleton (background + section frames)              |
 //+------------------------------------------------------------------+
 void BuildPanel(void) {
@@ -1556,8 +1770,21 @@ void BuildPanel(void) {
     const int total_h = RC_TITLE_HEIGHT + InpRowHeight + (g_eff_risktools ? RC_SECTION_HEIGHT : 0) + rules_h + RC_SECTION_HEIGHT + positions_h + InpRowHeight * footer_rows + tfbar_h + recbar_h; // V1.29 L : drop the rules header height too when OFF
     g_panel_height = total_h; // fix #5 : exposed for UpdateDisciplineOverlay
 
-    // Outer background + border
-    DrawRect(RC_PREFIX + "bg", x, y, w, total_h, g_theme.bg, g_theme.border, 1);
+    // Premium (v1.4) : soft drop shadow behind the panel for depth, then the
+    // panel body as a deep base with a crisp defined edge - the section bands
+    // (surface) sit on top and read as a raised card stack.
+    DrawRect(RC_PREFIX + "shadow", x + 5, y + 6, w, total_h, C'6,9,16', C'6,9,16', 0);
+    DrawRect(RC_PREFIX + "bg", x, y, w, total_h, g_theme.bg_deep, g_theme.border_hi, 1);
+    // v1.4 MODERN : draw the panel body into g_kit, created FIRST so the text
+    // (OBJ_LABEL) + controls from the section draws below render ON TOP of it, and
+    // the glow (g_fx) above that. The rect backgrounds above are now hidden under
+    // the canvas (kept for R1 ; removed in R2).
+    g_kit.Create(RC_PREFIX + "ui", x - RC_KIT_MARGIN, y - RC_KIT_MARGIN,
+                 w + 2 * RC_KIT_MARGIN, total_h + 2 * RC_KIT_MARGIN);
+    RepaintCanvas(x, y, w);
+    PrintFormat("RC build %s : body-canvas %s (%dx%d) - if you still see the flat panel, remove + re-drag the indicator.",
+                RC_BUILD_TAG, (g_kit.Ready() ? "OK" : "FAILED"), g_kit.W(), g_kit.H());
+    CreateFxCanvas(x, y, w, total_h); // v1.4 : glow ring around the panel (breach pulse)
 
     int cy = y;
     DrawTitleBar(x, cy, w);
@@ -1586,7 +1813,7 @@ void BuildPanel(void) {
 //| Title bar                                                        |
 //+------------------------------------------------------------------+
 void DrawTitleBar(int x, int y, int w) {
-    DrawRect(RC_PREFIX + "title_bg", x, y, w, RC_TITLE_HEIGHT, g_theme.bg_section, g_theme.border, 1);
+    DrawRect(RC_PREFIX + "title_bg", x, y, w, RC_TITLE_HEIGHT, g_theme.surface_hi, g_theme.border, 1);
 
     // R3 : header logo - a FIXED asset (RC_LOGO_FILE), not a user input. MT5
     // renders it via an OBJ_BITMAP_LABEL pointing at MQL5\Images\<file> (shipped
@@ -1616,7 +1843,9 @@ void DrawTitleBar(int x, int y, int w) {
     //  leftward from x+w-RC_PAD-RC_TITLE_CLOCK_W. Bare title ends well before gear_x.)
     string title = "RISKCOCKPIT";
 
-    DrawLabel(RC_PREFIX + "title_text", title_x, y + 8, title, g_theme.accent, RC_FONT_SIZE_TITLE);
+    DrawLabel(RC_PREFIX + "title_text", title_x, y + 8, title, g_theme.accent, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);
+    // v1.4 dev : discreet build tag just right of the brand (dim, small).
+    DrawLabel(RC_PREFIX + "build", title_x + 104, y + 12, RC_BUILD_TAG, g_theme.text_dim, RC_FONT_SIZE_LABEL, RC_FONT_UI);
 
     // R2 : settings GEAR button (U+2699) just right of the title. "Segoe UI
     // Symbol" renders the gear reliably on Windows ; the rest of the panel keeps
@@ -1663,7 +1892,7 @@ void DrawTitleBar(int x, int y, int w) {
 //| Account strip (cycle, account #, type, days remaining)           |
 //+------------------------------------------------------------------+
 void DrawAccountStrip(int x, int y, int w) {
-    DrawRect(RC_PREFIX + "strip_bg", x, y, w, InpRowHeight, g_theme.bg, g_theme.border, 0);
+    DrawRect(RC_PREFIX + "strip_bg", x, y, w, InpRowHeight, g_theme.surface, g_theme.border, 0);
 
     const long acc_login = AccountInfoInteger(ACCOUNT_LOGIN);
     const string acc_type_str = (g_profile.swap_charged ? "SWAP" : "SWAP-FREE");
@@ -1702,8 +1931,10 @@ void DrawAccountStrip(int x, int y, int w) {
 //| Section header                                                   |
 //+------------------------------------------------------------------+
 void DrawSectionHeader(const string id, int x, int y, int w, const string title, color accent) {
-    DrawRect(RC_PREFIX + id + "_bg", x, y, w, RC_SECTION_HEIGHT, g_theme.bg_section, g_theme.border, 0);
-    DrawLabel(RC_PREFIX + id + "_txt", x + RC_PAD, y + 4, title, accent, RC_FONT_SIZE_TITLE - 1);
+    DrawRect(RC_PREFIX + id + "_bg", x, y, w, RC_SECTION_HEIGHT, g_theme.surface_hi, g_theme.border, 0);
+    // Premium : a cyan accent tick on the left edge of every section header.
+    DrawRect(RC_PREFIX + id + "_tick", x, y + 3, 3, RC_SECTION_HEIGHT - 6, accent, accent, 0);
+    DrawLabel(RC_PREFIX + id + "_txt", x + RC_PAD, y + 4, title, accent, RC_FONT_SIZE_TITLE - 1, RC_FONT_UI_SB);
 }
 
 //+------------------------------------------------------------------+
@@ -1732,9 +1963,12 @@ void DrawRuleRow(const string key_prefix, int idx,
                  ENUM_RC_STATUS status, bool applies) {
     const string id = RC_PREFIX + key_prefix;
 
-    // Row background (transparent, only on alternate rows for striping)
-    if ((idx % 2) == 0)
-        DrawRect(id + "_rowbg", x + 1, y, w - 2, h, g_theme.bg, g_theme.bg, 0);
+    // Row background - premium zebra : every row gets a surface fill so the
+    // rules area reads as one continuous card (surface / surface_hi alternation).
+    {
+        const color rowc = ((idx % 2) == 0) ? g_theme.surface : g_theme.surface_hi;
+        DrawRect(id + "_rowbg", x + 1, y, w - 2, h, rowc, rowc, 0);
+    }
 
     const color text_clr = applies ? g_theme.text : g_theme.text_dim;
 
@@ -1755,8 +1989,8 @@ void DrawRuleRow(const string key_prefix, int idx,
         label_x = x + 22;
     }
 
-    // Label (left)
-    DrawLabel(id + "_lbl", label_x, y + 4, label, text_clr, RC_FONT_SIZE);
+    // Label (left) - premium UI font (Segoe UI) ; values/numbers stay Consolas
+    DrawLabel(id + "_lbl", label_x, y + 4, label, text_clr, RC_FONT_SIZE, RC_FONT_UI);
 
     // Value text - widened column to fit "ACTIVE cap 40%", "0.0% / 20-30%", etc.
     DrawLabel(id + "_val", x + 170, y + 4, value_text, text_clr, RC_FONT_SIZE);
@@ -2062,8 +2296,8 @@ void DrawViolationToggle(const string key, int x, int y, int h, bool active) {
     ObjectSetString(0, id, OBJPROP_FONT, RC_FONT);
     ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
     ObjectSetInteger(0, id, OBJPROP_COLOR, (active ? g_theme.bg : g_theme.text_dim));
-    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, (active ? g_theme.red : g_theme.bg_section));
-    ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.border);
+    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, (active ? g_theme.red : g_theme.surface_hi));
+    ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.border_hi);
     ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
     ObjectSetInteger(0, id, OBJPROP_STATE, false);
     ObjectSetInteger(0, id, OBJPROP_BACK, false);
@@ -2085,21 +2319,21 @@ int DrawPositionsSection(int x, int y, int w) {
     for (int i = 0; i < RC_MAX_POSITIONS; ++i) {
         const string id = RC_PREFIX + "pos_" + IntegerToString(i);
         DrawRect(id + "_rowbg", x + 1, cy, w - 2, InpRowHeight,
-                 ((i % 2) == 0 ? g_theme.bg : g_theme.bg_section),
-                 g_theme.bg, 0);
+                 ((i % 2) == 0 ? g_theme.surface : g_theme.surface_hi),
+                 ((i % 2) == 0 ? g_theme.surface : g_theme.surface_hi), 0);
         DrawLabel(id + "_lbl", x + RC_PAD, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
         DrawLabel(id + "_pnl", x + 220, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
         DrawLabel(id + "_age", x + 320, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
         DrawStatusChip(id + "_chip", x + w - 70, cy + 3, 60, InpRowHeight - 6, RC_STATUS_NA);
         // start every slot empty (no visible chip until a position fills it)
-        ObjectSetInteger(0, id + "_chip_bg", OBJPROP_BGCOLOR, g_theme.bg);
-        ObjectSetInteger(0, id + "_chip_bg", OBJPROP_COLOR, g_theme.bg);
+        ObjectSetInteger(0, id + "_chip_bg", OBJPROP_BGCOLOR, ((i % 2) == 0 ? g_theme.surface : g_theme.surface_hi));
+        ObjectSetInteger(0, id + "_chip_bg", OBJPROP_COLOR,   ((i % 2) == 0 ? g_theme.surface : g_theme.surface_hi));
         ObjectSetString(0, id + "_chip_txt", OBJPROP_TEXT, " ");
         // V1.27 : the symbol cell is a click-to-switch button (OBJ_BUTTON is the
         // reliable click target in this codebase ; it sits over the _lbl and
         // carries the same text, so clicking it switches the chart symbol).
         const string rowbtn = RC_PREFIX + "pos_row_" + IntegerToString(i);
-        const color rbg = ((i % 2) == 0 ? g_theme.bg : g_theme.bg_section);
+        const color rbg = ((i % 2) == 0 ? g_theme.surface : g_theme.surface_hi);
         if (ObjectFind(0, rowbtn) < 0) ObjectCreate(0, rowbtn, OBJ_BUTTON, 0, 0, 0);
         ObjectSetInteger(0, rowbtn, OBJPROP_XDISTANCE, x + 1);
         ObjectSetInteger(0, rowbtn, OBJPROP_YDISTANCE, cy);
@@ -2128,7 +2362,7 @@ int DrawPositionsSection(int x, int y, int w) {
 void DrawFooter(int x, int y, int w) {
     // 3 rows by default; +1 row (L4) when pyramid advisor is enabled.
     const int rows = (InpEnablePyramidSafe ? 4 : 3);
-    DrawRect(RC_PREFIX + "footer_bg", x, y, w, InpRowHeight * rows, g_theme.bg_section, g_theme.border, 0);
+    DrawRect(RC_PREFIX + "footer_bg", x, y, w, InpRowHeight * rows, g_theme.surface, g_theme.border, 0);
 
     // Row 1 - profit metrics : drawn as individually-coloured segments
     // (RC_ + "fseg_*") by RefreshFooterMetrics (P1). Just record the row y here.
@@ -2534,10 +2768,10 @@ void RefreshPositionsList(void) {
             ObjectSetInteger(0, id + "_pnl", OBJPROP_COLOR, g_theme.text_dim);
             ObjectSetString(0, id + "_age", OBJPROP_TEXT, " ");
             ObjectSetInteger(0, id + "_age", OBJPROP_COLOR, g_theme.text_dim);
-            ObjectSetInteger(0, id + "_chip_bg", OBJPROP_BGCOLOR, g_theme.bg);
-            ObjectSetInteger(0, id + "_chip_bg", OBJPROP_COLOR, g_theme.bg);
+            ObjectSetInteger(0, id + "_chip_bg", OBJPROP_BGCOLOR, g_theme.surface);
+            ObjectSetInteger(0, id + "_chip_bg", OBJPROP_COLOR, g_theme.surface);
             ObjectSetString(0, id + "_chip_txt", OBJPROP_TEXT, " ");
-            ObjectSetInteger(0, id + "_chip_txt", OBJPROP_COLOR, g_theme.bg);
+            ObjectSetInteger(0, id + "_chip_txt", OBJPROP_COLOR, g_theme.surface);
             g_pos_sym[i] = ""; // V1.27 : empty slot -> no click target
             ObjectSetString(0, RC_PREFIX + "pos_row_" + IntegerToString(i), OBJPROP_TEXT, " ");
             continue;
@@ -4947,6 +5181,51 @@ void InitI18n(void) {
     AddTr("set_tp",          "TP distance % :",       "Distance TP % :",       "Distancia TP % :");
     AddTr("set_maxmargin",   "Max margin/trade % :",  "Marge max/trade % :",   "Margen máx/op % :");
     AddTr("set_maxrisk",     "Max risk/trade % :",    "Risque max/trade % :",  "Riesgo máx/op % :");
+    // v1.4 : hover tooltips - explain each key param (unit + what it does).
+    AddTr("tip_maxparallel",
+          "How many trades you plan to hold at once. The SL budget is split across this count.",
+          "Combien de trades tu comptes tenir en même temps. Le budget SL est réparti sur ce nombre.",
+          "Cuántas operaciones prevés mantener a la vez. El presupuesto SL se reparte entre ellas.");
+    AddTr("tip_sl",
+          "Stop-loss distance, % of price. 1.0 = safest (locked in V1).",
+          "Distance du stop-loss, % du prix. 1.0 = le plus sûr (verrouillé en V1).",
+          "Distancia del stop-loss, % del precio. 1.0 = lo más seguro (fijo en V1).");
+    AddTr("tip_tp",
+          "Take-profit distance, % of price. 0.1 = scalping default.",
+          "Distance du take-profit, % du prix. 0.1 = défaut scalping.",
+          "Distancia del take-profit, % del precio. 0.1 = por defecto scalping.");
+    AddTr("tip_maxmargin",
+          "Max margin one trade may use, % of balance. FundedNext recommends 20-30%.",
+          "Marge max qu'un seul trade peut utiliser, % du solde. FundedNext recommande 20-30%.",
+          "Margen máx que una operación puede usar, % del saldo. FundedNext recomienda 20-30%.");
+    AddTr("tip_maxrisk",
+          "Max one trade may lose, % of balance. Your discipline ceiling.",
+          "Perte max sur un seul trade, % du solde. Ton plafond de discipline.",
+          "Pérdida máx en una operación, % del saldo. Tu límite de disciplina.");
+    AddTr("tip_mviol",
+          "Turn on after a margin violation : tightens the cumulative margin cap (2nd strike).",
+          "À activer après une violation de marge : resserre le plafond de marge cumulée (2e sanction).",
+          "Activar tras una violación de margen : ajusta el límite de margen acumulado (2ª sanción).");
+    AddTr("tip_mcapviol",
+          "Tightened cumulative margin cap after a violation (FundedNext 2nd strike = 30%).",
+          "Plafond de marge cumulée resserré après violation (FundedNext 2e sanction = 30%).",
+          "Límite de margen acumulado ajustado tras violación (FundedNext 2ª sanción = 30%).");
+    AddTr("tip_rviol",
+          "Turn on after a risk violation : tightens the cumulative risk cap (2nd strike).",
+          "À activer après une violation de risque : resserre le plafond de risque cumulé (2e sanction).",
+          "Activar tras una violación de riesgo : ajusta el límite de riesgo acumulado (2ª sanción).");
+    AddTr("tip_rcapviol",
+          "Tightened cumulative risk cap after a violation (FundedNext 2nd strike = 1%).",
+          "Plafond de risque cumulé resserré après violation (FundedNext 2e sanction = 1%).",
+          "Límite de riesgo acumulado ajustado tras violación (FundedNext 2ª sanción = 1%).");
+    AddTr("tip_news_high",
+          "Show HIGH-impact news on the chart (bars + countdown).",
+          "Afficher les news HIGH sur le graphique (barres + compte à rebours).",
+          "Mostrar noticias de ALTO impacto en el gráfico (barras + cuenta atrás).");
+    AddTr("tip_news_med",
+          "Also show MEDIUM-impact news (your prop firm may count these in its news window).",
+          "Afficher aussi les news MOYEN (ta prop firm peut les compter dans sa fenêtre news).",
+          "Mostrar también noticias de impacto MEDIO (tu prop firm puede contarlas en su ventana).");
     AddTr("set_theme",       "Theme :",               "Thème :",               "Tema :");
     AddTr("set_language",    "Language :",            "Langue :",              "Idioma :");
     AddTr("set_news",        "News on chart :",       "News graphique :",      "Noticias graf :");
@@ -5106,7 +5385,7 @@ string Tr(const string key) {
 //| triggers OnDeinit + OnInit (chart-change re-init) - clean.        |
 //+------------------------------------------------------------------+
 void DrawTimeframeBar(int x, int y, int w) {
-    DrawRect(RC_PREFIX + "tfbar_bg", x, y, w, InpRowHeight, g_theme.bg_section, g_theme.border, 0);
+    DrawRect(RC_PREFIX + "tfbar_bg", x, y, w, InpRowHeight, g_theme.surface, g_theme.border, 0);
     DrawLabel(RC_PREFIX + "tfbar_lbl", x + RC_PAD, y + 5, Tr("tf"), g_theme.text_dim, RC_FONT_SIZE - 1);
     string tfs[9];
     tfs[0]="M1"; tfs[1]="M5"; tfs[2]="M15"; tfs[3]="M30"; tfs[4]="H1";
@@ -5131,8 +5410,8 @@ void DrawTimeframeBar(int x, int y, int w) {
         ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
         const bool active = (tfvals[i] == cur);
         ObjectSetInteger(0, id, OBJPROP_COLOR,        active ? g_theme.bg     : g_theme.text);
-        ObjectSetInteger(0, id, OBJPROP_BGCOLOR,      active ? g_theme.accent : g_theme.bg);
-        ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.accent);
+        ObjectSetInteger(0, id, OBJPROP_BGCOLOR,      active ? g_theme.accent : g_theme.surface_hi);
+        ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, active ? g_theme.accent : g_theme.border_hi);
         ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
         ObjectSetInteger(0, id, OBJPROP_STATE, false);
         ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
@@ -5151,7 +5430,7 @@ void DrawTimeframeBar(int x, int y, int w) {
     ObjectSetString(0, be_id, OBJPROP_FONT, RC_FONT);
     ObjectSetInteger(0, be_id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
     ObjectSetInteger(0, be_id, OBJPROP_COLOR,        g_be_visible ? g_theme.bg       : g_theme.text);
-    ObjectSetInteger(0, be_id, OBJPROP_BGCOLOR,      g_be_visible ? g_theme.accent2  : g_theme.bg);
+    ObjectSetInteger(0, be_id, OBJPROP_BGCOLOR,      g_be_visible ? g_theme.accent2  : g_theme.surface_hi);
     ObjectSetInteger(0, be_id, OBJPROP_BORDER_COLOR, g_theme.accent2);
     ObjectSetInteger(0, be_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
     ObjectSetInteger(0, be_id, OBJPROP_STATE, false);
@@ -5334,7 +5613,7 @@ void DrawBreakevenLines(void) {
 }
 
 void DrawRecentSymbolsBar(int x, int y, int w) {
-    DrawRect(RC_PREFIX + "recbar_bg", x, y, w, InpRowHeight, g_theme.bg_section, g_theme.border, 0);
+    DrawRect(RC_PREFIX + "recbar_bg", x, y, w, InpRowHeight, g_theme.surface, g_theme.border, 0);
     DrawLabel(RC_PREFIX + "recbar_lbl", x + RC_PAD, y + 5, Tr("recent"), g_theme.text_dim, RC_FONT_SIZE - 1);
     const int btn_w = (g_eff_comfort ? 72 : 96); // FIX 6 : narrower when the Re-center button is shown
     const int btn_h = InpRowHeight - 6;
@@ -5353,7 +5632,7 @@ void DrawRecentSymbolsBar(int x, int y, int w) {
             ObjectSetString(0, id, OBJPROP_FONT, RC_FONT);
             ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
             ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.text);
-            ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.bg);
+            ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.surface_hi);
             ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.accent);
             ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
             ObjectSetInteger(0, id, OBJPROP_STATE, false);
@@ -5378,7 +5657,7 @@ void DrawRecentSymbolsBar(int x, int y, int w) {
         ObjectSetString(0, rc_id, OBJPROP_FONT, RC_FONT);
         ObjectSetInteger(0, rc_id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 2);
         ObjectSetInteger(0, rc_id, OBJPROP_COLOR, g_theme.text);
-        ObjectSetInteger(0, rc_id, OBJPROP_BGCOLOR, g_theme.bg);
+        ObjectSetInteger(0, rc_id, OBJPROP_BGCOLOR, g_theme.surface_hi);
         ObjectSetInteger(0, rc_id, OBJPROP_BORDER_COLOR, g_theme.accent);
         ObjectSetInteger(0, rc_id, OBJPROP_STATE, false);
         ObjectSetInteger(0, rc_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -5480,8 +5759,8 @@ void DrawSetButton(const string id, int x, int y, int w, int h, const string tex
     ObjectSetString(0, id, OBJPROP_FONT, RC_FONT);
     ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
     ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.text);
-    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.bg);
-    ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.border);
+    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.surface_hi);      // premium (v1.4) : raised control
+    ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.border_hi);
     ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
     ObjectSetInteger(0, id, OBJPROP_STATE, false);
     ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
@@ -5492,7 +5771,7 @@ void DrawSetButton(const string id, int x, int y, int w, int h, const string tex
 }
 
 void HighlightSetButton(const string id, bool active) {
-    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, active ? g_theme.accent : g_theme.bg);
+    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, active ? g_theme.accent : g_theme.surface_hi);
     ObjectSetInteger(0, id, OBJPROP_COLOR,   active ? g_theme.bg     : g_theme.text);
 }
 
@@ -5699,6 +5978,19 @@ string PhaseLabelLocal(int ph) {
 //| Context-aware : prop-only groups hide on a Personal account, and  |
 //| only the add-ons valid for the selected firm are shown.           |
 //+------------------------------------------------------------------+
+// v1.4 : the app must EXPLAIN its elements (JR's father's UX note). Attach an
+// "what it does + unit" tooltip (translation key) to a settings control on hover.
+// SetTip1 = a single control (toggle / button) ; SetTip3 = a [-] value [+] stepper.
+void SetTip1(const string id, const string tipkey) {
+    ObjectSetString(0, RC_PREFIX + id, OBJPROP_TOOLTIP, Tr(tipkey));
+}
+void SetTip3(const string id_base, const string tipkey) {
+    const string t = Tr(tipkey);
+    ObjectSetString(0, RC_PREFIX + id_base + "_dn",  OBJPROP_TOOLTIP, t);
+    ObjectSetString(0, RC_PREFIX + id_base + "_val", OBJPROP_TOOLTIP, t);
+    ObjectSetString(0, RC_PREFIX + id_base + "_up",  OBJPROP_TOOLTIP, t);
+}
+
 void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     const int ox = panel_x;
     const int oy = panel_y;
@@ -5823,18 +6115,23 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
         // ===== Risk =====
         SetLbl(RC_PREFIX + "set_n_lbl", lx, by + 3, Tr("set_maxparallel"), g_theme.text);
         SetStepper(RC_PREFIX + "set_n", cx, by, IntegerToString(g_max_parallel));
+        SetTip3("set_n", "tip_maxparallel");
         by += step;
         SetLbl(RC_PREFIX + "set_sl_lbl", lx, by + 3, Tr("set_sl"), g_theme.text);
         SetStepper(RC_PREFIX + "set_sl", cx, by, DoubleToString(g_eff_sl_pct, 2) + "%");
+        SetTip3("set_sl", "tip_sl");
         by += step;
         SetLbl(RC_PREFIX + "set_tp_lbl", lx, by + 3, Tr("set_tp"), g_theme.text);
         SetStepper(RC_PREFIX + "set_tp", cx, by, DoubleToString(g_eff_tp_pct, 2) + "%");
+        SetTip3("set_tp", "tip_tp");
         by += step;
         SetLbl(RC_PREFIX + "set_mm_lbl", lx, by + 3, Tr("set_maxmargin"), g_theme.text);
         SetStepper(RC_PREFIX + "set_mm", cx, by, DoubleToString(g_eff_max_margin_pt, 1) + "%");
+        SetTip3("set_mm", "tip_maxmargin");
         by += step;
         SetLbl(RC_PREFIX + "set_mr_lbl", lx, by + 3, Tr("set_maxrisk"), g_theme.text);
         SetStepper(RC_PREFIX + "set_mr", cx, by, DoubleToString(g_eff_max_risk_pt, 2) + "%");
+        SetTip3("set_mr", "tip_maxrisk");
         by += step;
         // V1.27 : post-violation tightening (mirror of the on-chart toggles + the
         // tightened caps that EffectiveMarginCap / EffectiveRiskCap apply). Only
@@ -5843,15 +6140,19 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
         if (ProfileCanBeRestricted()) {
             SetLbl(RC_PREFIX + "set_mviol_lbl", lx, by + 3, Tr("set_mviol"), g_theme.text);
             SetToggleBtn(RC_PREFIX + "set_mviol", cx, by, g_margin_violation_active);
+            SetTip1("set_mviol", "tip_mviol");
             by += step;
             SetLbl(RC_PREFIX + "set_mcv_lbl", lx, by + 3, Tr("set_mcapviol"), g_theme.text);
             SetStepper(RC_PREFIX + "set_mcv", cx, by, DoubleToString(g_eff_margin_cap_viol, 0) + "%");
+            SetTip3("set_mcv", "tip_mcapviol");
             by += step;
             SetLbl(RC_PREFIX + "set_rviol_lbl", lx, by + 3, Tr("set_rviol"), g_theme.text);
             SetToggleBtn(RC_PREFIX + "set_rviol", cx, by, g_risk_violation_active);
+            SetTip1("set_rviol", "tip_rviol");
             by += step;
             SetLbl(RC_PREFIX + "set_rcv_lbl", lx, by + 3, Tr("set_rcapviol"), g_theme.text);
             SetStepper(RC_PREFIX + "set_rcv", cx, by, DoubleToString(g_eff_risk_cap_viol, 2) + "%");
+            SetTip3("set_rcv", "tip_rcapviol");
             by += step;
         }
     } else if (g_settings_tab == 2) {
@@ -5876,9 +6177,11 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
         // V1.29 R : news LEVEL selector - HIGH / MEDIUM (both default ON ; FN counts MEDIUM too).
         SetLbl(RC_PREFIX + "set_nh_lbl", lx, by + 3, Tr("set_news_high"), g_theme.text);
         SetToggleBtn(RC_PREFIX + "set_news_high", cx, by, g_eff_news_high);
+        SetTip1("set_news_high", "tip_news_high");
         by += step;
         SetLbl(RC_PREFIX + "set_nm_lbl", lx, by + 3, Tr("set_news_med"), g_theme.text);
         SetToggleBtn(RC_PREFIX + "set_news_med", cx, by, g_eff_news_med);
+        SetTip1("set_news_med", "tip_news_med");
         by += step;
         SetLbl(RC_PREFIX + "set_cf_lbl", lx, by + 3, Tr("set_comfort"), g_theme.text);
         SetToggleBtn(RC_PREFIX + "set_comfort", cx, by, g_eff_comfort);
