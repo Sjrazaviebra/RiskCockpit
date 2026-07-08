@@ -719,6 +719,29 @@ void DrawRecentSymbolsBar(int x, int y, int w);
 // InpAnchorX/Y, restored from GlobalVariable, persisted on drop).
 int  g_anchor_x = 20;
 int  g_anchor_y = 100;
+
+// v1.4.1 R3 : HIT-TESTING for canvas-drawn ROUNDED controls (an OBJ_BUTTON is
+// opaque + square). Each drawn control registers a zone + action string ; the
+// CHARTEVENT_CLICK handler routes clicks by coordinate. Zones are stored RELATIVE
+// to the panel anchor (g_anchor_x/y) so a DRAG never invalidates them : MovePanelBy
+// shifts the objects, the anchor tracks the drag, and the relative offset is fixed.
+struct RCHit { int x1, y1, x2, y2; string act; int idx; };
+RCHit g_hits[]; int g_nhits = 0;
+void HitReset(void) { g_nhits = 0; }
+void HitAdd(const int x1, const int y1, const int x2, const int y2, const string act, const int idx = -1) {
+    if (g_nhits >= ArraySize(g_hits)) ArrayResize(g_hits, g_nhits + 32);
+    g_hits[g_nhits].x1 = x1 - g_anchor_x; g_hits[g_nhits].y1 = y1 - g_anchor_y; // store RELATIVE
+    g_hits[g_nhits].x2 = x2 - g_anchor_x; g_hits[g_nhits].y2 = y2 - g_anchor_y;
+    g_hits[g_nhits].act = act; g_hits[g_nhits].idx = idx; g_nhits++;
+}
+bool HitTest(const int mx, const int my, string &act, int &idx) {
+    const int rx = mx - g_anchor_x, ry = my - g_anchor_y; // click -> panel-relative (drag-proof)
+    for (int i = g_nhits - 1; i >= 0; --i)  // last-registered (top-most) wins
+        if (rx >= g_hits[i].x1 && rx <= g_hits[i].x2 && ry >= g_hits[i].y1 && ry <= g_hits[i].y2) {
+            act = g_hits[i].act; idx = g_hits[i].idx; return true;
+        }
+    return false;
+}
 // AUDIT 2026-06-07 fix #5 : hoisted from BuildPanel so the discipline-lock
 // overlay can cover the FULL panel (was ~title+1 row = ~8 % of the panel).
 int  g_panel_height = 0;
@@ -1073,6 +1096,19 @@ int OnCalculate(const int rates_total,
 //+------------------------------------------------------------------+
 //| OnChartEvent - reserved for future drag-to-move                  |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| v1.4.1 R3 : route a hit-tested (canvas-drawn) control to the same |
+//| logic its OBJ_BUTTON used. Extended per phase (tf now ; toggles,  |
+//| buttons, positions, settings modal next).                        |
+//+------------------------------------------------------------------+
+void DispatchHit(const string act, const int idx) {
+    if (act == "tf") {
+        ENUM_TIMEFRAMES tfv[9] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
+                                  PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
+        if (idx >= 0 && idx < 9) ChartSetSymbolPeriod(0, _Symbol, tfv[idx]);
+    }
+}
+
 void OnChartEvent(const int id, const long& lparam, const double& dparam, const string& sparam) {
     // V1.29 V : on any chart change (resize / TF switch / scroll / zoom), re-pin the
     // bottom news icons to the CURRENT visible price floor IMMEDIATELY - no calendar
@@ -1126,6 +1162,16 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
         }
         return;
     }
+    // v1.4.1 R3 : canvas-drawn (rounded) controls are routed by CLICK coordinates.
+    // (An OBJ_BUTTON is opaque + square ; rounded controls are painted, not buttons.)
+    if (id == CHARTEVENT_CLICK) {
+        const int mx = (int)lparam, my = (int)dparam;
+        string act; int hidx;
+        const bool hit = HitTest(mx, my, act, hidx);
+        PrintFormat("RC click (%d,%d) -> %s", mx, my, (hit ? act + "[" + IntegerToString(hidx) + "]" : "(no zone)"));
+        if (hit) { DispatchHit(act, hidx); return; }
+    }
+
     // CHARTEVENT_OBJECT_CLICK : +/- on max-parallel control (now OBJ_BUTTON)
     if (id == CHARTEVENT_OBJECT_CLICK) {
         if (sparam == RC_PREFIX + "mp_minus") {
@@ -1746,10 +1792,22 @@ void RepaintCanvas(const int x, const int y, const int w) {
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
     cy += InpRowHeight * footer_rows;                       // -> timeframe bar row
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
-    // v1.4 R2 : segmented TF track - a dark rounded pill behind the TF buttons,
-    // so the light (surface_hi) inactive buttons read as segments + cyan = active.
+    // v1.4 R2/R3 : segmented TF control - a dark rounded track, then 9 segment
+    // faces painted on top (active = cyan). The text labels + click zones live in
+    // DrawTimeframeBar. 2px gaps let the dark track show between segments.
     g_kit.RoundFill(px + 28, cy + 3, 322, InpRowHeight - 6, (InpRowHeight - 6) / 2,
                     ColorToARGB(g_theme.bg_deep, 255));
+    {
+        const ENUM_TIMEFRAMES tfv2[9] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
+                                         PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
+        const ENUM_TIMEFRAMES curp = (ENUM_TIMEFRAMES)ChartPeriod(0);
+        for (int s = 0; s < 9; ++s) {
+            const int sx = px + 30 + s * 35;
+            const bool act = (tfv2[s] == curp);
+            g_kit.RoundFill(sx, cy + 3, 33, InpRowHeight - 6, 5,
+                            act ? ColorToARGB(g_theme.accent, 255) : ColorToARGB(g_theme.surface_hi, 255));
+        }
+    }
     cy += InpRowHeight;
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
 
@@ -1763,6 +1821,7 @@ void BuildPanel(void) {
     const int x = g_anchor_x; // B2 : live anchor (drag-updated, persisted)
     const int y = g_anchor_y;
     const int w = InpPanelWidth;
+    HitReset(); // v1.4.1 R3 : clear hit-zones ; the section draws below re-register them
 
     // Estimate height: title + strip + section header + rules + section header + positions + footer
     // Footer is 3 rows by default, 4 when pyramid advisor is enabled.
@@ -5401,25 +5460,17 @@ void DrawTimeframeBar(int x, int y, int w) {
     const int x0    = x + 30;
     const ENUM_TIMEFRAMES cur = (ENUM_TIMEFRAMES)ChartPeriod(0);
     for (int i = 0; i < 9; ++i) {
-        const string id = RC_PREFIX + "tf_" + tfs[i];
         const int bx = x0 + i * (btn_w + 2);
-        if (ObjectFind(0, id) < 0) ObjectCreate(0, id, OBJ_BUTTON, 0, 0, 0);
-        ObjectSetInteger(0, id, OBJPROP_XDISTANCE, bx);
-        ObjectSetInteger(0, id, OBJPROP_YDISTANCE, y + 3);
-        ObjectSetInteger(0, id, OBJPROP_XSIZE, btn_w);
-        ObjectSetInteger(0, id, OBJPROP_YSIZE, btn_h);
-        ObjectSetString(0, id, OBJPROP_TEXT, tfs[i]);
-        ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
-        ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
         const bool active = (tfvals[i] == cur);
-        ObjectSetInteger(0, id, OBJPROP_COLOR,        active ? g_theme.bg     : g_theme.text);
-        ObjectSetInteger(0, id, OBJPROP_BGCOLOR,      active ? g_theme.accent : g_theme.surface_hi);
-        ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, active ? g_theme.accent : g_theme.border_hi);
-        ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-        ObjectSetInteger(0, id, OBJPROP_STATE, false);
-        ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
-        ObjectSetInteger(0, id, OBJPROP_ZORDER, 100); // LOT B
+        // v1.4.1 R3 : the segment FACE is painted in RepaintCanvas ; here we place the
+        // centered text label on top + register the CLICK zone (absolute pixels).
+        const string bid = RC_PREFIX + "tf_" + tfs[i];
+        if (ObjectFind(0, bid) >= 0) ObjectDelete(0, bid); // drop any pre-R3 OBJ_BUTTON
+        const string lid = RC_PREFIX + "tflab_" + tfs[i];
+        DrawLabel(lid, bx + btn_w / 2, y + 3 + btn_h / 2, tfs[i],
+                  active ? g_theme.bg : g_theme.text, RC_FONT_SIZE - 1, RC_FONT_UI);
+        ObjectSetInteger(0, lid, OBJPROP_ANCHOR, ANCHOR_CENTER);
+        HitAdd(bx, y + 3, bx + btn_w, y + 3 + btn_h, "tf", i);
     }
     // LOT 5 : "BE" toggle on the right side - show / hide breakeven lines on
     // each open position of the current chart symbol (draggable for manual adjust).
