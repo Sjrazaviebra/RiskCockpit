@@ -725,14 +725,35 @@ int  g_anchor_y = 100;
 // CHARTEVENT_CLICK handler routes clicks by coordinate. Zones are stored RELATIVE
 // to the panel anchor (g_anchor_x/y) so a DRAG never invalidates them : MovePanelBy
 // shifts the objects, the anchor tracks the drag, and the relative offset is fixed.
-struct RCHit { int x1, y1, x2, y2; string act; int idx; };
+// v1.4.1 R3 : a zone's FACE style. The registry is the SINGLE source of a
+// control's geometry : hit-testing reads the (relative) rect, and RepaintCanvas
+// paints the matching rounded face from the SAME rect (local = relative + margin).
+// So faces + click zones can never drift, and both are drag-proof by design.
+#define RCF_NONE      0   // no face (label-only / row overlay / tf drawn separately)
+#define RCF_BTN       1   // flat rounded button (surface)
+#define RCF_BTN_ON    2   // rounded button, accent fill (active)
+#define RCF_BTN_RED   3   // rounded button, red edge (X / danger)
+#define RCF_PILL_OFF  4   // sliding pill toggle, OFF (knob left)
+#define RCF_PILL_ON   5   // sliding pill toggle, ON  (knob right, accent)
+
+struct RCHit { int x1, y1, x2, y2; string act; int idx; int style; };
 RCHit g_hits[]; int g_nhits = 0;
 void HitReset(void) { g_nhits = 0; }
-void HitAdd(const int x1, const int y1, const int x2, const int y2, const string act, const int idx = -1) {
-    if (g_nhits >= ArraySize(g_hits)) ArrayResize(g_hits, g_nhits + 32);
-    g_hits[g_nhits].x1 = x1 - g_anchor_x; g_hits[g_nhits].y1 = y1 - g_anchor_y; // store RELATIVE
-    g_hits[g_nhits].x2 = x2 - g_anchor_x; g_hits[g_nhits].y2 = y2 - g_anchor_y;
-    g_hits[g_nhits].act = act; g_hits[g_nhits].idx = idx; g_nhits++;
+void HitAdd(const int x1, const int y1, const int x2, const int y2, const string act,
+            const int idx = -1, const int style = RCF_NONE) {
+    // Idempotent by (act, idx) : a standalone redraw (e.g. DrawRecentSymbolsBar from
+    // OnTradeTransaction, which fires per trade) UPDATES the matching zone in place
+    // instead of appending a duplicate, so g_hits can't leak between HitReset cycles.
+    int slot = -1;
+    for (int i = 0; i < g_nhits; ++i)
+        if (g_hits[i].act == act && g_hits[i].idx == idx) { slot = i; break; }
+    if (slot < 0) {
+        if (g_nhits >= ArraySize(g_hits)) ArrayResize(g_hits, g_nhits + 32);
+        slot = g_nhits++;
+    }
+    g_hits[slot].x1 = x1 - g_anchor_x; g_hits[slot].y1 = y1 - g_anchor_y; // store RELATIVE
+    g_hits[slot].x2 = x2 - g_anchor_x; g_hits[slot].y2 = y2 - g_anchor_y;
+    g_hits[slot].act = act; g_hits[slot].idx = idx; g_hits[slot].style = style;
 }
 bool HitTest(const int mx, const int my, string &act, int &idx) {
     const int rx = mx - g_anchor_x, ry = my - g_anchor_y; // click -> panel-relative (drag-proof)
@@ -741,6 +762,25 @@ bool HitTest(const int mx, const int my, string &act, int &idx) {
             act = g_hits[i].act; idx = g_hits[i].idx; return true;
         }
     return false;
+}
+// Paint one control face at LOCAL canvas coords (relative rect + RC_KIT_MARGIN).
+void DrawFace(const int lx, const int ly, const int w, const int h, const int style) {
+    const int r = MathMin(RC_R_CARD, h / 2);
+    switch (style) {
+        case RCF_BTN:      g_kit.Button(lx, ly, w, h, r, g_theme.surface_hi, g_theme.surface, g_theme.border_hi); break;
+        case RCF_BTN_ON:   g_kit.Button(lx, ly, w, h, r, g_theme.accent, g_theme.accent, g_theme.accent);         break;
+        case RCF_BTN_RED:  g_kit.Button(lx, ly, w, h, r, g_theme.surface_hi, g_theme.surface, g_theme.red);        break;
+        case RCF_PILL_OFF: g_kit.PillToggle(lx, ly, w, h, false, g_theme.surface, g_theme.accent, g_theme.accent, g_theme.label);    break;
+        case RCF_PILL_ON:  g_kit.PillToggle(lx, ly, w, h, true,  g_theme.surface, g_theme.accent, g_theme.accent, C'255,255,255');    break;
+    }
+}
+// Paint every registered face into g_kit (called from RepaintCanvas, in-frame).
+void PaintFaces(void) {
+    for (int i = 0; i < g_nhits; ++i) {
+        if (g_hits[i].style == RCF_NONE) continue;
+        DrawFace(g_hits[i].x1 + RC_KIT_MARGIN, g_hits[i].y1 + RC_KIT_MARGIN,
+                 g_hits[i].x2 - g_hits[i].x1, g_hits[i].y2 - g_hits[i].y1, g_hits[i].style);
+    }
 }
 // AUDIT 2026-06-07 fix #5 : hoisted from BuildPanel so the discipline-lock
 // overlay can cover the FULL panel (was ~title+1 row = ~8 % of the panel).
@@ -752,6 +792,12 @@ int  g_active_plan_idx  = -1;   // -1 = InpPlan, else cast to ENUM_FN_PLAN
 int  g_active_theme_idx = -1;   // -1 = InpTheme, else 0 = DARK, 1 = LIGHT
 bool g_settings_open    = false;
 int  g_settings_tab     = 0;    // 0=Account 1=Risk 2=Display 3=Alerts
+// v1.4.1 R3 : MT5 pairs a modal-button OBJECT_CLICK with a trailing CHARTEVENT_CLICK
+// at the same pixel. Closing the modal via its X flips g_settings_open=false FIRST,
+// so the trailing CLICK would slip past the "modal captures input" guard and hit the
+// panel-X hit-zone underneath (= closes the whole panel). This one-shot flag lets the
+// CLICK handler swallow exactly that paired event.
+bool g_swallow_click    = false;
 // G2 B-SETTINGS-FULL : runtime-mutable shadows of the editable inputs. MQL5
 // `input` variables are READ-ONLY at runtime, so the in-panel settings centre
 // works on these instead. Initialised from the Inp* defaults in OnInit (a
@@ -1102,10 +1148,45 @@ int OnCalculate(const int rates_total,
 //| buttons, positions, settings modal next).                        |
 //+------------------------------------------------------------------+
 void DispatchHit(const string act, const int idx) {
+    // Discipline HARD-LOCK integrity : while the full-panel STOP overlay is up, the
+    // native code hid the OBJ_BUTTONs so the lock can't be bypassed. Hit-zones have
+    // no such hiding, so refuse every control click while the overlay exists (the
+    // native "disc_unlock" button keeps its own OBJECT_CLICK path).
+    if (ObjectFind(0, RC_PREFIX + "discipline_overlay") >= 0) return;
+    // When the settings modal is OPEN it captures input : the panel-body hit-zones
+    // are inert (the modal's own OBJ_BUTTONs keep their OBJECT_CLICK routing). This
+    // stops the panel X (a body zone) firing under the modal's own close X. (R4 will
+    // convert the modal itself to canvas + hit-testing.)
+    if (g_settings_open) return;
     if (act == "tf") {
         ENUM_TIMEFRAMES tfv[9] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
                                   PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
         if (idx >= 0 && idx < 9) ChartSetSymbolPeriod(0, _Symbol, tfv[idx]);
+    } else if (act == "set") {                 // gear : open/close settings modal
+        g_settings_open = !g_settings_open; ApplySettingsChange();
+    } else if (act == "kill") {                // X : remove the indicator
+        int kwin = ChartWindowFind(); if (kwin < 0) kwin = 0;
+        ObjectsDeleteAll(0, RC_PREFIX); ChartIndicatorDelete(0, kwin, "RiskCockpit"); ChartRedraw(0);
+    } else if (act == "be") {                  // BE pill : toggle breakeven lines
+        g_be_visible = !g_be_visible; PersistBE(); DrawBreakevenLines(); ApplySettingsChange();
+    } else if (act == "recenter") {            // re-apply comfort scale on all charts
+        ApplyComfortScaleAllCharts(); ChartRedraw(0);
+    } else if (act == "recsym") {              // quick-switch to a recent symbol
+        if (idx >= 0 && idx < ArraySize(g_recent_syms))
+            ChartSetSymbolPeriod(0, g_recent_syms[idx], (ENUM_TIMEFRAMES)ChartPeriod(0));
+    } else if (act == "possym") {              // click a position row -> its symbol
+        if (idx >= 0 && idx < RC_MAX_POSITIONS && StringLen(g_pos_sym[idx]) > 0)
+            ChartSetSymbolPeriod(0, g_pos_sym[idx], (ENUM_TIMEFRAMES)ChartPeriod(0));
+    } else if (act == "mp_dn") {               // max-parallel stepper -
+        if (g_max_parallel > 1)  { g_max_parallel--; PersistMaxParallel(); ApplySettingsChange(); }
+    } else if (act == "mp_up") {               // max-parallel stepper +
+        if (g_max_parallel < 50) { g_max_parallel++; PersistMaxParallel(); ApplySettingsChange(); }
+    } else if (act == "viol_m") {              // margin-violation pill
+        g_margin_violation_active = !g_margin_violation_active;
+        GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0); ApplySettingsChange();
+    } else if (act == "viol_r") {              // risk-violation pill
+        g_risk_violation_active = !g_risk_violation_active;
+        GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0); ApplySettingsChange();
     }
 }
 
@@ -1165,11 +1246,11 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
     // v1.4.1 R3 : canvas-drawn (rounded) controls are routed by CLICK coordinates.
     // (An OBJ_BUTTON is opaque + square ; rounded controls are painted, not buttons.)
     if (id == CHARTEVENT_CLICK) {
-        const int mx = (int)lparam, my = (int)dparam;
+        // Swallow the stray CLICK MT5 pairs with a just-processed modal-close
+        // OBJECT_CLICK (else it lands on the panel-X zone under the modal X).
+        if (g_swallow_click) { g_swallow_click = false; return; }
         string act; int hidx;
-        const bool hit = HitTest(mx, my, act, hidx);
-        PrintFormat("RC click (%d,%d) -> %s", mx, my, (hit ? act + "[" + IntegerToString(hidx) + "]" : "(no zone)"));
-        if (hit) { DispatchHit(act, hidx); return; }
+        if (HitTest((int)lparam, (int)dparam, act, hidx)) { DispatchHit(act, hidx); return; }
     }
 
     // CHARTEVENT_OBJECT_CLICK : +/- on max-parallel control (now OBJ_BUTTON)
@@ -1215,6 +1296,7 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
             ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
             g_settings_open = false;
             ApplySettingsChange();
+            g_swallow_click = true; // eat the CLICK MT5 pairs with this OBJECT_CLICK, else it hits the panel-X zone underneath
         } else if (sparam == RC_PREFIX + "set_lang_en" ||
                    sparam == RC_PREFIX + "set_lang_fr" ||
                    sparam == RC_PREFIX + "set_lang_es") {
@@ -1811,6 +1893,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
     cy += InpRowHeight;
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
 
+    PaintFaces();     // v1.4.1 R3 : paint every registered control face (rounded btns / pills)
     g_kit.Commit();
 }
 
@@ -1844,7 +1927,9 @@ void BuildPanel(void) {
     // the canvas (kept for R1 ; removed in R2).
     g_kit.Create(RC_PREFIX + "ui", x - RC_KIT_MARGIN, y - RC_KIT_MARGIN,
                  w + 2 * RC_KIT_MARGIN, total_h + 2 * RC_KIT_MARGIN);
-    RepaintCanvas(x, y, w);
+    // RepaintCanvas is called at the END of BuildPanel (below), AFTER the sections
+    // register their hit-zones, so PaintFaces() can paint the control faces. The
+    // g_kit bitmap is created HERE (early) so text + controls render on top of it.
     CreateFxCanvas(x, y, w, total_h); // v1.4 : glow ring around the panel (breach pulse)
 
     int cy = y;
@@ -1864,6 +1949,10 @@ void BuildPanel(void) {
     g_recbar_y = cy;
     UpdateRecentSymbols();
     DrawRecentSymbolsBar(x, cy, w);
+
+    // v1.4.1 R3 : paint the modern body + all registered control faces NOW that
+    // every section has registered its hit-zones (single geometry source).
+    RepaintCanvas(x, y, w);
 
     // G3 : if the settings popup is open, float it ABOVE everything else.
     if (g_settings_open)
@@ -1917,19 +2006,19 @@ void DrawTitleBar(int x, int y, int w) {
     const int bw = 22, gap = 4;
     const int kill_x = x + w - RC_PAD - bw;   // X = rightmost
     const int gear_x = kill_x - gap - bw;     // gear left of the X
-    DrawSetButton(RC_PREFIX + "set", gear_x, y + 5, 22, 20, ShortToString((ushort)0x2699));
-    ObjectSetString (0, RC_PREFIX + "set", OBJPROP_FONT, "Segoe UI Symbol");
-    ObjectSetInteger(0, RC_PREFIX + "set", OBJPROP_FONTSIZE, RC_FONT_SIZE + 2);
-    ObjectSetString (0, RC_PREFIX + "set", OBJPROP_TOOLTIP,
-                    "Settings : account / risk / display / alerts");
+    // v1.4.1 R3 : gear = canvas rounded button (face via PaintFaces) + click zone + glyph label on top.
+    HitAdd(gear_x, y + 5, gear_x + 22, y + 25, "set", -1, RCF_BTN);
+    DrawLabel(RC_PREFIX + "set_g", gear_x + 11, y + 15, ShortToString((ushort)0x2699), g_theme.label, RC_FONT_SIZE + 2, "Segoe UI Symbol");
+    ObjectSetInteger(0, RC_PREFIX + "set_g", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    ObjectSetString (0, RC_PREFIX + "set_g", OBJPROP_TOOLTIP, "Settings : account / risk / display / alerts");
     // V1.28 : title-bar X button -> removes THIS indicator from the chart
     // (ChartIndicatorDelete), so no trip to the Indicators List is needed.
     // (kill_x computed above = top-right corner.)
-    DrawSetButton(RC_PREFIX + "kill", kill_x, y + 5, 22, 20, "X");
-    ObjectSetInteger(0, RC_PREFIX + "kill", OBJPROP_FONTSIZE, RC_FONT_SIZE + 1);
-    ObjectSetInteger(0, RC_PREFIX + "kill", OBJPROP_COLOR, g_theme.red);
-    ObjectSetInteger(0, RC_PREFIX + "kill", OBJPROP_BORDER_COLOR, g_theme.red);
-    ObjectSetString (0, RC_PREFIX + "kill", OBJPROP_TOOLTIP, Tr("kill_tip"));
+    // v1.4.1 R3 : X = canvas rounded button (red edge) + click zone + "X" label on top.
+    HitAdd(kill_x, y + 5, kill_x + 22, y + 25, "kill", -1, RCF_BTN_RED);
+    DrawLabel(RC_PREFIX + "kill_x", kill_x + 11, y + 15, "X", g_theme.red, RC_FONT_SIZE + 1, RC_FONT_UI);
+    ObjectSetInteger(0, RC_PREFIX + "kill_x", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    ObjectSetString (0, RC_PREFIX + "kill_x", OBJPROP_TOOLTIP, Tr("kill_tip"));
 
     // FIX 7 (V1.0.2) : balance ("model | $XXK") and the clock blinker are BOTH
     // right-anchored. The clock (news countdown / "WEEKEND HOLD!" / LIVE) grows
@@ -5472,26 +5561,19 @@ void DrawTimeframeBar(int x, int y, int w) {
         ObjectSetInteger(0, lid, OBJPROP_ANCHOR, ANCHOR_CENTER);
         HitAdd(bx, y + 3, bx + btn_w, y + 3 + btn_h, "tf", i);
     }
-    // LOT 5 : "BE" toggle on the right side - show / hide breakeven lines on
-    // each open position of the current chart symbol (draggable for manual adjust).
-    const string be_id = RC_PREFIX + "be";
-    if (ObjectFind(0, be_id) < 0) ObjectCreate(0, be_id, OBJ_BUTTON, 0, 0, 0);
-    ObjectSetInteger(0, be_id, OBJPROP_XDISTANCE, x + w - 52);
-    ObjectSetInteger(0, be_id, OBJPROP_YDISTANCE, y + 3);
-    ObjectSetInteger(0, be_id, OBJPROP_XSIZE, 44);
-    ObjectSetInteger(0, be_id, OBJPROP_YSIZE, btn_h);
-    ObjectSetString(0, be_id, OBJPROP_TEXT, "BE");
-    ObjectSetString(0, be_id, OBJPROP_FONT, RC_FONT_UI);
-    ObjectSetInteger(0, be_id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
-    ObjectSetInteger(0, be_id, OBJPROP_COLOR,        g_be_visible ? g_theme.bg       : g_theme.text);
-    ObjectSetInteger(0, be_id, OBJPROP_BGCOLOR,      g_be_visible ? g_theme.accent2  : g_theme.surface_hi);
-    ObjectSetInteger(0, be_id, OBJPROP_BORDER_COLOR, g_theme.accent2);
-    ObjectSetInteger(0, be_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, be_id, OBJPROP_STATE, false);
-    ObjectSetInteger(0, be_id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, be_id, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, be_id, OBJPROP_ZORDER, 100); // LOT B
-    ObjectSetString(0, be_id, OBJPROP_TOOLTIP, "Show / hide breakeven lines (draggable)");
+    // v1.4.1 R3 pass-2 (BE back on the TF row, right of "Max") : Break-even = a rounded
+    // TOGGLE button drawn EXACTLY like the gear / X - ONE rect (be_x/be_y/be_w/be_h)
+    // drives the hit-zone, the canvas FACE (PaintFaces) AND a CENTER-anchored "BE" label.
+    // WYSIWYG : the letters sit ON the click zone. (Earlier desync bug = the label was
+    // right-anchored OUTSIDE the rect, so text and zone were in different places.)
+    ObjectDelete(0, RC_PREFIX + "be"); // drop any pre-R3 OBJ_BUTTON
+    const int be_w = 44, be_h = btn_h;
+    const int be_x = x + w - 52, be_y = y + 3;   // right of the "Max" copy field (ends ~x+w-58)
+    HitAdd(be_x, be_y, be_x + be_w, be_y + be_h, "be", -1, g_be_visible ? RCF_BTN_ON : RCF_BTN);
+    DrawLabel(RC_PREFIX + "be_l", be_x + be_w / 2, be_y + be_h / 2, "BE",
+              g_be_visible ? g_theme.bg : g_theme.text, RC_FONT_SIZE - 1, RC_FONT_UI);
+    ObjectSetInteger(0, RC_PREFIX + "be_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    ObjectSetString (0, RC_PREFIX + "be_l", OBJPROP_TOOLTIP, "Show / hide breakeven lines");
 }
 
 //+------------------------------------------------------------------+
