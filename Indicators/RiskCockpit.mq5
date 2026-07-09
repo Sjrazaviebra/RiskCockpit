@@ -755,6 +755,17 @@ void HitAdd(const int x1, const int y1, const int x2, const int y2, const string
     g_hits[slot].x2 = x2 - g_anchor_x; g_hits[slot].y2 = y2 - g_anchor_y;
     g_hits[slot].act = act; g_hits[slot].idx = idx; g_hits[slot].style = style;
 }
+// Drop the (act, idx) zone so PaintFaces paints no ghost face for a control that just
+// disappeared on a standalone redraw (e.g. a recent-symbol slot that emptied). Zones
+// never overlap, so a swap-with-last removal keeps HitTest correct.
+void HitRemove(const string act, const int idx) {
+    for (int i = 0; i < g_nhits; ++i)
+        if (g_hits[i].act == act && g_hits[i].idx == idx) {
+            g_hits[i] = g_hits[g_nhits - 1];
+            g_nhits--;
+            return;
+        }
+}
 bool HitTest(const int mx, const int my, string &act, int &idx) {
     const int rx = mx - g_anchor_x, ry = my - g_anchor_y; // click -> panel-relative (drag-proof)
     for (int i = g_nhits - 1; i >= 0; --i)  // last-registered (top-most) wins
@@ -2137,7 +2148,7 @@ void DrawRuleRow(const string key_prefix, int idx,
         const bool viol_active = (key_prefix == "rule_margin_cum") ? g_margin_violation_active
                                                                    : g_risk_violation_active;
         DrawViolationToggle(key_prefix, x + 2, y + 3, h - 6, viol_active);
-        label_x = x + 22;
+        label_x = x + 30; // v1.4.1 R3 : room for the wider sliding-pill violation toggle
     }
 
     // Label (left) - premium UI font (Segoe UI) ; values/numbers stay Consolas
@@ -2436,26 +2447,17 @@ void DrawStatusChip(const string id, int x, int y, int w, int h, ENUM_RC_STATUS 
 //| button never sticks in the pressed look.                         |
 //+------------------------------------------------------------------+
 void DrawViolationToggle(const string key, int x, int y, int h, bool active) {
-    const string id = RC_PREFIX + key + "_viol";
-    if (ObjectFind(0, id) < 0)
-        ObjectCreate(0, id, OBJ_BUTTON, 0, 0, 0);
-    ObjectSetInteger(0, id, OBJPROP_XDISTANCE, x);
-    ObjectSetInteger(0, id, OBJPROP_YDISTANCE, y);
-    ObjectSetInteger(0, id, OBJPROP_XSIZE, 16);
-    ObjectSetInteger(0, id, OBJPROP_YSIZE, h);
-    ObjectSetString(0, id, OBJPROP_TEXT, (active ? "X" : " "));
-    ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
-    ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
-    ObjectSetInteger(0, id, OBJPROP_COLOR, (active ? g_theme.bg : g_theme.text_dim));
-    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, (active ? g_theme.red : g_theme.surface_hi));
-    ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.border_hi);
-    ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, id, OBJPROP_STATE, false);
-    ObjectSetInteger(0, id, OBJPROP_BACK, false);
-    ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, id, OBJPROP_ZORDER, 100); // LOT B : click target wins
-    ObjectSetString(0, id, OBJPROP_TOOLTIP,
+    // v1.4.1 R3 : violation toggle = a small sliding PILL (canvas face via PaintFaces)
+    // + a click zone ; DispatchHit routes "viol_m" / "viol_r". Drop the pre-R3 OBJ_BUTTON.
+    const string id  = RC_PREFIX + key + "_viol";
+    ObjectDelete(0, id);
+    const string act = (key == "rule_margin_cum") ? "viol_m" : "viol_r";
+    const int pw = 24; // pill width (room for the knob to slide) ; label_x is shifted to x+30
+    HitAdd(x, y, x + pw, y + h, act, -1, active ? RCF_PILL_ON : RCF_PILL_OFF);
+    // invisible label at the pill carries the hover tooltip (the canvas face has no object)
+    DrawLabel(id + "_tip", x, y + h / 2, " ", g_theme.text_dim, RC_FONT_SIZE - 1);
+    ObjectSetInteger(0, id + "_tip", OBJPROP_ANCHOR, ANCHOR_LEFT);
+    ObjectSetString (0, id + "_tip", OBJPROP_TOOLTIP,
                     (key == "rule_margin_cum")
                         ? "Margin violation suffered -> cumulative cap tightens to InpMarginCapViolated"
                         : "Risk violation suffered -> cumulative cap tightens to InpRiskCapViolated");
@@ -2483,25 +2485,12 @@ int DrawPositionsSection(int x, int y, int w) {
         // V1.27 : the symbol cell is a click-to-switch button (OBJ_BUTTON is the
         // reliable click target in this codebase ; it sits over the _lbl and
         // carries the same text, so clicking it switches the chart symbol).
-        const string rowbtn = RC_PREFIX + "pos_row_" + IntegerToString(i);
-        const color rbg = ((i % 2) == 0 ? g_theme.surface : g_theme.surface_hi);
-        if (ObjectFind(0, rowbtn) < 0) ObjectCreate(0, rowbtn, OBJ_BUTTON, 0, 0, 0);
-        ObjectSetInteger(0, rowbtn, OBJPROP_XDISTANCE, x + 1);
-        ObjectSetInteger(0, rowbtn, OBJPROP_YDISTANCE, cy);
-        ObjectSetInteger(0, rowbtn, OBJPROP_XSIZE, 210);
-        ObjectSetInteger(0, rowbtn, OBJPROP_YSIZE, InpRowHeight);
-        ObjectSetString(0, rowbtn, OBJPROP_TEXT, " ");
-        ObjectSetString(0, rowbtn, OBJPROP_FONT, RC_FONT_UI);
-        ObjectSetInteger(0, rowbtn, OBJPROP_FONTSIZE, RC_FONT_SIZE);
-        ObjectSetInteger(0, rowbtn, OBJPROP_COLOR, g_theme.text);
-        ObjectSetInteger(0, rowbtn, OBJPROP_BGCOLOR, rbg);
-        ObjectSetInteger(0, rowbtn, OBJPROP_BORDER_COLOR, rbg);
-        ObjectSetInteger(0, rowbtn, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-        ObjectSetInteger(0, rowbtn, OBJPROP_STATE, false);
-        ObjectSetInteger(0, rowbtn, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, rowbtn, OBJPROP_HIDDEN, true);
-        ObjectSetInteger(0, rowbtn, OBJPROP_ZORDER, 101);
-        ObjectSetString(0, rowbtn, OBJPROP_TOOLTIP, Tr("pos_click_tip"));
+        // v1.4.1 R3 : the symbol cell is a click-to-switch HIT-ZONE (no face - the row
+        // visual is the rowbg + labels + chip) ; DispatchHit routes "possym" idx. Drop
+        // the pre-R3 OBJ_BUTTON that used to sit over the cell.
+        ObjectDelete(0, RC_PREFIX + "pos_row_" + IntegerToString(i));
+        HitAdd(x + 1, cy, x + 1 + 210, cy + InpRowHeight, "possym", i, RCF_NONE);
+        ObjectSetString(0, id + "_lbl", OBJPROP_TOOLTIP, Tr("pos_click_tip"));
         cy += InpRowHeight;
     }
     return cy;
@@ -5755,54 +5744,40 @@ void DrawRecentSymbolsBar(int x, int y, int w) {
     const int btn_h = InpRowHeight - 6;
     const int x0 = x + 62;
     for (int i = 0; i < RC_MAX_RECENT_SYMS; ++i) {
-        const string id = RC_PREFIX + "recsym_" + IntegerToString(i);
+        const string id  = RC_PREFIX + "recsym_" + IntegerToString(i);
+        const string lid = RC_PREFIX + "recsym_l_" + IntegerToString(i);
         if (i < ArraySize(g_recent_syms)) {
             const int bx = x0 + i * (btn_w + 6);
-            if (ObjectFind(0, id) < 0)
-                ObjectCreate(0, id, OBJ_BUTTON, 0, 0, 0);
-            ObjectSetInteger(0, id, OBJPROP_XDISTANCE, bx);
-            ObjectSetInteger(0, id, OBJPROP_YDISTANCE, y + 3);
-            ObjectSetInteger(0, id, OBJPROP_XSIZE, btn_w);
-            ObjectSetInteger(0, id, OBJPROP_YSIZE, btn_h);
-            ObjectSetString(0, id, OBJPROP_TEXT, g_recent_syms[i]);
-            ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
-            ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 1);
-            ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.text);
-            ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.surface_hi);
-            ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.accent);
-            ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-            ObjectSetInteger(0, id, OBJPROP_STATE, false);
-            ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
-            ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
-            ObjectSetInteger(0, id, OBJPROP_ZORDER, 100); // LOT B
-            ObjectSetString(0, id, OBJPROP_TOOLTIP, "Switch chart to " + g_recent_syms[i]);
+            // v1.4.1 R3 : recent-symbol chips = canvas rounded buttons (faces via
+            // PaintFaces) + click zones + centered labels ; DispatchHit routes "recsym"
+            // idx. Drop the pre-R3 OBJ_BUTTON.
+            ObjectDelete(0, id);
+            HitAdd(bx, y + 3, bx + btn_w, y + 3 + btn_h, "recsym", i, RCF_BTN);
+            DrawLabel(lid, bx + btn_w / 2, y + 3 + btn_h / 2, g_recent_syms[i], g_theme.text, RC_FONT_SIZE - 1, RC_FONT_UI);
+            ObjectSetInteger(0, lid, OBJPROP_ANCHOR, ANCHOR_CENTER);
+            ObjectSetString (0, lid, OBJPROP_TOOLTIP, "Switch chart to " + g_recent_syms[i]);
         } else {
-            ObjectDelete(0, id); // empty slot
+            ObjectDelete(0, id);    // pre-R3 button
+            ObjectDelete(0, lid);   // empty slot label
+            HitRemove("recsym", i); // v1.4.1 R3 : drop the vacated slot's zone -> no ghost face
         }
     }
     // FIX 6 : "Re-center" button (shown only with the comfort scale on) - re-applies
     // the padded CHART_FIXED_MIN/MAX on demand. Sits just left of the Auto-SL button.
-    const string rc_id = RC_PREFIX + "recenter";
+    const string rc_id  = RC_PREFIX + "recenter";
+    const string rc_lid = RC_PREFIX + "recenter_l";
     if (g_eff_comfort) {
-        if (ObjectFind(0, rc_id) < 0) ObjectCreate(0, rc_id, OBJ_BUTTON, 0, 0, 0);
-        ObjectSetInteger(0, rc_id, OBJPROP_XDISTANCE, x + w - 172);
-        ObjectSetInteger(0, rc_id, OBJPROP_YDISTANCE, y + 3);
-        ObjectSetInteger(0, rc_id, OBJPROP_XSIZE, 74);
-        ObjectSetInteger(0, rc_id, OBJPROP_YSIZE, InpRowHeight - 6);
-        ObjectSetString(0, rc_id, OBJPROP_TEXT, Tr("recenter"));
-        ObjectSetString(0, rc_id, OBJPROP_FONT, RC_FONT_UI);
-        ObjectSetInteger(0, rc_id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 2);
-        ObjectSetInteger(0, rc_id, OBJPROP_COLOR, g_theme.text);
-        ObjectSetInteger(0, rc_id, OBJPROP_BGCOLOR, g_theme.surface_hi);
-        ObjectSetInteger(0, rc_id, OBJPROP_BORDER_COLOR, g_theme.accent);
-        ObjectSetInteger(0, rc_id, OBJPROP_STATE, false);
-        ObjectSetInteger(0, rc_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-        ObjectSetInteger(0, rc_id, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, rc_id, OBJPROP_HIDDEN, true);
-        ObjectSetInteger(0, rc_id, OBJPROP_ZORDER, 100); // LOT B
-        ObjectSetString(0, rc_id, OBJPROP_TOOLTIP, "Re-center the chart with comfort padding");
+        // v1.4.1 R3 : Re-center = canvas rounded button + click zone + centered label ;
+        // DispatchHit routes "recenter". Drop the pre-R3 OBJ_BUTTON.
+        ObjectDelete(0, rc_id);
+        const int rcx = x + w - 172, rcw = 74, rch = InpRowHeight - 6;
+        HitAdd(rcx, y + 3, rcx + rcw, y + 3 + rch, "recenter", -1, RCF_BTN);
+        DrawLabel(rc_lid, rcx + rcw / 2, y + 3 + rch / 2, Tr("recenter"), g_theme.text, RC_FONT_SIZE - 2, RC_FONT_UI);
+        ObjectSetInteger(0, rc_lid, OBJPROP_ANCHOR, ANCHOR_CENTER);
+        ObjectSetString (0, rc_lid, OBJPROP_TOOLTIP, "Re-center the chart with comfort padding");
     } else {
         ObjectDelete(0, rc_id);
+        ObjectDelete(0, rc_lid);
     }
 
     // B10 : DISABLED "Auto-SL" toggle. An indicator CANNOT place/modify orders -
@@ -6458,13 +6433,21 @@ void DrawMpButton(const string id, int x, int y, int w, int h, const string text
 void DrawMaxParallelControl(int x, int y) {
     const int btn_w = 20;
     const int btn_h = InpRowHeight - 4;
-
-    DrawMpButton(RC_PREFIX + "mp_minus", x, y, btn_w, btn_h, "-");
+    // v1.4.1 R3 : − / + are canvas rounded buttons (faces via PaintFaces) + click zones
+    // + centered glyph labels ; DispatchHit routes "mp_dn" / "mp_up". Drop pre-R3 OBJ_BUTTONs.
+    ObjectDelete(0, RC_PREFIX + "mp_minus");
+    ObjectDelete(0, RC_PREFIX + "mp_plus");
+    HitAdd(x, y, x + btn_w, y + btn_h, "mp_dn", -1, RCF_BTN);
+    DrawLabel(RC_PREFIX + "mp_dn_l", x + btn_w / 2, y + btn_h / 2, "-", g_theme.text, RC_FONT_SIZE + 1, RC_FONT_UI);
+    ObjectSetInteger(0, RC_PREFIX + "mp_dn_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
 
     DrawLabel(RC_PREFIX + "mp_value", x + btn_w + 8, y + 2,
               IntegerToString(g_max_parallel), g_theme.accent, RC_FONT_SIZE);
 
-    DrawMpButton(RC_PREFIX + "mp_plus", x + btn_w + 30, y, btn_w, btn_h, "+");
+    const int up_x = x + btn_w + 30;
+    HitAdd(up_x, y, up_x + btn_w, y + btn_h, "mp_up", -1, RCF_BTN);
+    DrawLabel(RC_PREFIX + "mp_up_l", up_x + btn_w / 2, y + btn_h / 2, "+", g_theme.text, RC_FONT_SIZE + 1, RC_FONT_UI);
+    ObjectSetInteger(0, RC_PREFIX + "mp_up_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
 }
 
 //+------------------------------------------------------------------+
