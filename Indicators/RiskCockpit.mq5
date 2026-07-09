@@ -658,7 +658,7 @@ int Live_OpenPositionsCount(void);
 void UpdatePeakEquity(void);
 double ComputePositionRiskMoney(const string sym, const int type,
                                 const double price_open, const double sl,
-                                const double vol);
+                                const double vol, const double costs = 0.0); // Phase 3.5 : net-of-costs, direction-aware
 void RefreshSlLines(void);
 void RefreshNewsZones(void);
 string FormatAge(int seconds);
@@ -3439,7 +3439,8 @@ double Live_CumulativeRiskPct(void) {
         const double po = PositionGetDouble(POSITION_PRICE_OPEN);
         const double vol = PositionGetDouble(POSITION_VOLUME);
         const int type = (int)PositionGetInteger(POSITION_TYPE);
-        total_risk_money += ComputePositionRiskMoney(sym, type, po, sl, vol);
+        const double swap = PositionGetDouble(POSITION_SWAP); // Phase 3.5 : net-of-holding-cost boundary
+        total_risk_money += ComputePositionRiskMoney(sym, type, po, sl, vol, swap);
     }
     if (any_missing_sl) {
         // Conservative: if any position is SL-less, the rule treats full
@@ -4032,7 +4033,12 @@ void RefreshSlLinesForChart(const long chart_id) {
 
             const double user_dist = (existing_sl > 0.0 ? MathAbs(entry - existing_sl) : 0.0);
             const bool has_user_sl = (existing_sl > 0.0);
-            const bool user_over_budget = (has_user_sl && user_dist > proposed_dist);
+            // Phase 3.5 : a SL trailed onto the FAVORABLE side (LONG sl>=entry / SHORT
+            // sl<=entry) locks profit -> the position has NO downside risk -> never flag it
+            // "over budget" / SL>REC, and draw no recommendation line for it.
+            const bool sl_locks_profit = has_user_sl &&
+                (type == POSITION_TYPE_BUY ? (existing_sl >= entry) : (existing_sl <= entry));
+            const bool user_over_budget = (has_user_sl && !sl_locks_profit && user_dist > proposed_dist);
             const bool draw_line = (!has_user_sl || user_over_budget);
 
             if (draw_line) {
@@ -4126,16 +4132,21 @@ void RefreshSlLinesForChart(const long chart_id) {
 //+------------------------------------------------------------------+
 double ComputePositionRiskMoney(const string sym, const int type,
                                 const double price_open, const double sl,
-                                const double vol) {
+                                const double vol, const double costs) {
     if (sl <= 0.0 || vol <= 0.0)
         return 0.0;
     const double tick_size = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
     const double tick_value = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
     if (tick_size <= 0.0 || tick_value <= 0.0)
         return 0.0;
-    const double dist = MathAbs(price_open - sl);
-    const double ticks = dist / tick_size;
-    return ticks * tick_value * vol;
+    // Phase 3.5 : direction-aware + net of booked costs. A SL trailed onto the FAVORABLE
+    // side (LONG sl>=entry / SHORT sl<=entry) LOCKS profit -> P&L at SL >= 0 -> the
+    // position carries NO downside risk -> 0. (The old MathAbs distance wrongly counted a
+    // profit-locking SL as risk.) `costs` (swap+commission, usually negative) tightens the
+    // breakeven boundary so it is truly net of holding cost.
+    const double dir = (type == POSITION_TYPE_BUY) ? 1.0 : -1.0;
+    const double pnl_at_sl = dir * (sl - price_open) / tick_size * tick_value * vol + costs;
+    return (pnl_at_sl >= 0.0) ? 0.0 : -pnl_at_sl; // profit-locked -> 0 ; else the net loss
 }
 
 // A1 : UpdateDayStartEquity + g_equity_at_day_start removed (dead code - the
@@ -6529,6 +6540,11 @@ void RefreshPyramidLine(void) {
 
         if (sl <= 0.0) {
             any_missing_sl = true;
+        } else if ((type == POSITION_TYPE_BUY && sl >= entry) ||
+                   (type != POSITION_TYPE_BUY && sl <= entry)) {
+            // Phase 3.5 : this leg's SL locks profit (favorable side) -> zero downside
+            // risk -> ignore it when picking the basket's worst loss-side anchor SL, so
+            // the planner never advises moving a stop that would UNLOCK locked profit.
         } else {
             const double dist = MathAbs(entry - sl);
             if (dist > worst_sl_dist) {
@@ -6552,9 +6568,12 @@ void RefreshPyramidLine(void) {
         return;
     }
     if (any_missing_sl || worst_sl_dist <= 0.0) {
+        // Phase 3.5 : worst_sl_dist==0 with all SLs present = every leg's SL locks profit
+        // (risk-free basket) ; only truly-missing SLs warrant the "place SL" warning.
         ObjectSetString(0, label_id, OBJPROP_TEXT,
-                        "Pyramid : place SL on all positions before planning");
-        ObjectSetInteger(0, label_id, OBJPROP_COLOR, g_theme.warn);
+                        any_missing_sl ? "Pyramid : place SL on all positions before planning"
+                                       : "Pyramid : basket risk-free (SL locks profit)");
+        ObjectSetInteger(0, label_id, OBJPROP_COLOR, any_missing_sl ? g_theme.warn : g_theme.ok);
         return;
     }
     if (sum_vol <= 0.0) {
