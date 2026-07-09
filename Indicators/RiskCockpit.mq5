@@ -781,8 +781,14 @@ void DrawFace(const int lx, const int ly, const int w, const int h, const int st
         case RCF_BTN:      g_kit.Button(lx, ly, w, h, r, g_theme.surface_hi, g_theme.surface, g_theme.border_hi); break;
         case RCF_BTN_ON:   g_kit.Button(lx, ly, w, h, r, g_theme.accent, g_theme.accent, g_theme.accent);         break;
         case RCF_BTN_RED:  g_kit.Button(lx, ly, w, h, r, g_theme.surface_hi, g_theme.surface, g_theme.red);        break;
-        case RCF_PILL_OFF: g_kit.PillToggle(lx, ly, w, h, false, g_theme.surface, g_theme.accent, g_theme.accent, g_theme.label);    break;
-        case RCF_PILL_ON:  g_kit.PillToggle(lx, ly, w, h, true,  g_theme.surface, g_theme.accent, g_theme.accent, C'255,255,255');    break;
+        case RCF_PILL_OFF:
+            g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2, ColorToARGB(g_theme.border_hi)); // Phase 2 : crisp 1px outline
+            g_kit.PillToggle(lx, ly, w, h, false, g_theme.surface, g_theme.accent, g_theme.accent, g_theme.label);
+            break;
+        case RCF_PILL_ON:
+            g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2, ColorToARGB(g_theme.border_hi)); // Phase 2 : crisp 1px outline
+            g_kit.PillToggle(lx, ly, w, h, true,  g_theme.surface, g_theme.accent, g_theme.accent, C'255,255,255');
+            break;
     }
 }
 // Paint every registered face into g_kit (called from RepaintCanvas, in-frame).
@@ -1178,7 +1184,10 @@ void DispatchHit(const string act, const int idx) {
     } else if (act == "kill") {                // X : remove the indicator
         int kwin = ChartWindowFind(); if (kwin < 0) kwin = 0;
         ObjectsDeleteAll(0, RC_PREFIX); ChartIndicatorDelete(0, kwin, "RiskCockpit"); ChartRedraw(0);
-    } else if (act == "be") {                  // BE pill : toggle breakeven lines
+    } else if (act == "be") {                  // BE : toggle breakeven lines
+        // Phase 3 (a) : can't ARM BE with no open positions (nothing to break-even) ;
+        // turning it OFF is always allowed (clears any stale line).
+        if (!g_be_visible && PositionsTotal() == 0) return;
         g_be_visible = !g_be_visible; PersistBE(); DrawBreakevenLines(); ApplySettingsChange();
     } else if (act == "recenter") {            // re-apply comfort scale on all charts
         ApplyComfortScaleAllCharts(); ChartRedraw(0);
@@ -1709,7 +1718,13 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
         SnapshotPositionList();
         UpdateRecentSymbols();                                       // B8 : refresh recent list
         DrawRecentSymbolsBar(g_anchor_x, g_recbar_y, InpPanelWidth); // B8 : redraw quick-switch bar
-        if (g_be_visible) DrawBreakevenLines();                       // LOT 5 : sync BE lines after position change
+        // Phase 3 (b) : all positions closed -> auto-disarm BE (clear flag + lines +
+        // reflect OFF on the face) so it never lingers "on" with nothing to break-even.
+        if (g_be_visible && PositionsTotal() == 0) {
+            g_be_visible = false; PersistBE(); ClearBreakevenLines(); SetBeFaceOff();
+        } else if (g_be_visible) {
+            DrawBreakevenLines();                                     // LOT 5 : sync BE lines after position change
+        }
         ChartRedraw(0);
     }
 }
@@ -5675,6 +5690,16 @@ int CountPositionSymbols(void) {
         if (!dup) { ArrayResize(seen, n + 1); seen[n] = s; n++; }
     }
     return n;
+}
+
+// Phase 3 (b) : reflect BE = OFF on its canvas face + label WITHOUT a full rebuild
+// (the auto-disarm path fires from OnTradeTransaction, which must stay cheap). Flips the
+// registry face style so the next PaintFaces shows it off, recolours the label, repaints.
+void SetBeFaceOff(void) {
+    for (int i = 0; i < g_nhits; ++i)
+        if (g_hits[i].act == "be") { g_hits[i].style = RCF_BTN; break; }
+    ObjectSetInteger(0, RC_PREFIX + "be_l", OBJPROP_COLOR, g_theme.text);
+    RepaintCanvas(g_anchor_x, g_anchor_y, InpPanelWidth);
 }
 
 void DrawBreakevenLines(void) {
