@@ -1379,7 +1379,12 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
             else if (sparam == RC_PREFIX + "set_tab_disp")  g_settings_tab = 2;
             else if (sparam == RC_PREFIX + "set_tab_alert") g_settings_tab = 3;
             else                                            g_settings_tab = 4;
-            ApplySettingsChange();
+            // Phase 4 (B) : re-render ONLY the modal on the new tab - NOT a full rebuild.
+            // ApplySettingsChange = DestroyAllObjects + BuildPanel = whole-indicator flicker.
+            // The body + g_kit canvas underneath the modal are left untouched -> zero flicker.
+            DestroySettingsOverlay();
+            DrawSettingsOverlay(g_anchor_x, g_anchor_y, InpPanelWidth);
+            ChartRedraw(0);
         } else if (sparam == RC_PREFIX + "set_phase_prev" || sparam == RC_PREFIX + "set_phase_next") {
             ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
             const int d = (sparam == RC_PREFIX + "set_phase_next" ? 1 : -1);
@@ -2034,9 +2039,9 @@ void DrawTitleBar(int x, int y, int w) {
     const int gear_x = kill_x - gap - bw;     // gear left of the X
     // v1.4.1 R3 : gear = canvas rounded button (face via PaintFaces) + click zone + glyph label on top.
     HitAdd(gear_x, y + 5, gear_x + 22, y + 25, "set", -1, RCF_BTN);
-    DrawLabel(RC_PREFIX + "set_g", gear_x + 11, y + 15, ShortToString((ushort)0x2699), g_theme.label, RC_FONT_SIZE + 2, "Segoe UI Symbol");
-    ObjectSetInteger(0, RC_PREFIX + "set_g", OBJPROP_ANCHOR, ANCHOR_CENTER);
-    ObjectSetString (0, RC_PREFIX + "set_g", OBJPROP_TOOLTIP, "Settings : account / risk / display / alerts");
+    DrawLabel(RC_PREFIX + "gearlbl", gear_x + 11, y + 15, ShortToString((ushort)0x2699), g_theme.label, RC_FONT_SIZE + 2, "Segoe UI Symbol");
+    ObjectSetInteger(0, RC_PREFIX + "gearlbl", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    ObjectSetString (0, RC_PREFIX + "gearlbl", OBJPROP_TOOLTIP, "Settings : account / risk / display / alerts");
     // V1.28 : title-bar X button -> removes THIS indicator from the chart
     // (ChartIndicatorDelete), so no trip to the Indicators List is needed.
     // (kill_x computed above = top-right corner.)
@@ -6138,6 +6143,13 @@ void SetTip3(const string id_base, const string tipkey) {
     ObjectSetString(0, RC_PREFIX + id_base + "_up",  OBJPROP_TOOLTIP, t);
 }
 
+// Phase 4 (B) : remove every settings-modal object (all "RC_set_*") WITHOUT touching the
+// base panel or its canvas. The title-bar gear glyph is "RC_gearlbl" (renamed off the
+// "set_" prefix), so it is never caught here. Used by the light tab-switch re-render.
+void DestroySettingsOverlay(void) {
+    ObjectsDeleteAll(0, RC_PREFIX + "set_");
+}
+
 void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     const int ox = panel_x;
     const int oy = panel_y;
@@ -6147,13 +6159,15 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     // Modal cover : opaque, full panel, ZORDER 240 -> masks every panel object
     // (rows are <= 100) AND swallows stray clicks meant for the panel behind.
     const string modal_id = RC_PREFIX + "set_modal";
-    DrawRect(modal_id, ox, oy, ow, oh, g_theme.bg, g_theme.border, 2);
+    DrawRect(modal_id, ox, oy, ow, oh, g_theme.bg_lift, g_theme.border_hi, 2); // Phase 4 : raised-card modal, crisp edge
     ObjectSetInteger(0, modal_id, OBJPROP_ZORDER, 240);
 
     // Title + close.
     SetLbl(RC_PREFIX + "set_title", ox + 16, oy + 9, Tr("settings"), g_theme.accent);
     ObjectSetInteger(0, RC_PREFIX + "set_title", OBJPROP_FONTSIZE, RC_FONT_SIZE_TITLE);
     DrawSetButton(RC_PREFIX + "set_close", ox + ow - 32, oy + 6, 24, 20, "X");
+    ObjectSetInteger(0, RC_PREFIX + "set_close", OBJPROP_COLOR, g_theme.red);        // Phase 4 : danger-tinted close, like the panel X
+    ObjectSetInteger(0, RC_PREFIX + "set_close", OBJPROP_BORDER_COLOR, g_theme.red);
 
     // Tab bar.
     const int ty = oy + 32;
@@ -6168,6 +6182,9 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     HighlightSetButton(RC_PREFIX + "set_tab_disp",  g_settings_tab == 2);
     HighlightSetButton(RC_PREFIX + "set_tab_alert", g_settings_tab == 3);
     HighlightSetButton(RC_PREFIX + "set_tab_adv",   g_settings_tab == 4);
+    // Phase 4 : hairline under the tab bar, separating the tabs from the content (modern feel).
+    DrawRect(RC_PREFIX + "set_divider", ox + 12, ty + 26, ow - 24, 1, g_theme.border_hi, g_theme.border_hi, 0);
+    ObjectSetInteger(0, RC_PREFIX + "set_divider", OBJPROP_ZORDER, 250);
 
     const int lx = ox + 16;   // label column
     const int cx = ox + 150;  // control column
