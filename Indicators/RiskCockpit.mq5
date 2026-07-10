@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "1.41"
+#property version "1.50"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -271,7 +271,7 @@ void InitTheme(void) {
         g_theme.text       = C'232,238,247'; // near-white
         g_theme.label      = C'159,176,200'; // muted label
         g_theme.text_dim   = C'100,116,139'; // dim
-        g_theme.ok         = C'52,211,153';  // green  (safe)
+        g_theme.ok         = C'74,222,128';  // green (safe) - FINESSE 3a : #4ADE80 = end of the SAFE canvas ramp (token==ramp-end convention, was off-ramp emerald)
         g_theme.warn       = C'251,191,36';  // amber  (warn)
         g_theme.red        = C'248,113,113'; // red    (breach)
         g_theme.bar_bg     = C'22,32,56';    // meter track
@@ -327,6 +327,7 @@ color FilmOver(const color base, const double t) {
 #define RC_PAD 10
 #define RC_TITLE_HEIGHT 30
 #define RC_TITLE_CLOCK_W 120 // FIX 7 : reserved right zone for the clock (news/weekend/LIVE) so it never overlaps the balance
+#define RC_HEADER_GAP    14  // FINESSE 1 : air between the gear cluster and the right-anchored status/clock (was a magic 8, too tight)
 #define RC_LOGO_FILE "RiskCockpit_logo.bmp" // fixed header logo asset under MQL5\Images\ (not a user input)
 #define RC_SECTION_HEIGHT 22
 #define RC_FONT "Consolas"                  // numeric / tabular data (right-aligned)
@@ -1910,6 +1911,18 @@ void CreateFxCanvas(int x, int y, int w, int h) {
 //| v1.4 MODERN : per-status meter fill (2-stop gradient, safe->red). |
 //+------------------------------------------------------------------+
 void RiskFillColors(const ENUM_RC_STATUS s, color &a, color &b) {
+    // FINESSE 3b : theme-aware ADDITIVELY - the LIGHT branch uses the -600 tones so
+    // fills/rings match the darker light-theme text tokens ; the DARK path below is
+    // byte-identical (frozen look).
+    if (EffectiveTheme() != RC_THEME_GLASS_DARK) {
+        switch (s) {
+            case RC_STATUS_RED:  a = C'220,38,38';  b = C'239,68,68';  break;
+            case RC_STATUS_WARN: a = C'202,138,4';  b = C'245,158,11'; break;
+            case RC_STATUS_OK:   a = C'22,163,74';  b = C'34,197,94';  break;
+            default:             a = g_theme.text_dim; b = g_theme.text_dim; break;
+        }
+        return;
+    }
     switch (s) {
         case RC_STATUS_RED:  a = C'239,68,68';  b = C'248,113,113'; break;
         case RC_STATUS_WARN: a = C'245,158,11'; b = C'251,191,36';  break;
@@ -2021,8 +2034,8 @@ void RepaintCanvas(const int x, const int y, const int w) {
             }
         }
         cy += rules_h;
-        // LOT A : divider between RULES and OPEN POSITIONS (mockup .divider, inset 14px)
-        g_kit.Hairline(px + 14, cy, px + w - 14, hl);
+        // LOT A : divider between RULES and OPEN POSITIONS (mockup .divider, inset 14/14)
+        g_kit.Hairline(px + 14, cy, px + w - 15, hl); // FINESSE 5b : symmetric inset (right end is exclusive)
     }
     // positions header tick (LOT A : cyan like every mockup tick, was indigo) + section
     g_kit.RoundFill(px + 6, cy + 5, 3, RC_SECTION_HEIGHT - 10, 1, ColorToARGB(g_theme.accent, 255));
@@ -2060,7 +2073,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
                                          PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
         const ENUM_TIMEFRAMES curp = (ENUM_TIMEFRAMES)ChartPeriod(0);
         for (int s = 0; s < 9; ++s) {
-            const int sx = px + 30 + s * 35;
+            const int sx = px + 32 + s * 35; // FINESSE 5a : +2px, strip centred in its track (LOCKSTEP with DrawTimeframeBar x0)
             if (tfv2[s] != curp) continue; // idle = transparent (label only)
             g_kit.Segment(sx, cy + 3, 33, InpRowHeight - 6, 7, true,
                           g_theme.accent, g_theme.accent_deep, g_theme.surface);
@@ -2173,18 +2186,18 @@ void DrawTitleBar(int x, int y, int w) {
     //  leftward from x+w-RC_PAD-RC_TITLE_CLOCK_W. Bare title ends well before gear_x.)
     // LOT B (mockup .brand) : two-tone wordmark - "RISK" in near-white, "COCKPIT" in
     // cyan. Two labels ; the +36px offset fits "RISK" at the semibold title size.
-    DrawLabel(RC_PREFIX + "title_text", title_x, y + 8, "RISK", g_theme.text, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);
-    DrawLabel(RC_PREFIX + "title_text2", title_x + 36, y + 8, "COCKPIT", g_theme.accent, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);
+    DrawLabel(RC_PREFIX + "title_text", title_x, y + 6, "RISK", g_theme.text, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);       // FINESSE 2a : 11pt cell recentred (was the 9pt clock offset)
+    DrawLabel(RC_PREFIX + "title_text2", title_x + 36, y + 6, "COCKPIT", g_theme.accent, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);
     // v1.4 : discreet dev build tag just right of the brand (empty in release).
     if (StringLen(RC_BUILD_TAG) > 0)
-        DrawLabel(RC_PREFIX + "build", title_x + 104, y + 12, RC_BUILD_TAG, g_theme.text_dim, RC_FONT_SIZE_LABEL, RC_FONT_UI);
+        DrawLabel(RC_PREFIX + "build", title_x + 104, y + 10, RC_BUILD_TAG, g_theme.text_dim, RC_FONT_SIZE_LABEL, RC_FONT_UI); // FINESSE 2d : follows the recentred wordmark (no-op in release, tag empty)
 
     // R2 : settings GEAR button (U+2699) just right of the title. "Segoe UI
     // Symbol" renders the gear reliably on Windows ; the rest of the panel keeps
     // RC_FONT. Click toggles the in-panel SETTINGS modal.
     // V1.29 K : X in the TOP-RIGHT corner, gear just left of it (were left-anchored
     // to the title and overrun by the right-anchored model label).
-    const int bw = 22, gap = 4;
+    const int bw = 22, gap = 6; // FINESSE 1d : gear<->X air 4 -> 6px
     const int kill_x = x + w - RC_PAD - bw;   // X = rightmost
     const int gear_x = kill_x - gap - bw;     // gear left of the X
     // v1.4.1 R3 : gear = canvas rounded button (face via PaintFaces) + click zone + glyph label on top.
@@ -2215,13 +2228,13 @@ void DrawTitleBar(int x, int y, int w) {
     }
     StringReplace(right, " (no prop rules)", ""); // V1.29 K : shorten the Personal label so it clears the gear/X cluster
     // V1.29 K : model sits LEFT of the (left-shifted) clock zone, which sits left of the gear.
-    DrawLabel(RC_PREFIX + "title_model", (gear_x - 8) - RC_TITLE_CLOCK_W, y + 8, right, g_theme.label, RC_FONT_SIZE); // E4 : dim (mockup .clock) so the green LIVE pops
+    DrawLabel(RC_PREFIX + "title_model", (gear_x - RC_HEADER_GAP) - RC_TITLE_CLOCK_W, y + 8, right, g_theme.label, RC_FONT_SIZE); // E4 : dim (mockup .clock) so the green LIVE pops ; FINESSE 1 : lockstep gap
     ObjectSetInteger(0, RC_PREFIX + "title_model", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
 
     // FINAL (mockup .live) : "● LIVE" in green - the dot is PART OF THE LABEL TEXT
     // (U+25CF), so it rides this right-anchored dynamic multi-state zone (news countdown /
     // weekend hold / degraded verdict via UpdateClockBlinker) with zero collision.
-    DrawLabel(RC_PREFIX + "title_clock", gear_x - 8, y + 8,
+    DrawLabel(RC_PREFIX + "title_clock", gear_x - RC_HEADER_GAP, y + 8,
               ShortToString((ushort)0x25CF) + " " + Tr("live"), g_theme.ok, RC_FONT_SIZE);
     ObjectSetInteger(0, RC_PREFIX + "title_clock", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
 }
@@ -2251,7 +2264,7 @@ void DrawAccountStrip(int x, int y, int w) {
     DrawLabel(RC_PREFIX + "strip_left", x + RC_PAD, y + 4, left, g_theme.text, RC_FONT_SIZE);
     const int chip_h = 16;
     const int chip_y = y + (InpRowHeight - chip_h) / 2;
-    int cdx = RC_PAD + 150; // chip column, right of the account id (fits "Acc #12345678  DEMO")
+    int cdx = RC_PAD + 164; // FINESSE 6a : +14px cushion for long Personal logins (chips slide together, strip_right is right-anchored)
     g_chip_swap_dx = cdx;
     g_chip_swap_w  = (StringLen(acc_type_str) > 4 ? 78 : 50); // "SWAP-FREE" vs "SWAP"
     DrawLabel(RC_PREFIX + "strip_chip1", x + cdx + g_chip_swap_w / 2, chip_y + chip_h / 2,
@@ -2292,7 +2305,7 @@ void DrawSectionHeader(const string id, int x, int y, int w, const string title,
     // canvas (RepaintCanvas). Drop any stale rects from a previous build in place.
     ObjectDelete(0, RC_PREFIX + id + "_bg");
     ObjectDelete(0, RC_PREFIX + id + "_tick");
-    DrawLabel(RC_PREFIX + id + "_txt", x + RC_PAD, y + 4, title, accent, RC_FONT_SIZE_TITLE - 1, RC_FONT_UI_SB);
+    DrawLabel(RC_PREFIX + id + "_txt", x + RC_PAD, y + 3, title, accent, RC_FONT_SIZE_TITLE - 1, RC_FONT_UI_SB); // FINESSE 2b : centred on the accent tick (cy+11)
 }
 
 //+------------------------------------------------------------------+
@@ -5137,7 +5150,7 @@ void DrawCopyFields(void) {
     const int x = g_anchor_x, w = InpPanelWidth;
     const int y = g_tfbar_y;
     const int h = InpRowHeight - 6;
-    const int bw = 60; // box width (wide enough for big lot numbers)
+    const int bw = 54; // FINESSE 6b : still fits 6-7 lot digits ; frees ~7px air before the BE pill caption
     // V1.29 F : visible caption (Sug / Max) before each box + localized tooltips
     // (the two boxes used to be indistinguishable - only an EN-hardcoded tooltip).
     // Reads "Sug [0.50]  Max [1.20]  BE". Leftmost caption (x+w-242 = x+378 @620)
@@ -5755,7 +5768,7 @@ void DrawTimeframeBar(int x, int y, int w) {
     tfvals[5]=PERIOD_H4; tfvals[6]=PERIOD_D1; tfvals[7]=PERIOD_W1;  tfvals[8]=PERIOD_MN1;
     const int btn_w = 33; // P3 : compact so 9 timeframes fit
     const int btn_h = InpRowHeight - 6;
-    const int x0    = x + 30;
+    const int x0    = x + 32; // FINESSE 5a : LOCKSTEP with the canvas segment origin (px+32)
     const ENUM_TIMEFRAMES cur = (ENUM_TIMEFRAMES)ChartPeriod(0);
     for (int i = 0; i < 9; ++i) {
         const int bx = x0 + i * (btn_w + 2);
@@ -6097,7 +6110,7 @@ void DrawSetButton(const string id, int x, int y, int w, int h, const string tex
     ObjectDelete(0, id); // drop the stale native OBJ_BUTTON from any previous build
     if (g_modal_kit.Ready()) {
         const int SM = RC_KIT_MARGIN;
-        g_modal_kit.Card((x - g_anchor_x) + SM, (y - g_anchor_y) + SM, w, h, 8,
+        g_modal_kit.Card((x - g_anchor_x) + SM, (y - g_anchor_y) + SM, w, h, MathMin(RC_R_CARD, h / 2), // FINESSE 4a : capsule like the panel (DrawFace)
                          g_theme.raise, g_theme.surface,
                          TintOver(g_theme.bg, C'148,163,184', 0.25));
     }
@@ -6117,7 +6130,8 @@ void HighlightSetButton(const string id, bool active) {
             if (g_modal_kit.Ready()) {
                 const int SM = RC_KIT_MARGIN;
                 g_modal_kit.Card(g_hits[i].x1 + SM, g_hits[i].y1 + SM,
-                                 g_hits[i].x2 - g_hits[i].x1, g_hits[i].y2 - g_hits[i].y1, 8,
+                                 g_hits[i].x2 - g_hits[i].x1, g_hits[i].y2 - g_hits[i].y1,
+                                 MathMin(RC_R_CARD, (g_hits[i].y2 - g_hits[i].y1) / 2), // FINESSE 4a : capsule (real hit height)
                                  g_theme.accent, g_theme.accent_deep, g_theme.accent);
             }
             ObjectSetInteger(0, id + "_l", OBJPROP_COLOR, g_theme.bg);
@@ -6446,13 +6460,13 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
                              TintOver(g_theme.bg, g_theme.surface, 0.20), mline);
             // step 1 : segmented TAB control (mockup .seg) - light track + soft ring ;
             // idle tabs are transparent (labels only), ACTIVE tab = cyan gradient segment
-            g_modal_kit.RoundFill(SM + 10, SM + 30, ow - 20, 26, 10, ColorToARGB(mline, 255));
-            g_modal_kit.RoundFill(SM + 11, SM + 31, ow - 22, 24, 9,
+            g_modal_kit.RoundFill(SM + 10, SM + 30, ow - 20, 26, 13, ColorToARGB(mline, 255)); // FINESSE 4b : capsule track (like TF / SetSeg2)
+            g_modal_kit.RoundFill(SM + 11, SM + 31, ow - 22, 24, 12,
                                   ColorToARGB(FilmOver(g_theme.bg, 0.05), 255));
             g_modal_kit.Segment(SM + 12 + tw * g_settings_tab, SM + 32, tw - 4, 22, 7, true,
                                 g_theme.accent, g_theme.accent_deep, g_theme.surface);
             // step 1 : X-close face = red-edged rounded button (same language as the panel X)
-            g_modal_kit.Card((cxx - ox) + SM, SM + 6, 24, 20, 8, g_theme.raise, g_theme.surface, g_theme.red);
+            g_modal_kit.Card((cxx - ox) + SM, SM + 6, 24, 20, MathMin(RC_R_CARD, 20 / 2), g_theme.raise, g_theme.surface, g_theme.red); // FINESSE 4a : capsule == panel X
             // D-FULL step 2 : NO Commit here - the canvas stays OPEN so the body's
             // DrawSetButton / SetToggleBtn / SetStepper calls paint their faces into
             // it ; the single Commit lives at the END of DrawSettingsOverlay.
@@ -6472,7 +6486,7 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     // Title + close (centered label + zone on the SAME rect as the face).
     SetLbl(RC_PREFIX + "set_title", ox + 16, oy + 9, Tr("settings"), g_theme.accent);
     ObjectSetInteger(0, RC_PREFIX + "set_title", OBJPROP_FONTSIZE, RC_FONT_SIZE_TITLE);
-    SetLbl(RC_PREFIX + "set_close_l", cxx + 12, oy + 16, "X", g_theme.red);
+    SetLbl(RC_PREFIX + "set_close_l", cxx + 12, oy + 16, "X", g_theme.label); // FINESSE 3c : discreet close, consistent with the grey header X
     ObjectSetInteger(0, RC_PREFIX + "set_close_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
     HitAdd(cxx, oy + 6, cxx + 24, oy + 26, "set_close", -1, RCF_NONE);
 
