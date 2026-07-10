@@ -204,8 +204,10 @@ struct ThemeColors {
     color border;     // card + outer border
     color border_hi;  // brighter border (hover / focus)
     // --- accents & text ---
-    color accent;     // primary accent (cyan)
-    color accent2;    // secondary accent (indigo)
+    color accent;      // primary accent (cyan)
+    color accent_deep; // deep end of the accent (LOT C : ON-state gradients, mockup --cyan-deep)
+    color accent2;     // secondary accent (indigo)
+    color raise;       // raised control top (LOT C : mockup --raise button gradient)
     color text;       // main text
     color label;      // muted label text (between text and text_dim)
     color text_dim;   // dimmest text
@@ -235,8 +237,13 @@ int     g_fx_h  = 0;
 // soft gradient, drop shadow, hairline dividers, rounded-end meters + pills).
 // It sits UNDER the text (OBJ_LABEL) and controls, and under g_fx (the glow).
 CCanvasKit g_kit;
+// LOT D STEP 0 : the settings modal gets its OWN canvas shell (rounded card + shadow +
+// glow) painted BEHIND its native controls. A bitmap-label always renders above the
+// legacy set_modal rect and below OBJ_BUTTONs -> the rounded look ships with ZERO
+// change to click routing (g_swallow_click / g_settings_open untouched).
+CCanvasKit g_modal_kit;
 #define RC_KIT_MARGIN 16   // shadow / rounding room around the panel
-#define RC_R_PANEL    13   // panel corner radius
+#define RC_R_PANEL    15   // panel corner radius (LOT B : mockup .rc radius 15)
 #define RC_R_CARD     10   // inner card corner radius
 // v1.4 dev : optional BUILD tag in the title bar (per modern phase during dev :
 // "R1", "R2"...). EMPTY = clean release (no tag drawn). NOT the Market version.
@@ -256,8 +263,10 @@ void InitTheme(void) {
         g_theme.surface_hi = C'34,46,69';    // raised / hover
         g_theme.border     = C'51,65,85';    // border
         g_theme.border_hi  = C'61,79,110';   // border hover
-        g_theme.accent     = C'56,189,248';  // cyan
-        g_theme.accent2    = C'129,140,248'; // indigo
+        g_theme.accent      = C'56,189,248'; // cyan
+        g_theme.accent_deep = C'14,116,144'; // cyan deep end (mockup --cyan-deep #0e7490)
+        g_theme.accent2     = C'129,140,248';// indigo
+        g_theme.raise       = C'34,48,78';   // raised control top (mockup --raise #22304e)
         g_theme.text       = C'232,238,247'; // near-white
         g_theme.label      = C'159,176,200'; // muted label
         g_theme.text_dim   = C'100,116,139'; // dim
@@ -275,8 +284,10 @@ void InitTheme(void) {
         g_theme.surface_hi = C'241,245,249';
         g_theme.border     = C'203,213,225';
         g_theme.border_hi  = C'148,163,184';
-        g_theme.accent     = C'2,132,199';   // cyan-700 (readable on light)
-        g_theme.accent2    = C'79,70,229';   // indigo-600
+        g_theme.accent      = C'2,132,199';  // cyan-700 (readable on light)
+        g_theme.accent_deep = C'2,109,133';  // cyan deep end (light variant)
+        g_theme.accent2     = C'79,70,229';  // indigo-600
+        g_theme.raise       = C'226,232,240';// raised control top (light variant)
         g_theme.text       = C'15,23,42';
         g_theme.label      = C'71,85,105';
         g_theme.text_dim   = C'100,116,139';
@@ -285,6 +296,18 @@ void InitTheme(void) {
         g_theme.red        = C'220,38,38';   // red-600
         g_theme.bar_bg     = C'226,232,240';
     }
+}
+
+// LOT A/B/C : pre-blend `tint` over `base` at strength t (0..1) and return an OPAQUE
+// color. CCanvas draws OVERWRITE pixels (no compositing between draws), so a low-alpha
+// fill over the opaque card would show the CHART through - the mockup's rgba() tints
+// must therefore be baked against the panel tone and drawn at alpha 255. (Real alpha
+// stays valid ONLY in the margin band outside the card : shadow + edge glow.)
+color TintOver(const color base, const color tint, const double t) {
+    const int r = (int)MathRound((base & 0xFF)         * (1.0 - t) + (tint & 0xFF)         * t);
+    const int g = (int)MathRound(((base >> 8) & 0xFF)  * (1.0 - t) + ((tint >> 8) & 0xFF)  * t);
+    const int b = (int)MathRound(((base >> 16) & 0xFF) * (1.0 - t) + ((tint >> 16) & 0xFF) * t);
+    return (color)((b << 16) | (g << 8) | r);
 }
 
 //+------------------------------------------------------------------+
@@ -712,6 +735,10 @@ int g_max_parallel = 5; // runtime-mutable; init from InpMaxParallelPositions
 #define RC_MAX_RECENT_SYMS 4
 string g_recent_syms[];   // up to 4 symbols, most-recent first
 string g_pos_sym[RC_MAX_POSITIONS]; // V1.27 : per-row symbol so a position row is click-to-switch
+// LOT A : per-row LIVE status mirror. RefreshPositionsList (and the SL>REC override in
+// RefreshSlLinesForChart) write it ; RepaintCanvas reads it to tint the row's status
+// pill on the canvas. OnTimer order (RefreshPanel THEN RepaintCanvas) keeps it fresh.
+ENUM_RC_STATUS g_pos_status[RC_MAX_POSITIONS];
 int    g_recbar_y = 0;    // y-coordinate of the bar (set in BuildPanel)
 int    g_tfbar_y  = 0;    // P4 : y of the TF/control bar (copy-lot fields live here)
 int    g_footer_y = 0;    // P1 : y of the footer block (coloured info segments)
@@ -780,17 +807,23 @@ bool HitTest(const int mx, const int my, string &act, int &idx) {
 // Paint one control face at LOCAL canvas coords (relative rect + RC_KIT_MARGIN).
 void DrawFace(const int lx, const int ly, const int w, const int h, const int style) {
     const int r = MathMin(RC_R_CARD, h / 2);
+    // LOT C : mockup fidelity - buttons = raise->surface vertical gradient + FAINT border
+    // (.bt) ; ON states = accent->accent_deep gradient (.bt.primary / .sw.on / .seg .act) ;
+    // pill OFF track = faint light film (.sw white-9%) with a soft outline. All tints are
+    // PRE-BLENDED via TintOver (CCanvas overwrite semantics - see TintOver).
+    const color pill_off  = TintOver(g_theme.bg, C'255,255,255', 0.09); // .sw track
+    const color soft_line = TintOver(g_theme.bg, C'148,163,184', 0.25); // pill outline
     switch (style) {
-        case RCF_BTN:      g_kit.Button(lx, ly, w, h, r, g_theme.surface_hi, g_theme.surface, g_theme.border_hi); break;
-        case RCF_BTN_ON:   g_kit.Button(lx, ly, w, h, r, g_theme.accent, g_theme.accent, g_theme.accent);         break;
-        case RCF_BTN_RED:  g_kit.Button(lx, ly, w, h, r, g_theme.surface_hi, g_theme.surface, g_theme.red);        break;
+        case RCF_BTN:      g_kit.Button(lx, ly, w, h, r, g_theme.raise, g_theme.surface, g_theme.border);          break;
+        case RCF_BTN_ON:   g_kit.Button(lx, ly, w, h, r, g_theme.accent, g_theme.accent_deep, g_theme.accent);     break;
+        case RCF_BTN_RED:  g_kit.Button(lx, ly, w, h, r, g_theme.raise, g_theme.surface, g_theme.red);             break;
         case RCF_PILL_OFF:
-            g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2, ColorToARGB(g_theme.border_hi)); // Phase 2 : crisp 1px outline
-            g_kit.PillToggle(lx, ly, w, h, false, g_theme.surface, g_theme.accent, g_theme.accent, g_theme.label);
+            g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2, ColorToARGB(soft_line)); // soft 1px outline
+            g_kit.PillToggle(lx, ly, w, h, false, pill_off, g_theme.accent_deep, g_theme.accent, C'203,213,225');
             break;
         case RCF_PILL_ON:
-            g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2, ColorToARGB(g_theme.border_hi)); // Phase 2 : crisp 1px outline
-            g_kit.PillToggle(lx, ly, w, h, true,  g_theme.surface, g_theme.accent, g_theme.accent, C'255,255,255');
+            g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2, ColorToARGB(soft_line)); // soft 1px outline
+            g_kit.PillToggle(lx, ly, w, h, true,  pill_off, g_theme.accent_deep, g_theme.accent, C'255,255,255');
             break;
     }
 }
@@ -1086,6 +1119,7 @@ void OnDeinit(const int reason) {
     EventKillTimer();
     if (g_fx_on) { g_fx.Destroy(); g_fx_on = false; } // v1.4 : free the FX bitmap resource
     g_kit.Destroy();                                   // v1.4 : free the modern body canvas
+    g_modal_kit.Destroy();                             // LOT D STEP 0 : free the modal shell canvas
     // FIX 6 : restore native auto-scale on removal, but only if the comfort scale we
     // applied is still the active one (don't clobber the user's manual zoom).
     if (g_eff_comfort && g_cs_max > g_cs_min) {
@@ -1866,29 +1900,37 @@ void RepaintCanvas(const int x, const int y, const int w) {
 
     g_kit.Begin();
     const int px = M, py = M;                     // panel top-left inside the bitmap
+    // LOT A/B : shared pre-blended tones (see TintOver - CCanvas overwrites pixels, so
+    // the mockup's rgba() tints are baked against the panel tone, drawn at alpha 255).
+    const color hl = TintOver(g_theme.bg, C'148,163,184', 0.14); // --line rgba(148,163,184,.14)
     g_kit.SoftShadow(px, py, w, total_h, RC_R_PANEL, g_theme.bg_deep, 9, 95);
-    g_kit.Card(px, py, w, total_h, RC_R_PANEL, g_theme.bg_lift, g_theme.bg, g_theme.border_hi);
+    // LOT B : idle CYAN edge glow (mockup .rc::after) - in the margin band, over the
+    // chart, so real alpha is correct here ; the red breach glow (g_fx) overlays it.
+    g_kit.EdgeGlow(px, py, w, total_h, RC_R_PANEL, g_theme.accent, 6, 46);
+    // LOT B : near-invisible light border (mockup white-5%) - the visible edge is the glow.
+    g_kit.Card(px, py, w, total_h, RC_R_PANEL, g_theme.bg_lift, g_theme.bg,
+               TintOver(g_theme.bg_lift, C'255,255,255', 0.08));
 
     int cy = py;
-    // title band + divider under it
-    g_kit.RoundFill(px + 1, py + 1, w - 2, RC_TITLE_HEIGHT - 1, RC_R_PANEL - 1,
-                    ColorToARGB(g_theme.surface_hi, 235));
+    // LOT B : title band = vertical gradient (mockup .title raise.85 -> card-a.70)
+    g_kit.GradientVFill(px + 1, py + 1, w - 2, RC_TITLE_HEIGHT - 1, RC_R_PANEL - 1,
+                        ColorToARGB(TintOver(g_theme.bg_lift, g_theme.raise, 0.85), 255),
+                        ColorToARGB(TintOver(g_theme.bg_lift, g_theme.surface, 0.70), 255));
     cy += RC_TITLE_HEIGHT;
-    g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
-    // BATCH 2 : account-strip band on the canvas (replaces the legacy strip_bg rect)
-    g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0, ColorToARGB(g_theme.surface, 255));
+    g_kit.Hairline(px + 1, cy, px + w - 2, hl);
+    // LOT B : account strip = barely-there light film (mockup .strip white-1.2%),
+    // NOT an opaque slab - the panel gradient reads through.
+    g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0,
+                    ColorToARGB(TintOver(g_theme.bg_lift, C'255,255,255', 0.02), 255));
     cy += InpRowHeight;                            // account strip
-    g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+    g_kit.Hairline(px + 1, cy, px + w - 2, hl);
 
     if (g_eff_risktools) {
         g_kit.RoundFill(px + 6, cy + 5, 3, RC_SECTION_HEIGHT - 10, 1, ColorToARGB(g_theme.accent, 255));
         cy += RC_SECTION_HEIGHT;
         for (int i = 0; i < RC_RULE_COUNT; ++i) {
             const int ry = cy + i * InpRowHeight;
-            // BATCH 2 : rule-row band on the canvas (replaces the legacy {rule}_rowbg rect) ;
-            // drawn for EVERY row (incl. the text-only ones below) before the meter on top.
-            g_kit.RoundFill(px + 1, ry, w - 2, InpRowHeight, 0,
-                            ColorToARGB((i % 2 == 0 ? g_theme.surface : g_theme.surface_hi), 255));
+            // LOT A : NO zebra band (mockup rows are transparent over the panel gradient).
             const string k = g_rows[i].key;
             if (k == "rule_margin_pt" || k == "rule_newsstats") continue; // text-only rows
             const int bx = px + 360;
@@ -1899,52 +1941,70 @@ void RepaintCanvas(const int x, const int y, const int w) {
                 const double ratio = (g_rows[i].max_pct > 0.0 ? g_rows[i].value_pct / g_rows[i].max_pct : 0.0);
                 color fa, fb; RiskFillColors(g_rows[i].status, fa, fb);
                 g_kit.Meter(bx, by, bw, bh, ratio, g_theme.bar_bg, fa, fb);
+                // LOT A : status pill = LOW-ALPHA tint (mockup .p-ok/.p-warn/.p-red ~15%),
+                // pre-blended ; the chip label carries the semantic colour on top.
                 g_kit.RoundFill(px + w - 70, ry + 3, 60, InpRowHeight - 6, (InpRowHeight - 6) / 2,
-                                ColorToARGB(StatusColor(g_rows[i].status), 255)); // status pill bg
+                                ColorToARGB(TintOver(g_theme.bg, StatusColor(g_rows[i].status), 0.15), 255));
             } else {
                 g_kit.Meter(bx, by, bw, bh, 0.0, g_theme.bar_bg, g_theme.text_dim, g_theme.text_dim);
+                g_kit.RoundFill(px + w - 70, ry + 3, 60, InpRowHeight - 6, (InpRowHeight - 6) / 2,
+                                ColorToARGB(TintOver(g_theme.bg, g_theme.text_dim, 0.10), 255)); // N/A pill
             }
         }
         cy += rules_h;
+        // LOT A : divider between RULES and OPEN POSITIONS (mockup .divider, inset 14px)
+        g_kit.Hairline(px + 14, cy, px + w - 14, hl);
     }
-    // positions header tick + section
-    g_kit.RoundFill(px + 6, cy + 5, 3, RC_SECTION_HEIGHT - 10, 1, ColorToARGB(g_theme.accent2, 255));
-    // BATCH 2 : position-row bands on the canvas (replaces the legacy {pos}_rowbg rects)
+    // positions header tick (LOT A : cyan like every mockup tick, was indigo) + section
+    g_kit.RoundFill(px + 6, cy + 5, 3, RC_SECTION_HEIGHT - 10, 1, ColorToARGB(g_theme.accent, 255));
+    // LOT A : NO zebra ; instead a LIVE tinted status pill per FILLED row (mockup .pill,
+    // ~15% tint pre-blended). g_pos_status is written by RefreshPositionsList (+ the
+    // SL>REC override) BEFORE this repaint in the OnTimer order. Empty slots draw nothing.
     {
         const int pcy = cy + RC_SECTION_HEIGHT;
-        for (int p = 0; p < RC_MAX_POSITIONS; ++p)
-            g_kit.RoundFill(px + 1, pcy + p * InpRowHeight, w - 2, InpRowHeight, 0,
-                            ColorToARGB((p % 2 == 0 ? g_theme.surface : g_theme.surface_hi), 255));
+        for (int p = 0; p < RC_MAX_POSITIONS; ++p) {
+            if (StringLen(g_pos_sym[p]) == 0) continue;
+            g_kit.RoundFill(px + w - 70, pcy + p * InpRowHeight + 3, 60, InpRowHeight - 6,
+                            (InpRowHeight - 6) / 2,
+                            ColorToARGB(TintOver(g_theme.bg, StatusColor(g_pos_status[p]), 0.15), 255));
+        }
     }
     cy += RC_SECTION_HEIGHT + positions_h;
     // dividers above footer / tf bar / recent bar
-    g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
-    // BATCH 2 : footer band on the canvas (replaces the legacy footer_bg rect)
-    g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight * footer_rows - 1, 0, ColorToARGB(g_theme.surface, 255));
+    g_kit.Hairline(px + 1, cy, px + w - 2, hl);
+    // LOT B : footer band = SUBTLE vertical gradient (was a flat opaque slab)
+    g_kit.GradientVFill(px + 1, cy + 1, w - 2, InpRowHeight * footer_rows - 1, 0,
+                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface_hi, 0.45), 255),
+                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface, 0.20), 255));
     cy += InpRowHeight * footer_rows;                       // -> timeframe bar row
-    g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
-    // BATCH 2 : TF-bar band on the canvas (replaces the legacy tfbar_bg rect) ; the dark track sits on top
-    g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0, ColorToARGB(g_theme.surface, 255));
-    // v1.4 R2/R3 : segmented TF control - a dark rounded track, then 9 segment
-    // faces painted on top (active = cyan). The text labels + click zones live in
-    // DrawTimeframeBar. 2px gaps let the dark track show between segments.
-    g_kit.RoundFill(px + 28, cy + 3, 322, InpRowHeight - 6, (InpRowHeight - 6) / 2,
-                    ColorToARGB(g_theme.bg_deep, 255));
+    g_kit.Hairline(px + 1, cy, px + w - 2, hl);
+    // LOT B : TF-bar band = same subtle gradient
+    g_kit.GradientVFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0,
+                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface_hi, 0.45), 255),
+                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface, 0.20), 255));
+    // LOT C : segmented TF control, mockup .seg - a subtle LIGHT track (white-5%, soft
+    // 1px ring, radius 10) ; idle segments draw NOTHING (label-only, .seg b) ; the
+    // ACTIVE segment is a vertical accent->accent_deep gradient (.seg b.act, radius 7).
+    g_kit.RoundFill(px + 28, cy + 3, 322, InpRowHeight - 6, 10, ColorToARGB(hl, 255));       // ring
+    g_kit.RoundFill(px + 29, cy + 4, 320, InpRowHeight - 8, 9,
+                    ColorToARGB(TintOver(g_theme.bg, C'255,255,255', 0.05), 255));           // track
     {
         const ENUM_TIMEFRAMES tfv2[9] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
                                          PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
         const ENUM_TIMEFRAMES curp = (ENUM_TIMEFRAMES)ChartPeriod(0);
         for (int s = 0; s < 9; ++s) {
             const int sx = px + 30 + s * 35;
-            const bool act = (tfv2[s] == curp);
-            g_kit.RoundFill(sx, cy + 3, 33, InpRowHeight - 6, 5,
-                            act ? ColorToARGB(g_theme.accent, 255) : ColorToARGB(g_theme.surface_hi, 255));
+            if (tfv2[s] != curp) continue; // idle = transparent (label only)
+            g_kit.Segment(sx, cy + 3, 33, InpRowHeight - 6, 7, true,
+                          g_theme.accent, g_theme.accent_deep, g_theme.surface);
         }
     }
     cy += InpRowHeight;
-    g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
-    // BATCH 2 : recent-symbols band on the canvas (replaces the legacy recbar_bg rect)
-    g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0, ColorToARGB(g_theme.surface, 255));
+    g_kit.Hairline(px + 1, cy, px + w - 2, hl);
+    // LOT B : recent-symbols band = same subtle gradient
+    g_kit.GradientVFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0,
+                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface_hi, 0.45), 255),
+                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface, 0.20), 255));
 
     PaintFaces();     // v1.4.1 R3 : paint every registered control face (rounded btns / pills)
     g_kit.Commit();
@@ -2044,9 +2104,10 @@ void DrawTitleBar(int x, int y, int w) {
     // (Note : the gear/X stay left-anchored here ; right-anchoring them as the spec
     //  suggested would collide with the right-anchored title_model that grows
     //  leftward from x+w-RC_PAD-RC_TITLE_CLOCK_W. Bare title ends well before gear_x.)
-    string title = "RISKCOCKPIT";
-
-    DrawLabel(RC_PREFIX + "title_text", title_x, y + 8, title, g_theme.accent, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);
+    // LOT B (mockup .brand) : two-tone wordmark - "RISK" in near-white, "COCKPIT" in
+    // cyan. Two labels ; the +36px offset fits "RISK" at the semibold title size.
+    DrawLabel(RC_PREFIX + "title_text", title_x, y + 8, "RISK", g_theme.text, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);
+    DrawLabel(RC_PREFIX + "title_text2", title_x + 36, y + 8, "COCKPIT", g_theme.accent, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);
     // v1.4 : discreet dev build tag just right of the brand (empty in release).
     if (StringLen(RC_BUILD_TAG) > 0)
         DrawLabel(RC_PREFIX + "build", title_x + 104, y + 12, RC_BUILD_TAG, g_theme.text_dim, RC_FONT_SIZE_LABEL, RC_FONT_UI);
@@ -2088,7 +2149,11 @@ void DrawTitleBar(int x, int y, int w) {
     DrawLabel(RC_PREFIX + "title_model", (gear_x - 8) - RC_TITLE_CLOCK_W, y + 8, right, g_theme.text, RC_FONT_SIZE);
     ObjectSetInteger(0, RC_PREFIX + "title_model", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
 
-    DrawLabel(RC_PREFIX + "title_clock", gear_x - 8, y + 8, Tr("live"), g_theme.accent2, RC_FONT_SIZE);
+    // LOT B (mockup .live) : initial LIVE reads GREEN (was indigo). NOTE : the mockup's
+    // glowing dot is SKIPPED on purpose - this zone is a dynamic multi-state field
+    // (news countdown / weekend hold / verdict badge via UpdateClockBlinker) and a
+    // static dot would collide with the right-anchored variable-width text.
+    DrawLabel(RC_PREFIX + "title_clock", gear_x - 8, y + 8, Tr("live"), g_theme.ok, RC_FONT_SIZE);
     ObjectSetInteger(0, RC_PREFIX + "title_clock", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
 }
 
@@ -2135,9 +2200,12 @@ void DrawAccountStrip(int x, int y, int w) {
 //| Section header                                                   |
 //+------------------------------------------------------------------+
 void DrawSectionHeader(const string id, int x, int y, int w, const string title, color accent) {
-    DrawRect(RC_PREFIX + id + "_bg", x, y, w, RC_SECTION_HEIGHT, g_theme.surface_hi, g_theme.border, 0);
-    // Premium : a cyan accent tick on the left edge of every section header.
-    DrawRect(RC_PREFIX + id + "_tick", x, y + 3, 3, RC_SECTION_HEIGHT - 6, accent, accent, 0);
+    // LOT A : the legacy opaque _bg band + _tick rects were created AFTER the canvas ->
+    // they painted OVER the modern card + canvas tick and flattened the look. The header
+    // is now label-only (mockup .sec-h is transparent) ; the accent tick lives on the
+    // canvas (RepaintCanvas). Drop any stale rects from a previous build in place.
+    ObjectDelete(0, RC_PREFIX + id + "_bg");
+    ObjectDelete(0, RC_PREFIX + id + "_tick");
     DrawLabel(RC_PREFIX + id + "_txt", x + RC_PAD, y + 4, title, accent, RC_FONT_SIZE_TITLE - 1, RC_FONT_UI_SB);
 }
 
@@ -2194,21 +2262,15 @@ void DrawRuleRow(const string key_prefix, int idx,
     // Value text - widened column to fit "ACTIVE cap 40%", "0.0% / 20-30%", etc.
     DrawLabel(id + "_val", x + 170, y + 4, value_text, text_clr, RC_FONT_SIZE);
 
-    // Progress bar starts further right to give the value column 130 px instead of 90 px
-    const int bar_x = x + 360; // P6/P4 : wider value column ("locked X%" + 2 decimals)
-    const int bar_y = y + 5;
-    const int bar_w = w - 360 - 80 - RC_PAD;
-    const int bar_h = h - 10;
-    // 1.1 : the "Max lot allowed" row (rule_margin_pt) renders TEXT-ONLY in the
-    // indicator. The bar + chip drawing is KEPT for the future Helper-EA but
-    // skipped here so the value text is not hidden under a bar.
+    // LOT A : the legacy sharp OBJ progress bar (_bar/_bar_empty rects) painted OVER the
+    // canvas rounded Meter and flattened it - the canvas Meter (RepaintCanvas) is now the
+    // ONLY bar. Same for the chip _bg : DrawStatusChip is label-only, the tinted pill
+    // face lives on the canvas. Clear any stale bar rects from a previous build.
+    // 1.1 : the "Max lot allowed" row (rule_margin_pt) stays TEXT-ONLY.
     if (key_prefix != "rule_margin_pt" && key_prefix != "rule_newsstats") {
-        if (applies)
-            DrawProgressBar(id + "_bar", bar_x, bar_y, bar_w, bar_h, pct, max_pct, status);
-        else
-            DrawRect(id + "_bar_empty", bar_x, bar_y, bar_w, bar_h, g_theme.bar_bg, g_theme.bar_bg, 0);
-
-        // Status chip (right)
+        ObjectsDeleteAll(0, id + "_bar");
+        ObjectDelete(0, id + "_bar_empty");
+        // Status chip (right) - centered semantic-coloured label over the canvas pill
         const int chip_x = x + w - 70;
         DrawStatusChip(id + "_chip", chip_x, y + 3, 60, h - 6, applies ? status : RC_STATUS_NA);
     }
@@ -2466,12 +2528,14 @@ void DrawTiltBanner(void) {
 //| Status chip                                                      |
 //+------------------------------------------------------------------+
 void DrawStatusChip(const string id, int x, int y, int w, int h, ENUM_RC_STATUS status) {
-    const color clr = StatusColor(status);
-    DrawRect(id + "_bg", x, y, w, h, clr, clr, 0);
-    // P7 theme fix : chips are always a BRIGHT bg (green/amber/red) -> use a
-    // fixed near-black text so it stays readable on BOTH themes (g_theme.bg was
-    // light in the light theme = unreadable on a green chip).
-    DrawLabel(id + "_txt", x + 6, y + 2, StatusLabel(status), (color)0x00181818, RC_FONT_SIZE - 1);
+    // LOT A (mockup .pill) : the chip is now LABEL-ONLY - the ~15% tinted rounded pill
+    // face is painted on the canvas (RepaintCanvas), and the text carries the SEMANTIC
+    // colour (ok/warn/red ; dim for N/A) exactly like .p-ok/.p-warn/.p-red. The old
+    // opaque _bg rect rendered OVER the canvas pill and flattened it -> dropped.
+    ObjectDelete(0, id + "_bg"); // clear the legacy rect from any previous build
+    const color txt_clr = (status == RC_STATUS_NA ? g_theme.text_dim : StatusColor(status));
+    DrawLabel(id + "_txt", x + w / 2, y + h / 2, StatusLabel(status), txt_clr, RC_FONT_SIZE - 1, RC_FONT_UI_SB);
+    ObjectSetInteger(0, id + "_txt", OBJPROP_ANCHOR, ANCHOR_CENTER); // centered like .pill
 }
 
 //+------------------------------------------------------------------+
@@ -2513,9 +2577,8 @@ int DrawPositionsSection(int x, int y, int w) {
         DrawLabel(id + "_pnl", x + 220, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
         DrawLabel(id + "_age", x + 320, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
         DrawStatusChip(id + "_chip", x + w - 70, cy + 3, 60, InpRowHeight - 6, RC_STATUS_NA);
-        // start every slot empty (no visible chip until a position fills it)
-        ObjectSetInteger(0, id + "_chip_bg", OBJPROP_BGCOLOR, ((i % 2) == 0 ? g_theme.surface : g_theme.surface_hi));
-        ObjectSetInteger(0, id + "_chip_bg", OBJPROP_COLOR,   ((i % 2) == 0 ? g_theme.surface : g_theme.surface_hi));
+        // start every slot empty : no chip text, no canvas pill (g_pos_sym empty -> the
+        // RepaintCanvas pill loop skips the slot). LOT A : legacy _chip_bg rect is gone.
         ObjectSetString(0, id + "_chip_txt", OBJPROP_TEXT, " ");
         // V1.27 : the symbol cell is a click-to-switch button (OBJ_BUTTON is the
         // reliable click target in this codebase ; it sits over the _lbl and
@@ -2853,24 +2916,18 @@ void UpdateRow(int idx, double pct, double max_pct, const string value_text,
     ObjectSetInteger(0, id + "_val", OBJPROP_COLOR, applies ? g_theme.text : g_theme.text_dim);
 
     // 1.1 : the "Max lot allowed" row (rule_margin_pt) is text-only in the
-    // indicator -> skip bar + chip re-draw (kept for the future Helper-EA).
+    // indicator -> skip the chip re-draw (kept for the future Helper-EA).
+    // LOT A : NO legacy bar re-draw - the canvas Meter (RepaintCanvas, runs right after
+    // this in the OnTimer order) is the only bar now. Only the chip LABEL updates here.
     if (g_rows[idx].key != "rule_margin_pt" && g_rows[idx].key != "rule_newsstats") {
-        // Re-draw progress bar (re-create fill)
-        ObjectsDeleteAll(0, id + "_bar");
+        ObjectsDeleteAll(0, id + "_bar"); // clear any stale legacy bar rects
+        ObjectDelete(0, id + "_bar_empty");
         const int x = g_anchor_x, w = InpPanelWidth; // B2 : live anchor
-        const int bar_x = x + 360; // P6/P4 : matches DrawRuleRow widened column
-        const int bar_y = (int)ObjectGetInteger(0, id + "_lbl", OBJPROP_YDISTANCE) + 1;
-        const int bar_w = w - 360 - 80 - RC_PAD;
-        const int bar_h = InpRowHeight - 10;
-        if (applies)
-            DrawProgressBar(id + "_bar", bar_x, bar_y, bar_w, bar_h, pct, max_pct, status);
-        else
-            DrawRect(id + "_bar_empty", bar_x, bar_y, bar_w, bar_h, g_theme.bar_bg, g_theme.bar_bg, 0);
-
-        // Re-draw chip
+        const int row_y = (int)ObjectGetInteger(0, id + "_lbl", OBJPROP_YDISTANCE) + 1;
+        // Re-draw chip label (semantic colour ; canvas pill tint follows via g_rows[].status)
         ObjectsDeleteAll(0, id + "_chip");
         const int chip_x = x + w - 70;
-        const int chip_y = bar_y - 2;
+        const int chip_y = row_y - 2;
         DrawStatusChip(id + "_chip", chip_x, chip_y, 60, InpRowHeight - 6, applies ? status : RC_STATUS_NA);
     }
 }
@@ -2942,10 +2999,10 @@ void RefreshPositionsList(void) {
             ObjectSetInteger(0, id + "_pnl", OBJPROP_COLOR, g_theme.text_dim);
             ObjectSetString(0, id + "_age", OBJPROP_TEXT, " ");
             ObjectSetInteger(0, id + "_age", OBJPROP_COLOR, g_theme.text_dim);
-            ObjectSetInteger(0, id + "_chip_bg", OBJPROP_BGCOLOR, g_theme.surface);
-            ObjectSetInteger(0, id + "_chip_bg", OBJPROP_COLOR, g_theme.surface);
+            // LOT A : chip is label-only ; blanking the text + emptying g_pos_sym is
+            // enough (the canvas pill loop skips empty slots -> no ghost tint).
             ObjectSetString(0, id + "_chip_txt", OBJPROP_TEXT, " ");
-            ObjectSetInteger(0, id + "_chip_txt", OBJPROP_COLOR, g_theme.surface);
+            g_pos_status[i] = RC_STATUS_NA;
             g_pos_sym[i] = ""; // V1.27 : empty slot -> no click target
             ObjectSetString(0, RC_PREFIX + "pos_row_" + IntegerToString(i), OBJPROP_TEXT, " ");
             continue;
@@ -3007,12 +3064,12 @@ void RefreshPositionsList(void) {
             pos_status = (age < deadline ? RC_STATUS_WARN : RC_STATUS_RED);
         }
 
-        const color chip_clr = StatusColor(pos_status);
-        ObjectSetInteger(0, id + "_chip_bg", OBJPROP_BGCOLOR, chip_clr);
-        ObjectSetInteger(0, id + "_chip_bg", OBJPROP_COLOR, chip_clr);
+        // LOT A (mockup .pill) : record the LIVE status for the canvas pill tint, and
+        // colour the label with the SEMANTIC colour (the old _chip_bg solid rect is gone).
+        g_pos_status[i] = pos_status;
         ObjectSetString(0, id + "_chip_txt", OBJPROP_TEXT,
                         PositionStatusLabel(pos_status, age, sl_miss));
-        ObjectSetInteger(0, id + "_chip_txt", OBJPROP_COLOR, g_theme.bg);
+        ObjectSetInteger(0, id + "_chip_txt", OBJPROP_COLOR, StatusColor(pos_status));
     }
 }
 
@@ -4095,12 +4152,14 @@ void RefreshSlLinesForChart(const long chart_id) {
                 ObjectSetInteger(chart_id, txt_id, OBJPROP_HIDDEN, true);
             }
 
-            // Panel-side chip override (HOST chart only).
+            // Panel-side chip override (HOST chart only). LOT A : label-only chip - red
+            // semantic text + the canvas pill follows via g_pos_status (bounds-guarded :
+            // this loop walks ALL positions, the panel only has RC_MAX_POSITIONS rows).
             if (user_over_budget) {
                 const string row_id = RC_PREFIX + "pos_" + IntegerToString(i);
-                ObjectSetInteger(0, row_id + "_chip_bg", OBJPROP_BGCOLOR, g_theme.red);
-                ObjectSetInteger(0, row_id + "_chip_bg", OBJPROP_COLOR, g_theme.red);
+                if (i >= 0 && i < RC_MAX_POSITIONS) g_pos_status[i] = RC_STATUS_RED;
                 ObjectSetString(0, row_id + "_chip_txt", OBJPROP_TEXT, Tr("sl_over_chip"));
+                ObjectSetInteger(0, row_id + "_chip_txt", OBJPROP_COLOR, g_theme.red);
             }
         }
 
@@ -6161,6 +6220,8 @@ void SetTip3(const string id_base, const string tipkey) {
 // base panel or its canvas. The title-bar gear glyph is "RC_gearlbl" (renamed off the
 // "set_" prefix), so it is never caught here. Used by the light tab-switch re-render.
 void DestroySettingsOverlay(void) {
+    g_modal_kit.Destroy(); // LOT D STEP 0 : free the shell bitmap resource first (the
+                           // object itself also matches the "set_" prefix below)
     ObjectsDeleteAll(0, RC_PREFIX + "set_");
 }
 
@@ -6170,11 +6231,38 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     const int ow = panel_w;
     const int oh = (g_panel_height > 120 ? g_panel_height : 240);
 
-    // Modal cover : opaque, full panel, ZORDER 240 -> masks every panel object
-    // (rows are <= 100) AND swallows stray clicks meant for the panel behind.
+    // Modal cover : opaque, ZORDER 240 -> masks every panel object (rows are <= 100)
+    // AND swallows stray clicks meant for the panel behind. Kept as the input-capture
+    // layer UNDER the shell canvas - INSET 6px so its square corners stay hidden under
+    // the shell Card's opaque rounded interior (the shell's corner band is translucent
+    // glow/shadow ; a full-size rect would peek square through the 4 rounded corners).
     const string modal_id = RC_PREFIX + "set_modal";
-    DrawRect(modal_id, ox, oy, ow, oh, g_theme.bg_lift, g_theme.border_hi, 2); // Phase 4 : raised-card modal, crisp edge
+    DrawRect(modal_id, ox + 6, oy + 6, ow - 12, oh - 12, g_theme.bg_lift, g_theme.bg_lift, 0);
     ObjectSetInteger(0, modal_id, OBJPROP_ZORDER, 240);
+
+    // LOT D STEP 0 : rounded modal SHELL on its own canvas - card + shadow + cyan edge
+    // glow, the same language as the panel body. A BITMAP_LABEL always renders above
+    // the rectangle cover and below the native OBJ_BUTTONs, and the SetLbl labels are
+    // (re)created after it -> rounded look, ZERO routing change (g_swallow_click /
+    // g_settings_open untouched). Recreated per open/tab-switch (a click-rate event).
+    {
+        const int SM = RC_KIT_MARGIN;
+        g_modal_kit.Create(RC_PREFIX + "set_shell", ox - SM, oy - SM, ow + 2 * SM, oh + 2 * SM);
+        if (g_modal_kit.Ready()) {
+            g_modal_kit.Begin();
+            g_modal_kit.SoftShadow(SM, SM, ow, oh, RC_R_PANEL, g_theme.bg_deep, 9, 95);
+            g_modal_kit.EdgeGlow(SM, SM, ow, oh, RC_R_PANEL, g_theme.accent, 6, 46);
+            g_modal_kit.Card(SM, SM, ow, oh, RC_R_PANEL, g_theme.bg_lift, g_theme.bg,
+                             TintOver(g_theme.bg_lift, C'255,255,255', 0.08));
+            // title zone gradient + hairline under the tab bar (mockup .title / .divider)
+            g_modal_kit.GradientVFill(SM + 1, SM + 1, ow - 2, 30, RC_R_PANEL - 1,
+                                      ColorToARGB(TintOver(g_theme.bg_lift, g_theme.raise, 0.85), 255),
+                                      ColorToARGB(TintOver(g_theme.bg_lift, g_theme.surface, 0.70), 255));
+            g_modal_kit.Hairline(SM + 12, SM + 58, SM + ow - 12,
+                                 TintOver(g_theme.bg, C'148,163,184', 0.14));
+            g_modal_kit.Commit();
+        }
+    }
 
     // Title + close.
     SetLbl(RC_PREFIX + "set_title", ox + 16, oy + 9, Tr("settings"), g_theme.accent);
@@ -6196,9 +6284,9 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     HighlightSetButton(RC_PREFIX + "set_tab_disp",  g_settings_tab == 2);
     HighlightSetButton(RC_PREFIX + "set_tab_alert", g_settings_tab == 3);
     HighlightSetButton(RC_PREFIX + "set_tab_adv",   g_settings_tab == 4);
-    // Phase 4 : hairline under the tab bar, separating the tabs from the content (modern feel).
-    DrawRect(RC_PREFIX + "set_divider", ox + 12, ty + 26, ow - 24, 1, g_theme.border_hi, g_theme.border_hi, 0);
-    ObjectSetInteger(0, RC_PREFIX + "set_divider", OBJPROP_ZORDER, 250);
+    // Phase 4 divider : now painted INSIDE the shell canvas (the old set_divider rect
+    // would render UNDER the shell bitmap and be invisible). Drop any stale rect.
+    ObjectDelete(0, RC_PREFIX + "set_divider");
 
     const int lx = ox + 16;   // label column
     const int cx = ox + 150;  // control column

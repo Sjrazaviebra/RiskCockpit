@@ -115,6 +115,39 @@ public:
       }
    }
 
+   //--- idle edge glow : concentric translucent outlines OUTSIDE the card edge, ---
+   //--- brightest hugging the edge, fading outward (mockup .rc::after cyan halo). ---
+   //--- Draw AFTER SoftShadow and BEFORE Card : the opaque Card overwrites the    ---
+   //--- interior, leaving only the 1px ring fringes visible in the margin band.   ---
+   void EdgeGlow(const int x, const int y, const int w, const int h, const int r,
+                 const color base, const int spread = 6, const uchar peak = 46) {
+      if(!m_ready) return;
+      for(int i = spread; i >= 1; --i) {
+         const uchar a = (uchar)(peak * (double)(spread - i + 1) / (double)spread / 2.0);
+         RoundFill(x - i, y - i, w + 2*i, h + 2*i, r + i, A(base, a));
+      }
+   }
+
+   //--- vertical gradient band : rounded TOP cap (base = top colour), banded lerp --
+   //--- top->bot over the body, square bottom (for title/footer bands whose lower --
+   //--- edge continues into the next section). Pass PRE-BLENDED opaque colours :   --
+   //--- CCanvas draws overwrite pixels (no compositing), so translucent fills over --
+   //--- the card would show the CHART through, not the card.                       --
+   void GradientVFill(const int x, const int y, const int w, const int h, int r,
+                      const uint top, const uint bot) {
+      if(!m_ready) return;
+      if(r > w/2) r = w/2; if(r > h/2) r = h/2; if(r < 0) r = 0;
+      RoundFill(x, y, w, h, r, top); // base incl. the rounded top cap
+      const int gy0 = y + r, gy1 = y + h, bands = 16;
+      if(gy1 > gy0) {
+         const int bh = MathMax(1, (gy1 - gy0) / bands);
+         for(int b = 0; b*bh < (gy1 - gy0); ++b) {
+            const uint c = Lerp(top, bot, (double)(b*bh) / (double)(gy1 - gy0));
+            m_cv.FillRectangle(x, gy0 + b*bh, x + w - 1, MathMin(gy1 - 1, gy0 + (b+1)*bh), c);
+         }
+      }
+   }
+
    //--- card : border ring + vertical gradient interior + faint top sheen. --
    void Card(const int x, const int y, const int w, const int h, const int r,
              const color top, const color bot, const color border) {
@@ -132,7 +165,10 @@ public:
             m_cv.FillRectangle(ix, gy0 + b*bh, ix + iw - 1, MathMin(gy1, gy0 + (b+1)*bh), c);
          }
       }
-      m_cv.FillRectangle(ix + ir, iy + 1, ix + iw - 1 - ir, iy + 2, A(clrWhite, 14)); // top sheen
+      // top sheen : OPAQUE pre-blend (CCanvas draws overwrite pixels - a translucent
+      // strip INSIDE the card would show the chart through wherever nothing opaque
+      // sits beneath the bitmap ; Button() inherits this line on every face).
+      m_cv.FillRectangle(ix + ir, iy + 1, ix + iw - 1 - ir, iy + 2, Lerp(A(top), A(clrWhite), 0.055));
    }
 
    void Hairline(const int x1, const int y, const int x2, const color c, const uchar a = 255) {
@@ -180,7 +216,10 @@ public:
       const double t = (knobT >= 0.0 ? knobT : (on ? 1.0 : 0.0));
       const int kr = r - 2;
       const int kx = (int)(x + r + t * (w - 2*r));
-      m_cv.FillCircle(kx, y + r, kr + 1, A(clrBlack, 60)); // knob shadow
+      // knob DROP shadow (offset down, mockup 0 2px 4px) : OPAQUE pre-blend against the
+      // track tone - a translucent circle inside the card would chart-through (overwrite).
+      const uint sh = Lerp(A(on ? onB : offTrack), A(clrBlack), 0.30);
+      m_cv.FillCircle(kx, y + r + 1, kr + 1, sh);
       m_cv.FillCircle(kx, y + r, kr, A(knob));
    }
 
