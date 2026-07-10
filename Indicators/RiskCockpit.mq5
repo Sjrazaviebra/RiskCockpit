@@ -311,6 +311,15 @@ color TintOver(const color base, const color tint, const double t) {
     return (color)((b << 16) | (g << 8) | r);
 }
 
+// E8 : theme-aware "film" tint. The mockup's rgba(255,255,255,x) films only LIFT on a
+// DARK base ; on the light theme white is invisible. DARK branch stays byte-identical
+// (frozen look) ; LIGHT swaps to a slate tint, boosted so it reads on a bright base.
+// (EffectiveTheme is defined later - MQL5 resolves globals in two passes.)
+color FilmOver(const color base, const double t) {
+    if (EffectiveTheme() == RC_THEME_GLASS_DARK) return TintOver(base, C'255,255,255', t);
+    return TintOver(base, C'148,163,184', MathMin(1.0, t * 2.4));
+}
+
 //+------------------------------------------------------------------+
 //| Layout constants                                                 |
 //+------------------------------------------------------------------+
@@ -771,6 +780,7 @@ int  g_anchor_y = 100;
 #define RCF_BTN_RED   3   // rounded button, red edge (X / danger)
 #define RCF_PILL_OFF  4   // sliding pill toggle, OFF (knob left)
 #define RCF_PILL_ON   5   // sliding pill toggle, ON  (knob right, accent)
+#define RCF_BTN_GHOST 6   // E5 : outline-only (ghost) button - 1px ring on the panel bg
 
 struct RCHit { int x1, y1, x2, y2; string act; int idx; int style; };
 RCHit g_hits[]; int g_nhits = 0;
@@ -821,12 +831,16 @@ void DrawFace(const int lx, const int ly, const int w, const int h, const int st
     // (.bt) ; ON states = accent->accent_deep gradient (.bt.primary / .sw.on / .seg .act) ;
     // pill OFF track = faint light film (.sw white-9%) with a soft outline. All tints are
     // PRE-BLENDED via TintOver (CCanvas overwrite semantics - see TintOver).
-    const color pill_off  = TintOver(g_theme.bg, C'255,255,255', 0.09); // .sw track
+    const color pill_off  = FilmOver(g_theme.bg, 0.09); // .sw track
     const color soft_line = TintOver(g_theme.bg, C'148,163,184', 0.25); // pill outline
     switch (style) {
         case RCF_BTN:      g_kit.Button(lx, ly, w, h, r, g_theme.raise, g_theme.surface, g_theme.border);          break;
         case RCF_BTN_ON:   g_kit.Button(lx, ly, w, h, r, g_theme.accent, g_theme.accent_deep, g_theme.accent);     break;
         case RCF_BTN_RED:  g_kit.Button(lx, ly, w, h, r, g_theme.raise, g_theme.surface, g_theme.red);             break;
+        case RCF_BTN_GHOST: // E5 : outline-only (mockup ghost button) - ring then bg interior
+            g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, r + 1, ColorToARGB(g_theme.border, 255));
+            g_kit.RoundFill(lx, ly, w, h, r, ColorToARGB(g_theme.bg, 255));
+            break;
         case RCF_PILL_OFF:
             g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2, ColorToARGB(soft_line)); // soft 1px outline
             g_kit.PillToggle(lx, ly, w, h, false, pill_off, g_theme.accent_deep, g_theme.accent, C'203,213,225');
@@ -1001,7 +1015,7 @@ int OnInit(void) {
         const string co  = AccountInfoString(ACCOUNT_COMPANY);
         if ((StringFind(srv, "Server 3") >= 0 || StringFind(srv, "Demo") >= 0) &&
             InpPlan != FN_PLAN_FREE_TRIAL && InpPlan != FN_PLAN_FREE_COMPETITION &&
-            StringFind(srv, "AvaTrade") < 0 && StringFind(co, "AvaTrade") < 0)
+            StringFind(srv, "AvaTrade") < 0 && StringFind(co, "AvaTrade") < 0 && InpVerboseLog) // LOG CLEANUP : one-time info, gated
             Print("RiskCockpit : free/competition server detected ('", srv,
                   "'). If this is a Free Trial or Free Competition, select it in InpPlan.");
         // B-AVATRADE-PROFILE : suggest the Personal plan on broker-perso servers
@@ -1011,24 +1025,24 @@ int OnInit(void) {
                                       || StringFind(srv, "Ava-")    >= 0
                                       || StringFind(co,  "AvaTrade") >= 0
                                       || StringFind(co,  "Ava ")    >= 0);
-        if (is_personal_broker && InpPlan != FN_PLAN_PERSONAL)
+        if (is_personal_broker && InpPlan != FN_PLAN_PERSONAL && InpVerboseLog)
             Print("RiskCockpit : personal-broker server detected ('", srv,
                   "' / '", co, "'). Recommended : set InpPlan = FN_PLAN_PERSONAL to disable prop rules.");
         // LOT C : suggest the matching multi-firm preset (FTMO / E8 / The5ers /
         // SeacrestFunded) based on server pattern. Per Agent A+B research.
-        if (StringFind(srv, "FTMO-") == 0 && InpPlan != FN_PLAN_FTMO_2STEP)
+        if (StringFind(srv, "FTMO-") == 0 && InpPlan != FN_PLAN_FTMO_2STEP && InpVerboseLog)
             Print("RiskCockpit : FTMO server detected ('", srv,
                   "'). Recommended : set InpPlan = FN_PLAN_FTMO_2STEP.");
-        if (StringFind(srv, "FivePercentOnline") >= 0 && InpPlan != FN_PLAN_THE5ERS_HIGH)
+        if (StringFind(srv, "FivePercentOnline") >= 0 && InpPlan != FN_PLAN_THE5ERS_HIGH && InpVerboseLog)
             Print("RiskCockpit : The5ers server detected ('", srv,
                   "'). Recommended : set InpPlan = FN_PLAN_THE5ERS_HIGH.");
         if ((StringFind(srv, "E8Markets") >= 0 || StringFind(co, "E8 Markets") >= 0
-          || StringFind(co, "E8 Funding") >= 0) && InpPlan != FN_PLAN_E8_8PCT)
+          || StringFind(co, "E8 Funding") >= 0) && InpPlan != FN_PLAN_E8_8PCT && InpVerboseLog)
             Print("RiskCockpit : E8 Markets server detected ('", srv,
                   "' / '", co, "'). Recommended : set InpPlan = FN_PLAN_E8_8PCT.");
         if ((StringFind(srv, "SeacrestMarkets") >= 0 || StringFind(srv, "MyFundedFX") >= 0
           || StringFind(co,  "Seacrest") >= 0 || StringFind(co, "MyFundedFX") >= 0)
-          && InpPlan != FN_PLAN_MFF_RAPID)
+          && InpPlan != FN_PLAN_MFF_RAPID && InpVerboseLog)
             Print("RiskCockpit : SeacrestFunded server detected ('", srv,
                   "' / '", co, "'). Recommended : set InpPlan = FN_PLAN_MFF_RAPID.");
     }
@@ -1082,7 +1096,7 @@ int OnInit(void) {
     if (g_eff_telegram) {
         if (InpTelegramBotToken == "" || InpTelegramChatId == "") {
             Print("RiskCockpit : Telegram enabled but bot token / chat id empty - alerts will not fire.");
-        } else {
+        } else if (InpVerboseLog) { // LOG CLEANUP : one-time info, gated (the empty-token WARNING above stays ungated)
             Print("RiskCockpit : Telegram alerts ON. ",
                   "If first alert fails with err=4014, allow https://api.telegram.org in Tools > Options > Expert Advisors > WebRequest.");
         }
@@ -1899,9 +1913,27 @@ void RiskFillColors(const ENUM_RC_STATUS s, color &a, color &b) {
     switch (s) {
         case RC_STATUS_RED:  a = C'239,68,68';  b = C'248,113,113'; break;
         case RC_STATUS_WARN: a = C'245,158,11'; b = C'251,191,36';  break;
-        case RC_STATUS_OK:   a = C'16,185,129'; b = C'52,211,153';  break;
+        case RC_STATUS_OK:   a = C'34,197,94';  b = C'74,222,128';  break; // E1 : SAFE green #22C55E -> #4ADE80 (mockup)
         default:             a = g_theme.text_dim;   b = g_theme.text_dim; break;
     }
+}
+
+// E2 : ONE painter for every status pill (rules + positions) so they can never drift.
+// Saturated RING (hue from RiskFillColors -> automatically follows the SAFE green above ;
+// na = slate ring) + tinted interior inset 1px. Standard geometry : w=60, h=row-6, full
+// radius. Paints into the OPEN g_kit canvas (called from RepaintCanvas only).
+void PaintStatusPill(const int x, const int y, const ENUM_RC_STATUS s, const bool na) {
+    const int w = 60, h = InpRowHeight - 6;
+    color ring;
+    if (na) {
+        ring = TintOver(g_theme.bg, C'148,163,184', 0.20);
+    } else {
+        color fa, fb; RiskFillColors(s, fa, fb);
+        ring = fa;
+    }
+    g_kit.RoundFill(x, y, w, h, h / 2, ColorToARGB(ring, 255));                       // ring
+    g_kit.RoundFill(x + 1, y + 1, w - 2, h - 2, (h - 2) / 2,                          // interior
+                    ColorToARGB(TintOver(g_theme.bg, StatusColor(s), na ? 0.12 : 0.24), 255));
 }
 
 //+------------------------------------------------------------------+
@@ -1933,7 +1965,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
     g_kit.EdgeGlow(px, py, w, total_h, RC_R_PANEL, g_theme.accent, 6, 56); // FINAL : a touch more presence (~11% inner ring)
     // LOT B : near-invisible light border (mockup white-5%) - the visible edge is the glow.
     g_kit.Card(px, py, w, total_h, RC_R_PANEL, g_theme.bg_lift, g_theme.bg,
-               TintOver(g_theme.bg_lift, C'255,255,255', 0.08));
+               FilmOver(g_theme.bg_lift, 0.08));
 
     int cy = py;
     // LOT B : title band = vertical gradient (mockup .title raise.85 -> card-a.70)
@@ -1945,7 +1977,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
     // LOT B : account strip = barely-there light film (mockup .strip white-1.2%),
     // NOT an opaque slab - the panel gradient reads through.
     g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0,
-                    ColorToARGB(TintOver(g_theme.bg_lift, C'255,255,255', 0.02), 255));
+                    ColorToARGB(FilmOver(g_theme.bg_lift, 0.02), 255));
     // FINAL (mockup .chip) : SWAP (cyan-tint) + Split (green-tint) pill chips - faces
     // painted from the SAME panel-relative rects DrawAccountStrip stored (single source).
     if (g_chip_swap_w > 0) {
@@ -1968,23 +2000,24 @@ void RepaintCanvas(const int x, const int y, const int w) {
             if (k == "rule_margin_pt" || k == "rule_newsstats") continue; // text-only rows
             const int bx = px + 360;
             const int bw = w - 360 - 80 - RC_PAD;
-            const int bh = 8;
+            const int bh = 10; // E1 : thicker rounded meter (was 8 ; by recenters below)
             const int by = ry + (InpRowHeight - bh) / 2;
-            // FINAL (mockup .bar) : track = light white-6% film, pre-blended - always
-            // subtly visible even at 0% fill (never a black/empty slot).
-            const color track = TintOver(g_theme.bg, C'255,255,255', 0.06);
+            // E1 : track = SLATE film (mockup --line), readable at 0% on BOTH themes -
+            // deliberately NOT FilmOver (slate already reads on dark AND light).
+            const color track = TintOver(g_theme.bg, C'148,163,184', 0.14);
             if (g_rows[i].applies) {
                 const double ratio = (g_rows[i].max_pct > 0.0 ? g_rows[i].value_pct / g_rows[i].max_pct : 0.0);
                 color fa, fb; RiskFillColors(g_rows[i].status, fa, fb);
                 g_kit.Meter(bx, by, bw, bh, ratio, track, fa, fb);
-                // LOT A : status pill = LOW-ALPHA tint (mockup .p-ok/.p-warn/.p-red ~15%),
-                // pre-blended ; the chip label carries the semantic colour on top.
-                g_kit.RoundFill(px + w - 70, ry + 3, 60, InpRowHeight - 6, (InpRowHeight - 6) / 2,
-                                ColorToARGB(TintOver(g_theme.bg, StatusColor(g_rows[i].status), 0.15), 255));
+                // E1 : "clear" dot - a 0% SAFE meter shows a start-of-track dot (mockup
+                // News window : clear) instead of an apparently-dead bar. fa = SAFE green.
+                if (ratio < 0.01 && g_rows[i].status == RC_STATUS_OK)
+                    g_kit.RoundFill(bx, by, bh, bh, bh / 2, ColorToARGB(fa, 255));
+                // E2 : saturated ring + tinted interior, one shared painter.
+                PaintStatusPill(px + w - 70, ry + 3, g_rows[i].status, false);
             } else {
                 g_kit.Meter(bx, by, bw, bh, 0.0, track, g_theme.text_dim, g_theme.text_dim);
-                g_kit.RoundFill(px + w - 70, ry + 3, 60, InpRowHeight - 6, (InpRowHeight - 6) / 2,
-                                ColorToARGB(TintOver(g_theme.bg, g_theme.text_dim, 0.10), 255)); // N/A pill
+                PaintStatusPill(px + w - 70, ry + 3, g_rows[i].status, true); // N/A pill
             }
         }
         cy += rules_h;
@@ -2000,9 +2033,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
         const int pcy = cy + RC_SECTION_HEIGHT;
         for (int p = 0; p < RC_MAX_POSITIONS; ++p) {
             if (StringLen(g_pos_sym[p]) == 0) continue;
-            g_kit.RoundFill(px + w - 70, pcy + p * InpRowHeight + 3, 60, InpRowHeight - 6,
-                            (InpRowHeight - 6) / 2,
-                            ColorToARGB(TintOver(g_theme.bg, StatusColor(g_pos_status[p]), 0.15), 255));
+            PaintStatusPill(px + w - 70, pcy + p * InpRowHeight + 3, g_pos_status[p], false); // E2/E6
         }
     }
     cy += RC_SECTION_HEIGHT + positions_h;
@@ -2023,7 +2054,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
     // ACTIVE segment is a vertical accent->accent_deep gradient (.seg b.act, radius 7).
     g_kit.RoundFill(px + 28, cy + 3, 322, InpRowHeight - 6, 10, ColorToARGB(hl, 255));       // ring
     g_kit.RoundFill(px + 29, cy + 4, 320, InpRowHeight - 8, 9,
-                    ColorToARGB(TintOver(g_theme.bg, C'255,255,255', 0.05), 255));           // track
+                    ColorToARGB(FilmOver(g_theme.bg, 0.05), 255));           // track
     {
         const ENUM_TIMEFRAMES tfv2[9] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
                                          PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
@@ -2165,8 +2196,10 @@ void DrawTitleBar(int x, int y, int w) {
     // (ChartIndicatorDelete), so no trip to the Indicators List is needed.
     // (kill_x computed above = top-right corner.)
     // v1.4.1 R3 : X = canvas rounded button (red edge) + click zone + "X" label on top.
-    HitAdd(kill_x, y + 5, kill_x + 22, y + 25, "kill", -1, RCF_BTN_RED);
-    DrawLabel(RC_PREFIX + "kill_x", kill_x + 11, y + 15, "X", g_theme.red, RC_FONT_SIZE + 1, RC_FONT_UI);
+    // E3 : discreet grey close (mockup .ico) - red was too loud for an idle header
+    // control. RCF_BTN_RED stays defined as a future BREACH-state hook.
+    HitAdd(kill_x, y + 5, kill_x + 22, y + 25, "kill", -1, RCF_BTN);
+    DrawLabel(RC_PREFIX + "kill_x", kill_x + 11, y + 15, ShortToString((ushort)0x00D7), g_theme.text_dim, RC_FONT_SIZE + 1, RC_FONT_UI);
     ObjectSetInteger(0, RC_PREFIX + "kill_x", OBJPROP_ANCHOR, ANCHOR_CENTER);
     ObjectSetString (0, RC_PREFIX + "kill_x", OBJPROP_TOOLTIP, Tr("kill_tip"));
 
@@ -2182,7 +2215,7 @@ void DrawTitleBar(int x, int y, int w) {
     }
     StringReplace(right, " (no prop rules)", ""); // V1.29 K : shorten the Personal label so it clears the gear/X cluster
     // V1.29 K : model sits LEFT of the (left-shifted) clock zone, which sits left of the gear.
-    DrawLabel(RC_PREFIX + "title_model", (gear_x - 8) - RC_TITLE_CLOCK_W, y + 8, right, g_theme.text, RC_FONT_SIZE);
+    DrawLabel(RC_PREFIX + "title_model", (gear_x - 8) - RC_TITLE_CLOCK_W, y + 8, right, g_theme.label, RC_FONT_SIZE); // E4 : dim (mockup .clock) so the green LIVE pops
     ObjectSetInteger(0, RC_PREFIX + "title_model", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
 
     // FINAL (mockup .live) : "● LIVE" in green - the dot is PART OF THE LABEL TEXT
@@ -3031,7 +3064,7 @@ ENUM_RC_STATUS ComputeBandStatus(double v, double lo, double hi) {
 string StatusLabel(ENUM_RC_STATUS s) {
     switch (s) {
     case RC_STATUS_OK:
-        return Tr("chip_ok");
+        return Tr("chip_safe"); // E2 : metered RULES rows read SAFE (positions go through PositionStatusLabel -> chip_ok)
     case RC_STATUS_WARN:
         return Tr("chip_warn");
     case RC_STATUS_RED:
@@ -3092,7 +3125,7 @@ void RefreshPositionsList(void) {
         const bool sl_miss = (sl <= 0.0);
 
         const string type_str = (type == POSITION_TYPE_BUY ? "BUY" : "SELL");
-        const string sym_short = (StringLen(sym) > 8 ? StringSubstr(sym, 0, 8) : sym);
+        const string sym_short = (StringLen(sym) > 12 ? StringSubstr(sym, 0, 12) : sym); // E6 : "US30.cash" / "JP225.cash" fit whole
 
         string lbl;
         StringConcatenate(lbl, sym_short, " ", type_str, " ", DoubleToString(vol, VolDigits(sym))); // V1.28 : up to 4 dp
@@ -4327,7 +4360,7 @@ string FormatAge(int seconds) {
     if (seconds < 3600) {
         const int m = seconds / 60;
         const int s = seconds % 60;
-        return IntegerToString(m) + "m" + IntegerToString(s) + "s";
+        return IntegerToString(m) + "m " + IntegerToString(s) + "s"; // E6 : "2m 14s" (mockup spacing)
     }
     const int h = seconds / 3600;
     const int m = (seconds % 3600) / 60;
@@ -4342,8 +4375,8 @@ string PositionStatusLabel(ENUM_RC_STATUS s, int age, bool sl_missing) {
     if (s == RC_STATUS_RED)
         return Tr("chip_red");
     if (s == RC_STATUS_WARN)
-        return Tr("chip_warn");
-    return Tr("chip_ok");
+        return (sl_missing ? Tr("pos_slq") : Tr("chip_warn")); // E6 : SL missing in grace -> amber "SL?"
+    return Tr("chip_ok"); // E6 : positions keep OK (mockup)
 }
 
 //+------------------------------------------------------------------+
@@ -5594,9 +5627,10 @@ void InitI18n(void) {
     AddTr("weekend_hold","WEEKEND HOLD!", "TENUE WEEKEND!", "RETENER FINDE!");
     AddTr("flatten",     "  FLATTEN!",    "  FERMER!",      "  CERRAR!");
     // --- status chips ---
-    AddTr("chip_ok",   "OK",   "OK",     "OK");
-    AddTr("chip_warn", "WARN", "ALERTE", "ALERTA");
-    AddTr("chip_red",  "RED",  "ROUGE",  "ROJO");
+    AddTr("chip_ok",   "OK",     "OK",        "OK");      // positions keep OK (E6)
+    AddTr("chip_safe", "SAFE",   "SUR",       "SEGURO");  // E2 : mockup vocabulary for metered RULES
+    AddTr("chip_warn", "WATCH",  "SURVEILLE", "VIGILAR"); // E2 : was WARN
+    AddTr("chip_red",  "BREACH", "BRECHE",    "BRECHA");  // E2 : was RED
     AddTr("chip_na",   "--",   "--",     "--");
     // --- TF / recent bar ---
     AddTr("tf",       "TF:",       "TF:",       "TF:");
@@ -5618,6 +5652,7 @@ void InitI18n(void) {
     // --- R4 : remaining panel-visible dynamic text ---
     AddTr("pos_lock", "LOCK",  "VERR",   "BLOQ");
     AddTr("pos_nosl", "NO SL", "SANS SL","SIN SL");
+    AddTr("pos_slq",  "SL?",   "SL ?",   "SL?"); // E6 : SL missing, still in grace (amber WATCH)
     AddTr("pos_none", "no open positions", "aucune position ouverte", "sin posiciones abiertas"); // FINAL : empty-section hint
     AddTr("f_insuf",       "[insufficient margin]",       "[marge insuffisante]",        "[margen insuficiente]");
     AddTr("f_reduce",      "[reduce lot / tighten SL]",   "[réduire lot / resserrer SL]","[reducir lote / ajustar SL]");
@@ -5741,12 +5776,16 @@ void DrawTimeframeBar(int x, int y, int w) {
     // WYSIWYG : the letters sit ON the click zone. (Earlier desync bug = the label was
     // right-anchored OUTSIDE the rect, so text and zone were in different places.)
     ObjectDelete(0, RC_PREFIX + "be"); // drop any pre-R3 OBJ_BUTTON
-    const int be_w = 44, be_h = btn_h;
-    const int be_x = x + w - 52, be_y = y + 3;   // right of the "Max" copy field (ends ~x+w-58)
-    HitAdd(be_x, be_y, be_x + be_w, be_y + be_h, "be", -1, g_be_visible ? RCF_BTN_ON : RCF_BTN);
-    DrawLabel(RC_PREFIX + "be_l", be_x + be_w / 2, be_y + be_h / 2, "BE",
-              g_be_visible ? g_theme.bg : g_theme.text, RC_FONT_SIZE - 1, RC_FONT_UI);
-    ObjectSetInteger(0, RC_PREFIX + "be_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    // E5 : Break-even = a sliding PILL (mockup .sw) with a compact dim "BE" caption on
+    // its LEFT (the full "Break-even" word would collide with the Max copy field, which
+    // ends ~x+w-58). Pill 34x18, right edge x+w-7 ; caption right-anchored at pill-3px,
+    // clear of the Max edit. Zone = face rect (single source) ; act "be" unchanged.
+    const int be_w = 34, be_h = 18;
+    const int be_x = x + w - 7 - be_w, be_y = y + 3 + (btn_h - be_h) / 2;
+    HitAdd(be_x, be_y, be_x + be_w, be_y + be_h, "be", -1, g_be_visible ? RCF_PILL_ON : RCF_PILL_OFF);
+    DrawLabel(RC_PREFIX + "be_l", be_x - 3, be_y + be_h / 2, "BE",
+              g_theme.text_dim, RC_FONT_SIZE - 1, RC_FONT_UI);
+    ObjectSetInteger(0, RC_PREFIX + "be_l", OBJPROP_ANCHOR, ANCHOR_RIGHT);
     ObjectSetString (0, RC_PREFIX + "be_l", OBJPROP_TOOLTIP, "Show / hide breakeven lines");
 }
 
@@ -5866,9 +5905,11 @@ int CountPositionSymbols(void) {
 // (the auto-disarm path fires from OnTradeTransaction, which must stay cheap). Flips the
 // registry face style so the next PaintFaces shows it off, recolours the label, repaints.
 void SetBeFaceOff(void) {
+    // E5 : BE is a sliding pill now - OFF face = RCF_PILL_OFF (the caption stays a
+    // static dim label ; state is carried by the knob/gradient, not the text colour).
     for (int i = 0; i < g_nhits; ++i)
-        if (g_hits[i].act == "be") { g_hits[i].style = RCF_BTN; break; }
-    ObjectSetInteger(0, RC_PREFIX + "be_l", OBJPROP_COLOR, g_theme.text);
+        if (g_hits[i].act == "be") { g_hits[i].style = RCF_PILL_OFF; break; }
+    ObjectSetInteger(0, RC_PREFIX + "be_l", OBJPROP_COLOR, g_theme.text_dim);
     RepaintCanvas(g_anchor_x, g_anchor_y, InpPanelWidth);
 }
 
@@ -5966,7 +6007,7 @@ void DrawRecentSymbolsBar(int x, int y, int w) {
         // DispatchHit routes "recenter". Drop the pre-R3 OBJ_BUTTON.
         ObjectDelete(0, rc_id);
         const int rcx = x + w - 172, rcw = 74, rch = InpRowHeight - 6;
-        HitAdd(rcx, y + 3, rcx + rcw, y + 3 + rch, "recenter", -1, RCF_BTN);
+        HitAdd(rcx, y + 3, rcx + rcw, y + 3 + rch, "recenter", -1, RCF_BTN_GHOST); // E5 : outline ghost (mockup secondary button)
         DrawLabel(rc_lid, rcx + rcw / 2, y + 3 + rch / 2, Tr("recenter"), g_theme.text, RC_FONT_SIZE - 2, RC_FONT_UI);
         ObjectSetInteger(0, rc_lid, OBJPROP_ANCHOR, ANCHOR_CENTER);
         ObjectSetString (0, rc_lid, OBJPROP_TOOLTIP, "Re-center the chart with comfort padding");
@@ -5975,27 +6016,19 @@ void DrawRecentSymbolsBar(int x, int y, int w) {
         ObjectDelete(0, rc_lid);
     }
 
-    // B10 : DISABLED "Auto-SL" toggle. An indicator CANNOT place/modify orders -
-    // the real auto-SL ships with the companion RiskCockpit EA. Greyed out,
-    // click is a no-op, full reason in the hover tooltip.
+    // B10 : DISABLED "Auto-SL" stub - an indicator CANNOT place/modify orders (the real
+    // auto-SL ships with the companion RiskCockpit EA). E5 : converted to a DISCREET
+    // idle canvas button (RCF_BTN, deliberately NOT the accent style - never promise an
+    // action that no-ops) + centered dim label + a no-op hit-zone ("autosl" has no
+    // DispatchHit branch). Tooltip keeps the full reason.
     const string asl_id = RC_PREFIX + "autosl";
-    if (ObjectFind(0, asl_id) < 0) ObjectCreate(0, asl_id, OBJ_BUTTON, 0, 0, 0);
-    ObjectSetInteger(0, asl_id, OBJPROP_XDISTANCE, x + w - 92);
-    ObjectSetInteger(0, asl_id, OBJPROP_YDISTANCE, y + 3);
-    ObjectSetInteger(0, asl_id, OBJPROP_XSIZE, 84);
-    ObjectSetInteger(0, asl_id, OBJPROP_YSIZE, InpRowHeight - 6);
-    ObjectSetString(0, asl_id, OBJPROP_TEXT, "Auto-SL OFF");
-    ObjectSetString(0, asl_id, OBJPROP_FONT, RC_FONT_UI);
-    ObjectSetInteger(0, asl_id, OBJPROP_FONTSIZE, RC_FONT_SIZE - 2);
-    ObjectSetInteger(0, asl_id, OBJPROP_COLOR, g_theme.text_dim);
-    ObjectSetInteger(0, asl_id, OBJPROP_BGCOLOR, g_theme.bg_section);
-    ObjectSetInteger(0, asl_id, OBJPROP_BORDER_COLOR, g_theme.text_dim);
-    ObjectSetInteger(0, asl_id, OBJPROP_STATE, false);
-    ObjectSetInteger(0, asl_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, asl_id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, asl_id, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, asl_id, OBJPROP_ZORDER, 100); // LOT B
-    ObjectSetString(0, asl_id, OBJPROP_TOOLTIP,
+    ObjectDelete(0, asl_id); // drop the legacy native OBJ_BUTTON
+    const int asl_x = x + w - 92, asl_h = InpRowHeight - 6;
+    HitAdd(asl_x, y + 3, asl_x + 84, y + 3 + asl_h, "autosl", -1, RCF_BTN);
+    DrawLabel(RC_PREFIX + "autosl_l", asl_x + 42, y + 3 + asl_h / 2, "Auto-SL OFF",
+              g_theme.text_dim, RC_FONT_SIZE - 2, RC_FONT_UI);
+    ObjectSetInteger(0, RC_PREFIX + "autosl_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    ObjectSetString (0, RC_PREFIX + "autosl_l", OBJPROP_TOOLTIP,
                     "Requires RiskCockpit EA (coming soon) - an indicator cannot place orders.");
 }
 
@@ -6110,10 +6143,33 @@ void SetToggleBtn(const string id, int x, int y, bool on) {
         g_modal_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2,
                               ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255));
         g_modal_kit.PillToggle(lx, ly, w, h, on,
-                               TintOver(g_theme.bg, C'255,255,255', 0.09),
+                               FilmOver(g_theme.bg, 0.09),
                                g_theme.accent_deep, g_theme.accent,
                                (on ? C'255,255,255' : C'203,213,225'));
     }
+    HitAdd(x, y, x + w, y + h, StringSubstr(id, StringLen(RC_PREFIX)), -1, RCF_NONE);
+}
+// E7 : two-cell SEGMENT toggle (A | B) painted into the OPEN modal canvas (no
+// Begin/Commit here - the single Commit stays at the END of DrawSettingsOverlay).
+// ONE hit-zone over the whole rect : the existing cycle dispatch stays unchanged.
+void DrawSetSeg2(const string id, int x, int y, int w, int h,
+                 const string labelA, const string labelB, const int activeIdx) {
+    ObjectDelete(0, id); // stale native button from a previous build
+    const int cw = w / 2;
+    if (g_modal_kit.Ready()) {
+        const int SM = RC_KIT_MARGIN;
+        const int lx = (x - g_anchor_x) + SM, ly = (y - g_anchor_y) + SM;
+        g_modal_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2,
+                              ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255));
+        g_modal_kit.RoundFill(lx, ly, w, h, h / 2,
+                              ColorToARGB(FilmOver(g_theme.bg, 0.05), 255));
+        g_modal_kit.Segment(lx + (activeIdx == 0 ? 1 : cw), ly + 1, cw - 1, h - 2, 7, true,
+                            g_theme.accent, g_theme.accent_deep, g_theme.surface);
+    }
+    SetLbl(id + "_la", x + cw / 2, y + h / 2, labelA, (activeIdx == 0 ? g_theme.bg : g_theme.label));
+    ObjectSetInteger(0, id + "_la", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    SetLbl(id + "_lb", x + cw + cw / 2, y + h / 2, labelB, (activeIdx == 1 ? g_theme.bg : g_theme.label));
+    ObjectSetInteger(0, id + "_lb", OBJPROP_ANCHOR, ANCHOR_CENTER);
     HitAdd(x, y, x + w, y + h, StringSubstr(id, StringLen(RC_PREFIX)), -1, RCF_NONE);
 }
 // A [-] value [+] stepper. id_base+"_dn" / id_base+"_up" are the click targets.
@@ -6378,7 +6434,7 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
             g_modal_kit.SoftShadow(SM, SM, ow, oh, RC_R_PANEL, g_theme.bg_deep, 9, 95);
             g_modal_kit.EdgeGlow(SM, SM, ow, oh, RC_R_PANEL, g_theme.accent, 6, 56);
             g_modal_kit.Card(SM, SM, ow, oh, RC_R_PANEL, g_theme.bg_lift, g_theme.bg,
-                             TintOver(g_theme.bg_lift, C'255,255,255', 0.08));
+                             FilmOver(g_theme.bg_lift, 0.08));
             // title zone gradient + hairline under the tab bar (mockup .title / .divider)
             g_modal_kit.GradientVFill(SM + 1, SM + 1, ow - 2, 30, RC_R_PANEL - 1,
                                       ColorToARGB(TintOver(g_theme.bg_lift, g_theme.raise, 0.85), 255),
@@ -6392,7 +6448,7 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
             // idle tabs are transparent (labels only), ACTIVE tab = cyan gradient segment
             g_modal_kit.RoundFill(SM + 10, SM + 30, ow - 20, 26, 10, ColorToARGB(mline, 255));
             g_modal_kit.RoundFill(SM + 11, SM + 31, ow - 22, 24, 9,
-                                  ColorToARGB(TintOver(g_theme.bg, C'255,255,255', 0.05), 255));
+                                  ColorToARGB(FilmOver(g_theme.bg, 0.05), 255));
             g_modal_kit.Segment(SM + 12 + tw * g_settings_tab, SM + 32, tw - 4, 22, 7, true,
                                 g_theme.accent, g_theme.accent_deep, g_theme.surface);
             // step 1 : X-close face = red-edged rounded button (same language as the panel X)
@@ -6437,6 +6493,7 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
 
     const int lx = ox + 16;   // label column
     const int cx = ox + 150;  // control column
+    const int rx = ox + ow - 40; // E7 : shared RIGHT edge (matches the steppers' ">"/"+" column)
     int by = oy + 64;         // body cursor
     const int step = 26;
 
@@ -6460,13 +6517,14 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
             // catalogue profile and the prop rules are unchanged (already off on
             // Personal). Auto-detected from ACCOUNT_TRADE_MODE, override here.
             SetLbl(RC_PREFIX + "set_pt_lbl", lx, by + 3, Tr("set_personal_type"), g_theme.text);
-            DrawSetButton(RC_PREFIX + "set_perso_type", cx, by, 110, 20,
-                          g_eff_personal_demo == 1 ? "DEMO" : "REAL");
+            // E7 : REAL | DEMO segment toggle (mockup .seg), right-aligned on rx
+            DrawSetSeg2(RC_PREFIX + "set_perso_type", rx - 110, by, 110, 20,
+                        "REAL", "DEMO", g_eff_personal_demo);
             by += step;
             // V1.29 M : risk-tools master toggle - PERSONAL-ONLY, in the Account
             // tab so it's discoverable in the Personal context (prop = always ON).
             SetLbl(RC_PREFIX + "set_rt_lbl", lx, by + 3, Tr("set_risktools"), g_theme.text);
-            SetToggleBtn(RC_PREFIX + "set_risktools", cx, by, g_eff_risktools);
+            SetToggleBtn(RC_PREFIX + "set_risktools", rx - 42, by, g_eff_risktools); // E7 : right-aligned on rx
             by += step;
             // V1.28 : Personal can pick a demo size OR "Auto" (= the real account
             // balance, item 7). The size stepper walks the Personal list.
@@ -6491,8 +6549,9 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
 
             if (PlanIsFundedNext()) {
                 SetLbl(RC_PREFIX + "set_at_lbl", lx, by + 3, Tr("set_acct_type"), g_theme.text);
-                DrawSetButton(RC_PREFIX + "set_acct_type", cx, by, 110, 20,
-                              g_eff_acct_type == 0 ? "SWAP" : "SWAP-FREE");
+                // E7 : SWAP | SWAP-FREE segment toggle (mockup .seg), right-aligned on rx
+                DrawSetSeg2(RC_PREFIX + "set_acct_type", rx - 110, by, 110, 20,
+                            "SWAP", "SWAP-FREE", g_eff_acct_type);
                 by += step;
 
                 // Add-ons : only the ones valid for this firm (context-aware).
@@ -6513,7 +6572,7 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
                         SetLbl(RC_PREFIX + "set_adn_" + IntegerToString(flags[a]), lx + 12, by + 3,
                                names[a], g_theme.text);
                         SetToggleBtn(RC_PREFIX + "set_addon_" + IntegerToString(flags[a]),
-                                     ox + ow - 76, by, (g_addons_mask & flags[a]) != 0);
+                                     rx - 42, by, (g_addons_mask & flags[a]) != 0); // E7 : shared right edge
                         by += step - 2;
                     }
                 }
