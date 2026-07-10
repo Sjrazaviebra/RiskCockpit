@@ -773,6 +773,10 @@ int  g_anchor_y = 100;
 
 struct RCHit { int x1, y1, x2, y2; string act; int idx; int style; };
 RCHit g_hits[]; int g_nhits = 0;
+// D-FULL step 1 : the modal's hit-zones are always registered LAST (DrawSettingsOverlay
+// runs after the panel sections). This base index lets DestroySettingsOverlay TRUNCATE
+// them cleanly on close/tab-switch without touching the panel zones. -1 = modal closed.
+int g_modal_hit_base = -1;
 void HitReset(void) { g_nhits = 0; }
 void HitAdd(const int x1, const int y1, const int x2, const int y2, const string act,
             const int idx = -1, const int style = RCF_NONE) {
@@ -1202,6 +1206,37 @@ int OnCalculate(const int rates_total,
 //| OnChartEvent - reserved for future drag-to-move                  |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
+//| D-FULL step 1 : modal-side dispatcher. While the settings modal   |
+//| is OPEN, every coordinate click routes HERE (DispatchHit hands    |
+//| over before any panel act can run). Converted controls (tabs, X)  |
+//| act ; "set_noop" (the full-modal swallow zone) and any not-yet-   |
+//| converted act are ignored - the remaining NATIVE modal buttons    |
+//| keep their CHARTEVENT_OBJECT_CLICK ladder, and the trailing       |
+//| CHARTEVENT_CLICK MT5 pairs with them dies on the noop zone        |
+//| instead of leaking to a panel zone underneath.                    |
+//+------------------------------------------------------------------+
+void DispatchModalHit(const string act, const int idx) {
+    if (act == "set_close") {
+        // X : CLOSING must restore the FULL panel - opening the modal HID the panel
+        // controls (SetPanelControlsHidden(true,"set") : buttons/edits/logo AND the
+        // g_kit canvas bitmap). A light close left them hidden = half-rendered panel
+        // (same class as the lock->clear bug). Full rebuild = the proven native-close
+        // path ; a one-off click action, so the rebuild cost is invisible.
+        g_settings_open = false;
+        DestroySettingsOverlay();   // free the shell bitmap + truncate the modal zones
+        ApplySettingsChange();      // DestroyAllObjects + BuildPanel + refresh + ChartRedraw
+    } else if (act == "set_tab") {         // tab switch : re-render ONLY the modal (zero flicker)
+        if (idx >= 0 && idx < 5 && idx != g_settings_tab) {
+            g_settings_tab = idx;
+            DestroySettingsOverlay();
+            DrawSettingsOverlay(g_anchor_x, g_anchor_y, InpPanelWidth);
+        }
+        ChartRedraw(0);
+    }
+    // "set_noop" + anything else : swallowed on purpose (modal captures input).
+}
+
+//+------------------------------------------------------------------+
 //| v1.4.1 R3 : route a hit-tested (canvas-drawn) control to the same |
 //| logic its OBJ_BUTTON used. Extended per phase (tf now ; toggles,  |
 //| buttons, positions, settings modal next).                        |
@@ -1212,11 +1247,11 @@ void DispatchHit(const string act, const int idx) {
     // no such hiding, so refuse every control click while the overlay exists (the
     // native "disc_unlock" button keeps its own OBJECT_CLICK path).
     if (ObjectFind(0, RC_PREFIX + "discipline_overlay") >= 0) return;
-    // When the settings modal is OPEN it captures input : the panel-body hit-zones
-    // are inert (the modal's own OBJ_BUTTONs keep their OBJECT_CLICK routing). This
-    // stops the panel X (a body zone) firing under the modal's own close X. (R4 will
-    // convert the modal itself to canvas + hit-testing.)
-    if (g_settings_open) return;
+    // D-FULL step 1 : while the modal is open, ALL coordinate clicks belong to the
+    // modal dispatcher - its zones sit on TOP of the registry and "set_noop" swallows
+    // whatever misses a control. Panel acts stay unreachable (same capture semantics
+    // the plain `return` used to provide).
+    if (g_settings_open) { DispatchModalHit(act, idx); return; }
     if (act == "tf") {
         ENUM_TIMEFRAMES tfv[9] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
                                   PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
@@ -1354,11 +1389,10 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
             ChartIndicatorDelete(0, kwin, "RiskCockpit");
             ChartRedraw(0);
             return;
-        } else if (sparam == RC_PREFIX + "set_close") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_settings_open = false;
-            ApplySettingsChange();
-            g_swallow_click = true; // eat the CLICK MT5 pairs with this OBJECT_CLICK, else it hits the panel-X zone underneath
+        // D-FULL step 1 : set_close + set_tab_* are HIT-TESTING now (DispatchModalHit) -
+        // their native OBJ_BUTTONs no longer exist, so their ladder branches are gone.
+        // g_swallow_click stays until the WHOLE modal is converted (remaining native
+        // modal buttons still emit paired OBJECT_CLICK+CLICK ; the noop zone eats them).
         } else if (sparam == RC_PREFIX + "set_lang_en" ||
                    sparam == RC_PREFIX + "set_lang_fr" ||
                    sparam == RC_PREFIX + "set_lang_es") {
@@ -1411,22 +1445,6 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
                 SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
             }
             ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_tab_acct"  || sparam == RC_PREFIX + "set_tab_risk" ||
-                   sparam == RC_PREFIX + "set_tab_disp"  || sparam == RC_PREFIX + "set_tab_alert" ||
-                   sparam == RC_PREFIX + "set_tab_adv") {
-            // G2 : switch settings tab.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            if      (sparam == RC_PREFIX + "set_tab_acct")  g_settings_tab = 0;
-            else if (sparam == RC_PREFIX + "set_tab_risk")  g_settings_tab = 1;
-            else if (sparam == RC_PREFIX + "set_tab_disp")  g_settings_tab = 2;
-            else if (sparam == RC_PREFIX + "set_tab_alert") g_settings_tab = 3;
-            else                                            g_settings_tab = 4;
-            // Phase 4 (B) : re-render ONLY the modal on the new tab - NOT a full rebuild.
-            // ApplySettingsChange = DestroyAllObjects + BuildPanel = whole-indicator flicker.
-            // The body + g_kit canvas underneath the modal are left untouched -> zero flicker.
-            DestroySettingsOverlay();
-            DrawSettingsOverlay(g_anchor_x, g_anchor_y, InpPanelWidth);
-            ChartRedraw(0);
         } else if (sparam == RC_PREFIX + "set_phase_prev" || sparam == RC_PREFIX + "set_phase_next") {
             ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
             const int d = (sparam == RC_PREFIX + "set_phase_next" ? 1 : -1);
@@ -6285,6 +6303,12 @@ void DestroySettingsOverlay(void) {
     g_modal_kit.Destroy(); // LOT D STEP 0 : free the shell bitmap resource first (the
                            // object itself also matches the "set_" prefix below)
     ObjectsDeleteAll(0, RC_PREFIX + "set_");
+    // D-FULL step 1 : drop the modal hit-zones - they are always the registry TAIL
+    // (DrawSettingsOverlay runs after the panel sections), so truncate to the base.
+    // Guarded : -1 = modal was never drawn ; base can never exceed the current count.
+    if (g_modal_hit_base >= 0 && g_modal_hit_base <= g_nhits)
+        g_nhits = g_modal_hit_base;
+    g_modal_hit_base = -1;
 }
 
 void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
@@ -6292,6 +6316,15 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     const int oy = panel_y;
     const int ow = panel_w;
     const int oh = (g_panel_height > 120 ? g_panel_height : 240);
+
+    // D-FULL step 1 : modal hit-zones start here (truncated by DestroySettingsOverlay).
+    g_modal_hit_base = g_nhits;
+    // Full-modal SWALLOW zone, registered FIRST : HitTest scans last-registered-first,
+    // so every real modal control zone (registered after) wins ; any in-modal click
+    // that misses a control lands here and DispatchModalHit ignores it -> it can never
+    // fall through to a panel zone underneath (incl. the trailing CHARTEVENT_CLICK the
+    // remaining native modal buttons still emit).
+    HitAdd(ox, oy, ox + ow, oy + oh, "set_noop", -1, RCF_NONE);
 
     // Modal cover : opaque, ZORDER 240 -> masks every panel object (rows are <= 100)
     // AND swallows stray clicks meant for the panel behind. Kept as the input-capture
@@ -6302,15 +6335,18 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     DrawRect(modal_id, ox + 6, oy + 6, ow - 12, oh - 12, g_theme.bg_lift, g_theme.bg_lift, 0);
     ObjectSetInteger(0, modal_id, OBJPROP_ZORDER, 240);
 
-    // LOT D STEP 0 : rounded modal SHELL on its own canvas - card + shadow + cyan edge
-    // glow, the same language as the panel body. A BITMAP_LABEL always renders above
-    // the rectangle cover and below the native OBJ_BUTTONs, and the SetLbl labels are
-    // (re)created after it -> rounded look, ZERO routing change (g_swallow_click /
-    // g_settings_open untouched). Recreated per open/tab-switch (a click-rate event).
+    // D-FULL step 1 : tab-bar + X-close geometry, shared by faces, zones AND labels
+    // (ONE source - the BE lesson : face, zone and text derive from the same rect).
+    const int ty  = oy + 32;
+    const int tw  = (ow - 24) / 5;
+    const int cxx = ox + ow - 32;   // X-close rect (24x20 at oy+6)
+
+    // LOT D : rounded modal SHELL + (step 1) tab track/segment + X face - ONE paint pass.
     {
         const int SM = RC_KIT_MARGIN;
         g_modal_kit.Create(RC_PREFIX + "set_shell", ox - SM, oy - SM, ow + 2 * SM, oh + 2 * SM);
         if (g_modal_kit.Ready()) {
+            const color mline = TintOver(g_theme.bg, C'148,163,184', 0.14);
             g_modal_kit.Begin();
             g_modal_kit.SoftShadow(SM, SM, ow, oh, RC_R_PANEL, g_theme.bg_deep, 9, 95);
             g_modal_kit.EdgeGlow(SM, SM, ow, oh, RC_R_PANEL, g_theme.accent, 6, 56);
@@ -6320,35 +6356,55 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
             g_modal_kit.GradientVFill(SM + 1, SM + 1, ow - 2, 30, RC_R_PANEL - 1,
                                       ColorToARGB(TintOver(g_theme.bg_lift, g_theme.raise, 0.85), 255),
                                       ColorToARGB(TintOver(g_theme.bg_lift, g_theme.surface, 0.70), 255));
-            g_modal_kit.Hairline(SM + 12, SM + 58, SM + ow - 12,
-                                 TintOver(g_theme.bg, C'148,163,184', 0.14));
+            g_modal_kit.Hairline(SM + 12, SM + 58, SM + ow - 12, mline);
+            // step 1 : CONTENT card behind the tab body rows (mockup card stack)
+            g_modal_kit.Card(SM + 10, SM + 62, ow - 20, oh - 74, RC_R_CARD,
+                             TintOver(g_theme.bg, g_theme.surface_hi, 0.45),
+                             TintOver(g_theme.bg, g_theme.surface, 0.20), mline);
+            // step 1 : segmented TAB control (mockup .seg) - light track + soft ring ;
+            // idle tabs are transparent (labels only), ACTIVE tab = cyan gradient segment
+            g_modal_kit.RoundFill(SM + 10, SM + 30, ow - 20, 26, 10, ColorToARGB(mline, 255));
+            g_modal_kit.RoundFill(SM + 11, SM + 31, ow - 22, 24, 9,
+                                  ColorToARGB(TintOver(g_theme.bg, C'255,255,255', 0.05), 255));
+            g_modal_kit.Segment(SM + 12 + tw * g_settings_tab, SM + 32, tw - 4, 22, 7, true,
+                                g_theme.accent, g_theme.accent_deep, g_theme.surface);
+            // step 1 : X-close face = red-edged rounded button (same language as the panel X)
+            g_modal_kit.Card((cxx - ox) + SM, SM + 6, 24, 20, 8, g_theme.raise, g_theme.surface, g_theme.red);
             g_modal_kit.Commit();
         }
     }
 
-    // Title + close.
+    // D-FULL step 1 : the close X + the 5 tabs are HIT-TESTING now - retire their
+    // native OBJ_BUTTONs (drop any stale ones from a previous build).
+    ObjectDelete(0, RC_PREFIX + "set_close");
+    ObjectDelete(0, RC_PREFIX + "set_tab_acct");
+    ObjectDelete(0, RC_PREFIX + "set_tab_risk");
+    ObjectDelete(0, RC_PREFIX + "set_tab_disp");
+    ObjectDelete(0, RC_PREFIX + "set_tab_alert");
+    ObjectDelete(0, RC_PREFIX + "set_tab_adv");
+    ObjectDelete(0, RC_PREFIX + "set_divider"); // pre-D-full leftover
+
+    // Title + close (centered label + zone on the SAME rect as the face).
     SetLbl(RC_PREFIX + "set_title", ox + 16, oy + 9, Tr("settings"), g_theme.accent);
     ObjectSetInteger(0, RC_PREFIX + "set_title", OBJPROP_FONTSIZE, RC_FONT_SIZE_TITLE);
-    DrawSetButton(RC_PREFIX + "set_close", ox + ow - 32, oy + 6, 24, 20, "X");
-    ObjectSetInteger(0, RC_PREFIX + "set_close", OBJPROP_COLOR, g_theme.red);        // Phase 4 : danger-tinted close, like the panel X
-    ObjectSetInteger(0, RC_PREFIX + "set_close", OBJPROP_BORDER_COLOR, g_theme.red);
+    SetLbl(RC_PREFIX + "set_close_l", cxx + 12, oy + 16, "X", g_theme.red);
+    ObjectSetInteger(0, RC_PREFIX + "set_close_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    HitAdd(cxx, oy + 6, cxx + 24, oy + 26, "set_close", -1, RCF_NONE);
 
-    // Tab bar.
-    const int ty = oy + 32;
-    const int tw = (ow - 24) / 5;
-    DrawSetButton(RC_PREFIX + "set_tab_acct",  ox + 12 + tw * 0, ty, tw - 4, 22, Tr("tab_account"));
-    DrawSetButton(RC_PREFIX + "set_tab_risk",  ox + 12 + tw * 1, ty, tw - 4, 22, Tr("tab_risk"));
-    DrawSetButton(RC_PREFIX + "set_tab_disp",  ox + 12 + tw * 2, ty, tw - 4, 22, Tr("tab_display"));
-    DrawSetButton(RC_PREFIX + "set_tab_alert", ox + 12 + tw * 3, ty, tw - 4, 22, Tr("tab_alerts"));
-    DrawSetButton(RC_PREFIX + "set_tab_adv",   ox + 12 + tw * 4, ty, tw - 4, 22, Tr("tab_advanced"));
-    HighlightSetButton(RC_PREFIX + "set_tab_acct",  g_settings_tab == 0);
-    HighlightSetButton(RC_PREFIX + "set_tab_risk",  g_settings_tab == 1);
-    HighlightSetButton(RC_PREFIX + "set_tab_disp",  g_settings_tab == 2);
-    HighlightSetButton(RC_PREFIX + "set_tab_alert", g_settings_tab == 3);
-    HighlightSetButton(RC_PREFIX + "set_tab_adv",   g_settings_tab == 4);
-    // Phase 4 divider : now painted INSIDE the shell canvas (the old set_divider rect
-    // would render UNDER the shell bitmap and be invisible). Drop any stale rect.
-    ObjectDelete(0, RC_PREFIX + "set_divider");
+    // Tab bar : centered labels + click zones on the SAME rects as the faces.
+    {
+        string tabs[5];
+        tabs[0] = Tr("tab_account"); tabs[1] = Tr("tab_risk"); tabs[2] = Tr("tab_display");
+        tabs[3] = Tr("tab_alerts");  tabs[4] = Tr("tab_advanced");
+        for (int t = 0; t < 5; ++t) {
+            const int tx = ox + 12 + tw * t;
+            const string tl = RC_PREFIX + "set_tab_l" + IntegerToString(t);
+            SetLbl(tl, tx + (tw - 4) / 2, ty + 11, tabs[t],
+                   (t == g_settings_tab ? g_theme.bg : g_theme.label));
+            ObjectSetInteger(0, tl, OBJPROP_ANCHOR, ANCHOR_CENTER);
+            HitAdd(tx, ty, tx + tw - 4, ty + 22, "set_tab", t, RCF_NONE);
+        }
+    }
 
     const int lx = ox + 16;   // label column
     const int cx = ox + 150;  // control column
