@@ -237,10 +237,11 @@ int     g_fx_h  = 0;
 // soft gradient, drop shadow, hairline dividers, rounded-end meters + pills).
 // It sits UNDER the text (OBJ_LABEL) and controls, and under g_fx (the glow).
 CCanvasKit g_kit;
-// LOT D STEP 0 : the settings modal gets its OWN canvas shell (rounded card + shadow +
-// glow) painted BEHIND its native controls. A bitmap-label always renders above the
-// legacy set_modal rect and below OBJ_BUTTONs -> the rounded look ships with ZERO
-// change to click routing (g_swallow_click / g_settings_open untouched).
+// LOT D : the settings modal draws on its OWN canvas - shell (rounded card + shadow +
+// glow) AND, since D-FULL step 2, every control face (buttons / pills / steppers).
+// DrawSettingsOverlay holds ONE Begin..Commit around the whole build ; the helpers
+// (DrawSetButton / SetToggleBtn / SetStepper) paint into the open canvas and register
+// hit-zones on the same rects. 100% hit-testing : no native modal OBJ_BUTTON remains.
 CCanvasKit g_modal_kit;
 #define RC_KIT_MARGIN 16   // shadow / rounding room around the panel
 #define RC_R_PANEL    15   // panel corner radius (LOT B : mockup .rc radius 15)
@@ -854,12 +855,10 @@ int  g_active_plan_idx  = -1;   // -1 = InpPlan, else cast to ENUM_FN_PLAN
 int  g_active_theme_idx = -1;   // -1 = InpTheme, else 0 = DARK, 1 = LIGHT
 bool g_settings_open    = false;
 int  g_settings_tab     = 0;    // 0=Account 1=Risk 2=Display 3=Alerts
-// v1.4.1 R3 : MT5 pairs a modal-button OBJECT_CLICK with a trailing CHARTEVENT_CLICK
-// at the same pixel. Closing the modal via its X flips g_settings_open=false FIRST,
-// so the trailing CLICK would slip past the "modal captures input" guard and hit the
-// panel-X hit-zone underneath (= closes the whole panel). This one-shot flag lets the
-// CLICK handler swallow exactly that paired event.
-bool g_swallow_click    = false;
+// D-FULL step 3 : g_swallow_click REMOVED. It existed because native modal OBJ_BUTTONs
+// emitted an OBJECT_CLICK paired with a trailing CHARTEVENT_CLICK that could leak to a
+// panel zone. The modal is 100% hit-testing now : one CLICK = one dispatch, and the
+// full-modal "set_noop" zone swallows anything that misses a control.
 // G2 B-SETTINGS-FULL : runtime-mutable shadows of the editable inputs. MQL5
 // `input` variables are READ-ONLY at runtime, so the in-panel settings centre
 // works on these instead. Initialised from the Inp* defaults in OnInit (a
@@ -1206,6 +1205,260 @@ int OnCalculate(const int rates_total,
 //| OnChartEvent - reserved for future drag-to-move                  |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
+//| D-FULL step 2 : the settings-control logic, MOVED VERBATIM from   |
+//| the CHARTEVENT_OBJECT_CLICK ladder (the modal is 100% hit-testing |
+//| now - no native OBJ_BUTTON left, so no sparam ; the OBJPROP_STATE |
+//| resets died with the buttons). act = the object id minus "RC_"    |
+//| (e.g. "set_lang_fr", "set_sl_up"). Same effects : persist          |
+//| (GlobalVariableSet) + ApplySettingsChange.                        |
+//+------------------------------------------------------------------+
+void HandleModalControl(const string act) {
+    if (act == "set_lang_en" || act == "set_lang_fr" || act == "set_lang_es") {
+        if      (act == "set_lang_en") g_lang = 0;
+        else if (act == "set_lang_fr") g_lang = 1;
+        else                           g_lang = 2;
+        GlobalVariableSet("RC_lang", (double)g_lang);
+        ApplySettingsChange();
+    } else if (act == "set_theme_dark" || act == "set_theme_light") {
+        g_active_theme_idx = (act == "set_theme_dark" ? 0 : 1);
+        GlobalVariableSet("RC_theme_override", (double)g_active_theme_idx);
+        ApplySettingsChange();
+    } else if (act == "set_vendor_prev" || act == "set_vendor_next") {
+        // V1.27 CASCADE step 1 : pick the BROKER. Snap the type to that
+        // vendor's first plan and the size to that plan's first legal size.
+        const int delta = (act == "set_vendor_next" ? 1 : -1);
+        int v = VendorOfPlan(EffectivePlan());
+        v = ((v + delta) % 6 + 6) % 6; // 6 vendors
+        ENUM_FN_PLAN vplans[];
+        const int vn = PlansForVendor(v, vplans);
+        if (vn > 0) {
+            g_active_plan_idx = (int)vplans[0];
+            GlobalVariableSet("RC_plan_override", (double)g_active_plan_idx);
+            SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
+            SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
+        }
+        ApplySettingsChange();
+    } else if (act == "set_plan_prev" || act == "set_plan_next") {
+        // V1.27 CASCADE step 2 : pick the TYPE, constrained to the current
+        // vendor's plans only (so e.g. FTMO never offers Stellar types).
+        const int delta = (act == "set_plan_next" ? 1 : -1);
+        const int v = VendorOfPlan(EffectivePlan());
+        ENUM_FN_PLAN plans[];
+        const int np = PlansForVendor(v, plans);
+        const int cur = (int)EffectivePlan();
+        int pidx = 0;
+        for (int i = 0; i < np; ++i) if ((int)plans[i] == cur) { pidx = i; break; }
+        if (np > 0) {
+            pidx = ((pidx + delta) % np + np) % np;
+            g_active_plan_idx = (int)plans[pidx];
+            GlobalVariableSet("RC_plan_override", (double)g_active_plan_idx);
+            SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
+            SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
+        }
+        ApplySettingsChange();
+    } else if (act == "set_phase_prev" || act == "set_phase_next") {
+        const int d = (act == "set_phase_next" ? 1 : -1);
+        g_eff_phase = ((g_eff_phase + d) % 4 + 4) % 4; // ENUM_FN_PHASE 0..3
+        SnapPhaseToPlan(EffectivePlan()); // V1.27 : don't let a non-Instant plan land on INSTANT
+        GlobalVariableSet("RC_phase", (double)g_eff_phase);
+        ApplySettingsChange();
+    } else if (act == "set_size_prev" || act == "set_size_next") {
+        // V1.27 CASCADE step 3 : step only the sizes legal for the current plan.
+        double sizes[];
+        const int ns = ValidSizesForPlan(EffectivePlan(), sizes);
+        int sidx = 0;
+        for (int si = 0; si < ns; ++si)
+            if ((int)MathRound(g_eff_size) == (int)MathRound(sizes[si])) { sidx = si; break; }
+        const int d = (act == "set_size_next" ? 1 : -1);
+        if (ns > 0) {
+            sidx = ((sidx + d) % ns + ns) % ns;
+            g_eff_size = sizes[sidx];
+            GlobalVariableSet("RC_size", g_eff_size);
+        }
+        ApplySettingsChange();
+    } else if (act == "set_acct_type") {
+        g_eff_acct_type = (g_eff_acct_type == 0 ? 1 : 0);
+        GlobalVariableSet("RC_acct_type", (double)g_eff_acct_type);
+        ApplySettingsChange();
+    } else if (act == "set_perso_type") {
+        // V1.29 I : toggle Personal Real <-> Demo (labeling only ; catalogue untouched).
+        g_eff_personal_demo = (g_eff_personal_demo == 0 ? 1 : 0);
+        GlobalVariableSet("RC_perso_demo", (double)g_eff_personal_demo);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_addon_") == 0) {
+        const int flag = (int)StringToInteger(StringSubstr(act, StringLen("set_addon_")));
+        if ((g_addons_mask & flag) != 0) g_addons_mask &= ~flag;
+        else                             g_addons_mask |=  flag;
+        GlobalVariableSet("RC_addons", (double)g_addons_mask);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_n_") == 0) {
+        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
+        g_max_parallel = (int)MathMax(1.0, MathMin(50.0, (double)g_max_parallel + d));
+        PersistMaxParallel();
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_sl_") == 0) {
+        const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
+        g_eff_sl_pct = MathMax(0.1, MathMin(10.0, MathRound((g_eff_sl_pct + d) * 100.0) / 100.0));
+        GlobalVariableSet("RC_sl_pct", g_eff_sl_pct);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_tp_") == 0) {
+        const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
+        g_eff_tp_pct = MathMax(0.05, MathMin(10.0, MathRound((g_eff_tp_pct + d) * 100.0) / 100.0));
+        GlobalVariableSet("RC_tp_pct", g_eff_tp_pct);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_mm_") == 0) {
+        const double d = (StringFind(act, "_up") >= 0 ? 1.0 : -1.0);
+        g_eff_max_margin_pt = MathMax(1.0, MathMin(100.0, MathRound(g_eff_max_margin_pt + d)));
+        GlobalVariableSet("RC_mm_pt", g_eff_max_margin_pt);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_mr_") == 0) {
+        const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
+        g_eff_max_risk_pt = MathMax(0.1, MathMin(5.0, MathRound((g_eff_max_risk_pt + d) * 100.0) / 100.0));
+        GlobalVariableSet("RC_mr_pt", g_eff_max_risk_pt);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_tn_") == 0) { // V1.26 Advanced steppers
+        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
+        g_eff_tilt_n = (int)MathMax(0.0, MathMin(50.0, (double)g_eff_tilt_n + d));
+        GlobalVariableSet("RC_tilt_n", (double)g_eff_tilt_n);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_tw_") == 0) {
+        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
+        g_eff_tilt_win = (int)MathMax(1.0, MathMin(240.0, (double)g_eff_tilt_win + d));
+        GlobalVariableSet("RC_tilt_win", (double)g_eff_tilt_win);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_cn_") == 0) {
+        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
+        g_eff_cooldown_n = (int)MathMax(0.0, MathMin(20.0, (double)g_eff_cooldown_n + d));
+        GlobalVariableSet("RC_cool_n", (double)g_eff_cooldown_n);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_cm_") == 0) {
+        const int d = (StringFind(act, "_up") >= 0 ? 5 : -5);
+        g_eff_cooldown_m = (int)MathMax(0.0, MathMin(480.0, (double)g_eff_cooldown_m + d));
+        GlobalVariableSet("RC_cool_m", (double)g_eff_cooldown_m);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_sh_") == 0) {
+        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
+        g_eff_selflock_h = (int)MathMax(1.0, MathMin(72.0, (double)g_eff_selflock_h + d));
+        GlobalVariableSet("RC_selflock_h", (double)g_eff_selflock_h);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_cp_") == 0) {
+        const double d = (StringFind(act, "_up") >= 0 ? 1.0 : -1.0);
+        g_eff_comfort_pct = MathMax(1.0, MathMin(50.0, MathRound(g_eff_comfort_pct + d)));
+        GlobalVariableSet("RC_comfort_pct", g_eff_comfort_pct);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_split_") == 0) {
+        // V1.27 : profit-split override. Cycles Auto(-1) -> 70 -> 80 -> 90 -> 95 -> Auto.
+        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
+        double opts[5]; opts[0]=-1.0; opts[1]=70.0; opts[2]=80.0; opts[3]=90.0; opts[4]=95.0;
+        int oi = 0;
+        for (int i = 0; i < 5; ++i) if ((int)MathRound(opts[i]) == (int)MathRound(g_eff_split)) { oi = i; break; }
+        oi = ((oi + d) % 5 + 5) % 5;
+        g_eff_split = opts[oi];
+        GlobalVariableSet("RC_split", g_eff_split);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_cyy_") == 0) {
+        // V1.27 : cycle-start YEAR stepper (YYYYMMDD double).
+        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
+        if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
+        int y = (int)g_eff_cycle_ymd / 10000, m = ((int)g_eff_cycle_ymd / 100) % 100, dd = (int)g_eff_cycle_ymd % 100;
+        y = (int)MathMax(2020, MathMin(2035, y + d));
+        if (dd > DaysInMonth(y, m)) dd = DaysInMonth(y, m); // Feb 29 -> 28 in a non-leap year
+        g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
+        GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_cmm_") == 0) {
+        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
+        if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
+        int y = (int)g_eff_cycle_ymd / 10000, m = ((int)g_eff_cycle_ymd / 100) % 100, dd = (int)g_eff_cycle_ymd % 100;
+        m = ((m - 1 + d) % 12 + 12) % 12 + 1;
+        if (dd > DaysInMonth(y, m)) dd = DaysInMonth(y, m); // clamp to the new month's length
+        g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
+        GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_cdd_") == 0) {
+        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
+        if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
+        int y = (int)g_eff_cycle_ymd / 10000, m = ((int)g_eff_cycle_ymd / 100) % 100, dd = (int)g_eff_cycle_ymd % 100;
+        const int dim = DaysInMonth(y, m);
+        if (dd > dim) dd = dim;
+        dd = ((dd - 1 + d) % dim + dim) % dim + 1; // 1..days-in-month (calendar-aware)
+        g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
+        GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_mcv_") == 0) {
+        // V1.27 : post-violation MARGIN cap (%) stepper.
+        const double d = (StringFind(act, "_up") >= 0 ? 5.0 : -5.0);
+        g_eff_margin_cap_viol = MathMax(5.0, MathMin(100.0, MathRound(g_eff_margin_cap_viol + d)));
+        GlobalVariableSet("RC_mcap_viol", g_eff_margin_cap_viol);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_rcv_") == 0) {
+        // V1.27 : post-violation RISK cap (%) stepper.
+        const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
+        g_eff_risk_cap_viol = MathMax(0.1, MathMin(5.0, MathRound((g_eff_risk_cap_viol + d) * 100.0) / 100.0));
+        GlobalVariableSet("RC_rcap_viol", g_eff_risk_cap_viol);
+        ApplySettingsChange();
+    } else if (StringFind(act, "set_rm_") == 0) {
+        // V1.27 : refresh period (ms) stepper ; re-arm the timer immediately.
+        const int d = (StringFind(act, "_up") >= 0 ? 100 : -100);
+        g_eff_refresh_ms = (int)MathMax(100.0, MathMin(2000.0, (double)g_eff_refresh_ms + d));
+        GlobalVariableSet("RC_refresh_ms", (double)g_eff_refresh_ms);
+        EventKillTimer();
+        EventSetMillisecondTimer(g_eff_refresh_ms);
+        ApplySettingsChange();
+    } else if (act == "set_mviol") {
+        // V1.27 : mirror of the on-chart margin-violation toggle (same shadow + GV).
+        g_margin_violation_active = !g_margin_violation_active;
+        GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
+        ApplySettingsChange();
+    } else if (act == "set_rviol") {
+        g_risk_violation_active = !g_risk_violation_active;
+        GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0);
+        ApplySettingsChange();
+    } else if (act == "set_news") {
+        g_eff_show_news = !g_eff_show_news;
+        GlobalVariableSet("RC_show_news", g_eff_show_news ? 1.0 : 0.0);
+        ApplySettingsChange();
+    } else if (act == "set_news_high") {
+        g_eff_news_high = !g_eff_news_high; // V1.29 R
+        GlobalVariableSet("RC_news_high", g_eff_news_high ? 1.0 : 0.0);
+        ApplySettingsChange();
+    } else if (act == "set_news_med") {
+        g_eff_news_med = !g_eff_news_med; // V1.29 R
+        GlobalVariableSet("RC_news_med", g_eff_news_med ? 1.0 : 0.0);
+        ApplySettingsChange();
+    } else if (act == "set_comfort") {
+        g_eff_comfort = !g_eff_comfort;
+        GlobalVariableSet("RC_comfort", g_eff_comfort ? 1.0 : 0.0);
+        ApplySettingsChange();
+    } else if (act == "set_discipline") {
+        g_eff_discipline = !g_eff_discipline;
+        GlobalVariableSet("RC_discipline", g_eff_discipline ? 1.0 : 0.0);
+        ApplySettingsChange();
+    } else if (act == "set_risktools") {
+        // V1.29 J : master risk-tools ON/OFF (explicit choice persists, beats the Personal default).
+        g_eff_risktools = !g_eff_risktools;
+        GlobalVariableSet("RC_risktools", g_eff_risktools ? 1.0 : 0.0);
+        ApplySettingsChange();
+    } else if (act == "set_sound") {
+        g_eff_sound = !g_eff_sound;
+        GlobalVariableSet("RC_sound", g_eff_sound ? 1.0 : 0.0);
+        ApplySettingsChange();
+    } else if (act == "set_telegram") {
+        g_eff_telegram = !g_eff_telegram;
+        GlobalVariableSet("RC_telegram", g_eff_telegram ? 1.0 : 0.0);
+        ApplySettingsChange();
+    } else if (act == "set_selflock") {
+        // V1.24 G1 : arm the self-lock for the configured hours, persist, close the
+        // popup so the full-panel STOP shows immediately.
+        g_selflock_until = TimeCurrent() + (datetime)MathMax(1, g_eff_selflock_h) * 3600;
+        GlobalVariableSet("RC_selflock_until", (double)g_selflock_until);
+        g_unlock_arm = 0;
+        g_settings_open = false;
+        ApplySettingsChange();
+    }
+}
+
+//+------------------------------------------------------------------+
 //| D-FULL step 1 : modal-side dispatcher. While the settings modal   |
 //| is OPEN, every coordinate click routes HERE (DispatchHit hands    |
 //| over before any panel act can run). Converted controls (tabs, X)  |
@@ -1232,8 +1485,12 @@ void DispatchModalHit(const string act, const int idx) {
             DrawSettingsOverlay(g_anchor_x, g_anchor_y, InpPanelWidth);
         }
         ChartRedraw(0);
+    } else if (act != "set_noop") {
+        // D-FULL step 2 : every converted body control routes here - the exact logic
+        // its native OBJECT_CLICK branch ran (moved into HandleModalControl).
+        HandleModalControl(act);
     }
-    // "set_noop" + anything else : swallowed on purpose (modal captures input).
+    // "set_noop" : swallowed on purpose (modal captures input).
 }
 
 //+------------------------------------------------------------------+
@@ -1343,9 +1600,6 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
     // v1.4.1 R3 : canvas-drawn (rounded) controls are routed by CLICK coordinates.
     // (An OBJ_BUTTON is opaque + square ; rounded controls are painted, not buttons.)
     if (id == CHARTEVENT_CLICK) {
-        // Swallow the stray CLICK MT5 pairs with a just-processed modal-close
-        // OBJECT_CLICK (else it lands on the panel-X zone under the modal X).
-        if (g_swallow_click) { g_swallow_click = false; return; }
         string act; int hidx;
         if (HitTest((int)lparam, (int)dparam, act, hidx)) { DispatchHit(act, hidx); return; }
     }
@@ -1389,295 +1643,9 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
             ChartIndicatorDelete(0, kwin, "RiskCockpit");
             ChartRedraw(0);
             return;
-        // D-FULL step 1 : set_close + set_tab_* are HIT-TESTING now (DispatchModalHit) -
-        // their native OBJ_BUTTONs no longer exist, so their ladder branches are gone.
-        // g_swallow_click stays until the WHOLE modal is converted (remaining native
-        // modal buttons still emit paired OBJECT_CLICK+CLICK ; the noop zone eats them).
-        } else if (sparam == RC_PREFIX + "set_lang_en" ||
-                   sparam == RC_PREFIX + "set_lang_fr" ||
-                   sparam == RC_PREFIX + "set_lang_es") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            if      (sparam == RC_PREFIX + "set_lang_en") g_lang = 0;
-            else if (sparam == RC_PREFIX + "set_lang_fr") g_lang = 1;
-            else                                          g_lang = 2;
-            GlobalVariableSet("RC_lang", (double)g_lang);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_theme_dark" ||
-                   sparam == RC_PREFIX + "set_theme_light") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_active_theme_idx = (sparam == RC_PREFIX + "set_theme_dark" ? 0 : 1);
-            GlobalVariableSet("RC_theme_override", (double)g_active_theme_idx);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_vendor_prev" ||
-                   sparam == RC_PREFIX + "set_vendor_next") {
-            // V1.27 CASCADE step 1 : pick the BROKER. Snap the type to that
-            // vendor's first plan and the size to that plan's first legal size.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int delta = (sparam == RC_PREFIX + "set_vendor_next" ? 1 : -1);
-            int v = VendorOfPlan(EffectivePlan());
-            v = ((v + delta) % 6 + 6) % 6; // 6 vendors
-            ENUM_FN_PLAN vplans[];
-            const int vn = PlansForVendor(v, vplans);
-            if (vn > 0) {
-                g_active_plan_idx = (int)vplans[0];
-                GlobalVariableSet("RC_plan_override", (double)g_active_plan_idx);
-                SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
-                SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
-            }
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_plan_prev" ||
-                   sparam == RC_PREFIX + "set_plan_next") {
-            // V1.27 CASCADE step 2 : pick the TYPE, constrained to the current
-            // vendor's plans only (so e.g. FTMO never offers Stellar types).
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int delta = (sparam == RC_PREFIX + "set_plan_next" ? 1 : -1);
-            const int v = VendorOfPlan(EffectivePlan());
-            ENUM_FN_PLAN plans[];
-            const int np = PlansForVendor(v, plans);
-            const int cur = (int)EffectivePlan();
-            int pidx = 0;
-            for (int i = 0; i < np; ++i) if ((int)plans[i] == cur) { pidx = i; break; }
-            if (np > 0) {
-                pidx = ((pidx + delta) % np + np) % np;
-                g_active_plan_idx = (int)plans[pidx];
-                GlobalVariableSet("RC_plan_override", (double)g_active_plan_idx);
-                SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
-                SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
-            }
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_phase_prev" || sparam == RC_PREFIX + "set_phase_next") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (sparam == RC_PREFIX + "set_phase_next" ? 1 : -1);
-            g_eff_phase = ((g_eff_phase + d) % 4 + 4) % 4; // ENUM_FN_PHASE 0..3
-            SnapPhaseToPlan(EffectivePlan()); // V1.27 : don't let a non-Instant plan land on INSTANT
-            GlobalVariableSet("RC_phase", (double)g_eff_phase);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_size_prev" || sparam == RC_PREFIX + "set_size_next") {
-            // V1.27 CASCADE step 3 : step only the sizes legal for the current plan.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            double sizes[];
-            const int ns = ValidSizesForPlan(EffectivePlan(), sizes);
-            int idx = 0;
-            for (int si = 0; si < ns; ++si)
-                if ((int)MathRound(g_eff_size) == (int)MathRound(sizes[si])) { idx = si; break; }
-            const int d = (sparam == RC_PREFIX + "set_size_next" ? 1 : -1);
-            if (ns > 0) {
-                idx = ((idx + d) % ns + ns) % ns;
-                g_eff_size = sizes[idx];
-                GlobalVariableSet("RC_size", g_eff_size);
-            }
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_acct_type") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_eff_acct_type = (g_eff_acct_type == 0 ? 1 : 0);
-            GlobalVariableSet("RC_acct_type", (double)g_eff_acct_type);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_perso_type") {
-            // V1.29 I : toggle Personal Real <-> Demo (labeling only ; catalogue untouched).
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_eff_personal_demo = (g_eff_personal_demo == 0 ? 1 : 0);
-            GlobalVariableSet("RC_perso_demo", (double)g_eff_personal_demo);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_addon_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int flag = (int)StringToInteger(StringSubstr(sparam, StringLen(RC_PREFIX + "set_addon_")));
-            if ((g_addons_mask & flag) != 0) g_addons_mask &= ~flag;
-            else                             g_addons_mask |=  flag;
-            GlobalVariableSet("RC_addons", (double)g_addons_mask);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_n_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 1 : -1);
-            g_max_parallel = (int)MathMax(1.0, MathMin(50.0, (double)g_max_parallel + d));
-            PersistMaxParallel();
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_sl_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const double d = (StringFind(sparam, "_up") >= 0 ? 0.1 : -0.1);
-            g_eff_sl_pct = MathMax(0.1, MathMin(10.0, MathRound((g_eff_sl_pct + d) * 100.0) / 100.0));
-            GlobalVariableSet("RC_sl_pct", g_eff_sl_pct);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_tp_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const double d = (StringFind(sparam, "_up") >= 0 ? 0.1 : -0.1);
-            g_eff_tp_pct = MathMax(0.05, MathMin(10.0, MathRound((g_eff_tp_pct + d) * 100.0) / 100.0));
-            GlobalVariableSet("RC_tp_pct", g_eff_tp_pct);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_mm_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const double d = (StringFind(sparam, "_up") >= 0 ? 1.0 : -1.0);
-            g_eff_max_margin_pt = MathMax(1.0, MathMin(100.0, MathRound(g_eff_max_margin_pt + d)));
-            GlobalVariableSet("RC_mm_pt", g_eff_max_margin_pt);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_mr_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const double d = (StringFind(sparam, "_up") >= 0 ? 0.1 : -0.1);
-            g_eff_max_risk_pt = MathMax(0.1, MathMin(5.0, MathRound((g_eff_max_risk_pt + d) * 100.0) / 100.0));
-            GlobalVariableSet("RC_mr_pt", g_eff_max_risk_pt);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_tn_") == 0) { // V1.26 Advanced steppers
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 1 : -1);
-            g_eff_tilt_n = (int)MathMax(0.0, MathMin(50.0, (double)g_eff_tilt_n + d));
-            GlobalVariableSet("RC_tilt_n", (double)g_eff_tilt_n);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_tw_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 1 : -1);
-            g_eff_tilt_win = (int)MathMax(1.0, MathMin(240.0, (double)g_eff_tilt_win + d));
-            GlobalVariableSet("RC_tilt_win", (double)g_eff_tilt_win);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_cn_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 1 : -1);
-            g_eff_cooldown_n = (int)MathMax(0.0, MathMin(20.0, (double)g_eff_cooldown_n + d));
-            GlobalVariableSet("RC_cool_n", (double)g_eff_cooldown_n);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_cm_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 5 : -5);
-            g_eff_cooldown_m = (int)MathMax(0.0, MathMin(480.0, (double)g_eff_cooldown_m + d));
-            GlobalVariableSet("RC_cool_m", (double)g_eff_cooldown_m);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_sh_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 1 : -1);
-            g_eff_selflock_h = (int)MathMax(1.0, MathMin(72.0, (double)g_eff_selflock_h + d));
-            GlobalVariableSet("RC_selflock_h", (double)g_eff_selflock_h);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_cp_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const double d = (StringFind(sparam, "_up") >= 0 ? 1.0 : -1.0);
-            g_eff_comfort_pct = MathMax(1.0, MathMin(50.0, MathRound(g_eff_comfort_pct + d)));
-            GlobalVariableSet("RC_comfort_pct", g_eff_comfort_pct);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_split_") == 0) {
-            // V1.27 : profit-split override. Cycles Auto(-1) -> 70 -> 80 -> 90 -> 95 -> Auto.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 1 : -1);
-            double opts[5]; opts[0]=-1.0; opts[1]=70.0; opts[2]=80.0; opts[3]=90.0; opts[4]=95.0;
-            int oi = 0;
-            for (int i = 0; i < 5; ++i) if ((int)MathRound(opts[i]) == (int)MathRound(g_eff_split)) { oi = i; break; }
-            oi = ((oi + d) % 5 + 5) % 5;
-            g_eff_split = opts[oi];
-            GlobalVariableSet("RC_split", g_eff_split);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_cyy_") == 0) {
-            // V1.27 : cycle-start YEAR stepper (YYYYMMDD double).
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 1 : -1);
-            if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
-            int y = (int)g_eff_cycle_ymd / 10000, m = ((int)g_eff_cycle_ymd / 100) % 100, dd = (int)g_eff_cycle_ymd % 100;
-            y = (int)MathMax(2020, MathMin(2035, y + d));
-            if (dd > DaysInMonth(y, m)) dd = DaysInMonth(y, m); // Feb 29 -> 28 in a non-leap year
-            g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
-            GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_cmm_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 1 : -1);
-            if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
-            int y = (int)g_eff_cycle_ymd / 10000, m = ((int)g_eff_cycle_ymd / 100) % 100, dd = (int)g_eff_cycle_ymd % 100;
-            m = ((m - 1 + d) % 12 + 12) % 12 + 1;
-            if (dd > DaysInMonth(y, m)) dd = DaysInMonth(y, m); // clamp to the new month's length
-            g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
-            GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_cdd_") == 0) {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 1 : -1);
-            if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
-            int y = (int)g_eff_cycle_ymd / 10000, m = ((int)g_eff_cycle_ymd / 100) % 100, dd = (int)g_eff_cycle_ymd % 100;
-            const int dim = DaysInMonth(y, m);
-            if (dd > dim) dd = dim;
-            dd = ((dd - 1 + d) % dim + dim) % dim + 1; // 1..days-in-month (calendar-aware)
-            g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
-            GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_mcv_") == 0) {
-            // V1.27 : post-violation MARGIN cap (%) stepper.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const double d = (StringFind(sparam, "_up") >= 0 ? 5.0 : -5.0);
-            g_eff_margin_cap_viol = MathMax(5.0, MathMin(100.0, MathRound(g_eff_margin_cap_viol + d)));
-            GlobalVariableSet("RC_mcap_viol", g_eff_margin_cap_viol);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_rcv_") == 0) {
-            // V1.27 : post-violation RISK cap (%) stepper.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const double d = (StringFind(sparam, "_up") >= 0 ? 0.1 : -0.1);
-            g_eff_risk_cap_viol = MathMax(0.1, MathMin(5.0, MathRound((g_eff_risk_cap_viol + d) * 100.0) / 100.0));
-            GlobalVariableSet("RC_rcap_viol", g_eff_risk_cap_viol);
-            ApplySettingsChange();
-        } else if (StringFind(sparam, RC_PREFIX + "set_rm_") == 0) {
-            // V1.27 : refresh period (ms) stepper ; re-arm the timer immediately.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const int d = (StringFind(sparam, "_up") >= 0 ? 100 : -100);
-            g_eff_refresh_ms = (int)MathMax(100.0, MathMin(2000.0, (double)g_eff_refresh_ms + d));
-            GlobalVariableSet("RC_refresh_ms", (double)g_eff_refresh_ms);
-            EventKillTimer();
-            EventSetMillisecondTimer(g_eff_refresh_ms);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_mviol") {
-            // V1.27 : mirror of the on-chart margin-violation toggle (same shadow + GV).
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_margin_violation_active = !g_margin_violation_active;
-            GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_rviol") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_risk_violation_active = !g_risk_violation_active;
-            GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_news") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_eff_show_news = !g_eff_show_news;
-            GlobalVariableSet("RC_show_news", g_eff_show_news ? 1.0 : 0.0);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_news_high") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_eff_news_high = !g_eff_news_high; // V1.29 R
-            GlobalVariableSet("RC_news_high", g_eff_news_high ? 1.0 : 0.0);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_news_med") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_eff_news_med = !g_eff_news_med; // V1.29 R
-            GlobalVariableSet("RC_news_med", g_eff_news_med ? 1.0 : 0.0);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_comfort") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_eff_comfort = !g_eff_comfort;
-            GlobalVariableSet("RC_comfort", g_eff_comfort ? 1.0 : 0.0);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_discipline") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_eff_discipline = !g_eff_discipline;
-            GlobalVariableSet("RC_discipline", g_eff_discipline ? 1.0 : 0.0);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_risktools") {
-            // V1.29 J : master risk-tools ON/OFF (explicit choice persists, beats the Personal default).
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_eff_risktools = !g_eff_risktools;
-            GlobalVariableSet("RC_risktools", g_eff_risktools ? 1.0 : 0.0);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_sound") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_eff_sound = !g_eff_sound;
-            GlobalVariableSet("RC_sound", g_eff_sound ? 1.0 : 0.0);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_telegram") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_eff_telegram = !g_eff_telegram;
-            GlobalVariableSet("RC_telegram", g_eff_telegram ? 1.0 : 0.0);
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "set_selflock") {
-            // V1.24 G1 : arm the self-lock for InpSelfLockHours, persist, close the
-            // popup so the full-panel STOP shows immediately.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_selflock_until = TimeCurrent() + (datetime)MathMax(1, g_eff_selflock_h) * 3600;
-            GlobalVariableSet("RC_selflock_until", (double)g_selflock_until);
-            g_unlock_arm = 0;
-            g_settings_open = false;
-            ApplySettingsChange();
+            // D-FULL step 2 : ALL modal set_* branches (lang / theme / vendor / plan /
+            // phase / size / steppers / toggles / selflock) moved to HandleModalControl -
+            // the modal is 100% hit-testing, no native OBJ_BUTTON left to OBJECT_CLICK.
         } else if (sparam == RC_PREFIX + "disc_unlock") {
             // V1.24 G1 : Ulysses-pact unlock = double-confirm within 5 s.
             ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
@@ -6053,31 +6021,42 @@ void PersistViolationFlags(void) {
 //| immediately + are persisted in GlobalVariable (survive reattach). |
 //| Rationale : the user wanted these without re-opening MT5 Inputs.  |
 //+------------------------------------------------------------------+
+// D-FULL step 2 : ONE shared helper = ALL modal controls converted at once. The
+// rounded face is painted into the OPEN modal canvas (DrawSettingsOverlay holds a
+// single Begin..Commit around the whole build), a centered label sits on top, and
+// the click zone shares the SAME rect (single geometry source - the BE lesson).
+// act = the object id minus "RC_" (e.g. "set_lang_fr", "set_sl_up"), routed by
+// DispatchModalHit -> HandleModalControl. No native OBJ_BUTTON is created anymore.
 void DrawSetButton(const string id, int x, int y, int w, int h, const string text) {
-    if (ObjectFind(0, id) < 0)
-        ObjectCreate(0, id, OBJ_BUTTON, 0, 0, 0);
-    ObjectSetInteger(0, id, OBJPROP_XDISTANCE, x);
-    ObjectSetInteger(0, id, OBJPROP_YDISTANCE, y);
-    ObjectSetInteger(0, id, OBJPROP_XSIZE, w);
-    ObjectSetInteger(0, id, OBJPROP_YSIZE, h);
-    ObjectSetString(0, id, OBJPROP_TEXT, text);
-    ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
-    ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
-    ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.text);
-    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.surface_hi);      // premium (v1.4) : raised control
-    ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.border_hi);
-    ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, id, OBJPROP_STATE, false);
-    ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
-    // G1 : 260 = above the modal cover (240) + overlay labels (250) so the
-    // settings buttons always win click routing while the popup is open.
-    ObjectSetInteger(0, id, OBJPROP_ZORDER, 260);
+    ObjectDelete(0, id); // drop the stale native OBJ_BUTTON from any previous build
+    if (g_modal_kit.Ready()) {
+        const int SM = RC_KIT_MARGIN;
+        g_modal_kit.Card((x - g_anchor_x) + SM, (y - g_anchor_y) + SM, w, h, 8,
+                         g_theme.raise, g_theme.surface,
+                         TintOver(g_theme.bg, C'148,163,184', 0.25));
+    }
+    SetLbl(id + "_l", x + w / 2, y + h / 2, text, g_theme.text);
+    ObjectSetInteger(0, id + "_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    HitAdd(x, y, x + w, y + h, StringSubstr(id, StringLen(RC_PREFIX)), -1, RCF_NONE);
 }
 
+// D-FULL step 2 : the ACTIVE state repaints the face in the accent gradient + a dark
+// label. Geometry comes from the hit registry (the zone DrawSetButton just added for
+// this id) = the same single source, so face/zone/label can never drift.
 void HighlightSetButton(const string id, bool active) {
-    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, active ? g_theme.accent : g_theme.surface_hi);
-    ObjectSetInteger(0, id, OBJPROP_COLOR,   active ? g_theme.bg     : g_theme.text);
+    if (!active) return; // idle face already painted by DrawSetButton
+    const string act = StringSubstr(id, StringLen(RC_PREFIX));
+    for (int i = g_nhits - 1; i >= MathMax(0, g_modal_hit_base); --i)
+        if (g_hits[i].act == act) {
+            if (g_modal_kit.Ready()) {
+                const int SM = RC_KIT_MARGIN;
+                g_modal_kit.Card(g_hits[i].x1 + SM, g_hits[i].y1 + SM,
+                                 g_hits[i].x2 - g_hits[i].x1, g_hits[i].y2 - g_hits[i].y1, 8,
+                                 g_theme.accent, g_theme.accent_deep, g_theme.accent);
+            }
+            ObjectSetInteger(0, id + "_l", OBJPROP_COLOR, g_theme.bg);
+            return;
+        }
 }
 
 // G2/G4 : an overlay label at ZORDER 250 (between the modal cover 240 and the
@@ -6087,9 +6066,22 @@ void SetLbl(const string id, int x, int y, const string t, color c) {
     ObjectSetInteger(0, id, OBJPROP_ZORDER, 250);
 }
 // A labelled ON/OFF toggle button (60 px). The id encodes the setting.
+// D-FULL step 2 : ON/OFF = a sliding PILL (mockup .sw), state carried by the knob
+// position + accent gradient - no more 60px ON/OFF text button.
 void SetToggleBtn(const string id, int x, int y, bool on) {
-    DrawSetButton(id, x, y, 60, 20, on ? Tr("on") : Tr("off"));
-    HighlightSetButton(id, on);
+    ObjectDelete(0, id); // drop the stale native OBJ_BUTTON from any previous build
+    const int w = 42, h = 20;
+    if (g_modal_kit.Ready()) {
+        const int SM = RC_KIT_MARGIN;
+        const int lx = (x - g_anchor_x) + SM, ly = (y - g_anchor_y) + SM;
+        g_modal_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2,
+                              ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255));
+        g_modal_kit.PillToggle(lx, ly, w, h, on,
+                               TintOver(g_theme.bg, C'255,255,255', 0.09),
+                               g_theme.accent_deep, g_theme.accent,
+                               (on ? C'255,255,255' : C'203,213,225'));
+    }
+    HitAdd(x, y, x + w, y + h, StringSubstr(id, StringLen(RC_PREFIX)), -1, RCF_NONE);
 }
 // A [-] value [+] stepper. id_base+"_dn" / id_base+"_up" are the click targets.
 void SetStepper(const string id_base, int x, int y, const string value_text) {
@@ -6290,10 +6282,12 @@ void SetTip1(const string id, const string tipkey) {
     ObjectSetString(0, RC_PREFIX + id, OBJPROP_TOOLTIP, Tr(tipkey));
 }
 void SetTip3(const string id_base, const string tipkey) {
+    // D-FULL step 2 : the -/+ native buttons are gone ; the hover carriers are now the
+    // centered glyph LABELS DrawSetButton creates (id + "_l") plus the value label.
     const string t = Tr(tipkey);
-    ObjectSetString(0, RC_PREFIX + id_base + "_dn",  OBJPROP_TOOLTIP, t);
-    ObjectSetString(0, RC_PREFIX + id_base + "_val", OBJPROP_TOOLTIP, t);
-    ObjectSetString(0, RC_PREFIX + id_base + "_up",  OBJPROP_TOOLTIP, t);
+    ObjectSetString(0, RC_PREFIX + id_base + "_dn_l", OBJPROP_TOOLTIP, t);
+    ObjectSetString(0, RC_PREFIX + id_base + "_val",  OBJPROP_TOOLTIP, t);
+    ObjectSetString(0, RC_PREFIX + id_base + "_up_l", OBJPROP_TOOLTIP, t);
 }
 
 // Phase 4 (B) : remove every settings-modal object (all "RC_set_*") WITHOUT touching the
@@ -6370,7 +6364,9 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
                                 g_theme.accent, g_theme.accent_deep, g_theme.surface);
             // step 1 : X-close face = red-edged rounded button (same language as the panel X)
             g_modal_kit.Card((cxx - ox) + SM, SM + 6, 24, 20, 8, g_theme.raise, g_theme.surface, g_theme.red);
-            g_modal_kit.Commit();
+            // D-FULL step 2 : NO Commit here - the canvas stays OPEN so the body's
+            // DrawSetButton / SetToggleBtn / SetStepper calls paint their faces into
+            // it ; the single Commit lives at the END of DrawSettingsOverlay.
         }
     }
 
@@ -6524,7 +6520,7 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
         if (ProfileCanBeRestricted()) {
             SetLbl(RC_PREFIX + "set_mviol_lbl", lx, by + 3, Tr("set_mviol"), g_theme.text);
             SetToggleBtn(RC_PREFIX + "set_mviol", cx, by, g_margin_violation_active);
-            SetTip1("set_mviol", "tip_mviol");
+            SetTip1("set_mviol_lbl", "tip_mviol"); // D-FULL : tip rides the caption (the pill has no object)
             by += step;
             SetLbl(RC_PREFIX + "set_mcv_lbl", lx, by + 3, Tr("set_mcapviol"), g_theme.text);
             SetStepper(RC_PREFIX + "set_mcv", cx, by, DoubleToString(g_eff_margin_cap_viol, 0) + "%");
@@ -6532,7 +6528,7 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
             by += step;
             SetLbl(RC_PREFIX + "set_rviol_lbl", lx, by + 3, Tr("set_rviol"), g_theme.text);
             SetToggleBtn(RC_PREFIX + "set_rviol", cx, by, g_risk_violation_active);
-            SetTip1("set_rviol", "tip_rviol");
+            SetTip1("set_rviol_lbl", "tip_rviol"); // D-FULL : tip rides the caption
             by += step;
             SetLbl(RC_PREFIX + "set_rcv_lbl", lx, by + 3, Tr("set_rcapviol"), g_theme.text);
             SetStepper(RC_PREFIX + "set_rcv", cx, by, DoubleToString(g_eff_risk_cap_viol, 2) + "%");
@@ -6561,11 +6557,11 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
         // V1.29 R : news LEVEL selector - HIGH / MEDIUM (both default ON ; FN counts MEDIUM too).
         SetLbl(RC_PREFIX + "set_nh_lbl", lx, by + 3, Tr("set_news_high"), g_theme.text);
         SetToggleBtn(RC_PREFIX + "set_news_high", cx, by, g_eff_news_high);
-        SetTip1("set_news_high", "tip_news_high");
+        SetTip1("set_nh_lbl", "tip_news_high"); // D-FULL : tip rides the caption
         by += step;
         SetLbl(RC_PREFIX + "set_nm_lbl", lx, by + 3, Tr("set_news_med"), g_theme.text);
         SetToggleBtn(RC_PREFIX + "set_news_med", cx, by, g_eff_news_med);
-        SetTip1("set_news_med", "tip_news_med");
+        SetTip1("set_nm_lbl", "tip_news_med"); // D-FULL : tip rides the caption
         by += step;
         SetLbl(RC_PREFIX + "set_cf_lbl", lx, by + 3, Tr("set_comfort"), g_theme.text);
         SetToggleBtn(RC_PREFIX + "set_comfort", cx, by, g_eff_comfort);
@@ -6642,6 +6638,9 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     // / copy edits / logo) while the modal is up - they'd render on top of the
     // rectangle overlay otherwise. Keep the settings controls (set_*) visible.
     SetPanelControlsHidden(true, "set");
+    // D-FULL step 2 : single Commit - every face (shell + tabs + X + all the body
+    // controls painted by the helpers above) lands in ONE bitmap update.
+    if (g_modal_kit.Ready()) g_modal_kit.Commit();
 }
 
 // G3 : after a settings popup change, rebuild theme + (optionally) re-resolve
