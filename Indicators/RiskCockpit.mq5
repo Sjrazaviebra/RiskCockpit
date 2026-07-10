@@ -1205,6 +1205,39 @@ int OnCalculate(const int rates_total,
 //| OnChartEvent - reserved for future drag-to-move                  |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
+//| FIX sursaut modal : light MODAL-ONLY re-render for in-modal       |
+//| control clicks. The panel is fully COVERED while the modal is     |
+//| open (and OnTimer skips its refresh), so rebuilding ~190 panel    |
+//| objects + Erase/repainting the body canvas on EVERY click - what  |
+//| ApplySettingsChange does - was pure waste and, with canvas faces, |
+//| a visible JOLT. This keeps the STATE part of ApplySettingsChange  |
+//| (theme + profile resolve, so the modal rebinds to fresh data :    |
+//| cascade vendor->plan->size, Personal/FN layouts, live theme) and  |
+//| re-renders the MODAL ALONE - the proven zero-flicker set_tab      |
+//| path. The FULL rebuild happens ONCE, at close (set_close).        |
+//+------------------------------------------------------------------+
+void RefreshModalOnly(void) {
+    InitTheme();
+    g_profile_ok = g_catalog.Resolve(EffectivePlan(), (ENUM_FN_PHASE)g_eff_phase, g_eff_size,
+                                     (ENUM_FN_ACCOUNT_TYPE)g_eff_acct_type, g_addons_mask, g_profile);
+    if (g_eff_split >= 0.0) g_profile.profit_split_pct = g_eff_split; // V1.27 : manual split override
+    if (EffectivePlan() == FN_PLAN_PERSONAL && g_eff_size <= 0.0)
+        g_profile.initial_balance = DetectStartingBalance(); // V1.28 : Personal "Auto" -> real balance
+    if (!ProfileCanBeRestricted()) {
+        g_margin_violation_active = false;
+        g_risk_violation_active   = false;
+    }
+    // The on-chart SL/TP recommendation lines are VISIBLE around the modal and feed on
+    // values steppers change live (N / sl / tp / max-risk / violation caps) - refresh
+    // them here so they always track the fresh state. Chart objects only (self-guarded
+    // on g_eff_risktools) : no panel rebuild, no canvas repaint, no jolt.
+    RefreshSlLines();
+    DestroySettingsOverlay(); // shell + labels + zones dropped...
+    DrawSettingsOverlay(g_anchor_x, g_anchor_y, InpPanelWidth); // ...and rebuilt on fresh state
+    ChartRedraw(0);
+}
+
+//+------------------------------------------------------------------+
 //| D-FULL step 2 : the settings-control logic, MOVED VERBATIM from   |
 //| the CHARTEVENT_OBJECT_CLICK ladder (the modal is 100% hit-testing |
 //| now - no native OBJ_BUTTON left, so no sparam ; the OBJPROP_STATE |
@@ -1218,11 +1251,11 @@ void HandleModalControl(const string act) {
         else if (act == "set_lang_fr") g_lang = 1;
         else                           g_lang = 2;
         GlobalVariableSet("RC_lang", (double)g_lang);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_theme_dark" || act == "set_theme_light") {
         g_active_theme_idx = (act == "set_theme_dark" ? 0 : 1);
         GlobalVariableSet("RC_theme_override", (double)g_active_theme_idx);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_vendor_prev" || act == "set_vendor_next") {
         // V1.27 CASCADE step 1 : pick the BROKER. Snap the type to that
         // vendor's first plan and the size to that plan's first legal size.
@@ -1237,7 +1270,7 @@ void HandleModalControl(const string act) {
             SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
             SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
         }
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_plan_prev" || act == "set_plan_next") {
         // V1.27 CASCADE step 2 : pick the TYPE, constrained to the current
         // vendor's plans only (so e.g. FTMO never offers Stellar types).
@@ -1255,13 +1288,13 @@ void HandleModalControl(const string act) {
             SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
             SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
         }
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_phase_prev" || act == "set_phase_next") {
         const int d = (act == "set_phase_next" ? 1 : -1);
         g_eff_phase = ((g_eff_phase + d) % 4 + 4) % 4; // ENUM_FN_PHASE 0..3
         SnapPhaseToPlan(EffectivePlan()); // V1.27 : don't let a non-Instant plan land on INSTANT
         GlobalVariableSet("RC_phase", (double)g_eff_phase);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_size_prev" || act == "set_size_next") {
         // V1.27 CASCADE step 3 : step only the sizes legal for the current plan.
         double sizes[];
@@ -1275,77 +1308,77 @@ void HandleModalControl(const string act) {
             g_eff_size = sizes[sidx];
             GlobalVariableSet("RC_size", g_eff_size);
         }
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_acct_type") {
         g_eff_acct_type = (g_eff_acct_type == 0 ? 1 : 0);
         GlobalVariableSet("RC_acct_type", (double)g_eff_acct_type);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_perso_type") {
         // V1.29 I : toggle Personal Real <-> Demo (labeling only ; catalogue untouched).
         g_eff_personal_demo = (g_eff_personal_demo == 0 ? 1 : 0);
         GlobalVariableSet("RC_perso_demo", (double)g_eff_personal_demo);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_addon_") == 0) {
         const int flag = (int)StringToInteger(StringSubstr(act, StringLen("set_addon_")));
         if ((g_addons_mask & flag) != 0) g_addons_mask &= ~flag;
         else                             g_addons_mask |=  flag;
         GlobalVariableSet("RC_addons", (double)g_addons_mask);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_n_") == 0) {
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
         g_max_parallel = (int)MathMax(1.0, MathMin(50.0, (double)g_max_parallel + d));
         PersistMaxParallel();
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_sl_") == 0) {
         const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
         g_eff_sl_pct = MathMax(0.1, MathMin(10.0, MathRound((g_eff_sl_pct + d) * 100.0) / 100.0));
         GlobalVariableSet("RC_sl_pct", g_eff_sl_pct);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_tp_") == 0) {
         const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
         g_eff_tp_pct = MathMax(0.05, MathMin(10.0, MathRound((g_eff_tp_pct + d) * 100.0) / 100.0));
         GlobalVariableSet("RC_tp_pct", g_eff_tp_pct);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_mm_") == 0) {
         const double d = (StringFind(act, "_up") >= 0 ? 1.0 : -1.0);
         g_eff_max_margin_pt = MathMax(1.0, MathMin(100.0, MathRound(g_eff_max_margin_pt + d)));
         GlobalVariableSet("RC_mm_pt", g_eff_max_margin_pt);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_mr_") == 0) {
         const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
         g_eff_max_risk_pt = MathMax(0.1, MathMin(5.0, MathRound((g_eff_max_risk_pt + d) * 100.0) / 100.0));
         GlobalVariableSet("RC_mr_pt", g_eff_max_risk_pt);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_tn_") == 0) { // V1.26 Advanced steppers
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
         g_eff_tilt_n = (int)MathMax(0.0, MathMin(50.0, (double)g_eff_tilt_n + d));
         GlobalVariableSet("RC_tilt_n", (double)g_eff_tilt_n);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_tw_") == 0) {
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
         g_eff_tilt_win = (int)MathMax(1.0, MathMin(240.0, (double)g_eff_tilt_win + d));
         GlobalVariableSet("RC_tilt_win", (double)g_eff_tilt_win);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_cn_") == 0) {
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
         g_eff_cooldown_n = (int)MathMax(0.0, MathMin(20.0, (double)g_eff_cooldown_n + d));
         GlobalVariableSet("RC_cool_n", (double)g_eff_cooldown_n);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_cm_") == 0) {
         const int d = (StringFind(act, "_up") >= 0 ? 5 : -5);
         g_eff_cooldown_m = (int)MathMax(0.0, MathMin(480.0, (double)g_eff_cooldown_m + d));
         GlobalVariableSet("RC_cool_m", (double)g_eff_cooldown_m);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_sh_") == 0) {
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
         g_eff_selflock_h = (int)MathMax(1.0, MathMin(72.0, (double)g_eff_selflock_h + d));
         GlobalVariableSet("RC_selflock_h", (double)g_eff_selflock_h);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_cp_") == 0) {
         const double d = (StringFind(act, "_up") >= 0 ? 1.0 : -1.0);
         g_eff_comfort_pct = MathMax(1.0, MathMin(50.0, MathRound(g_eff_comfort_pct + d)));
         GlobalVariableSet("RC_comfort_pct", g_eff_comfort_pct);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_split_") == 0) {
         // V1.27 : profit-split override. Cycles Auto(-1) -> 70 -> 80 -> 90 -> 95 -> Auto.
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
@@ -1355,7 +1388,7 @@ void HandleModalControl(const string act) {
         oi = ((oi + d) % 5 + 5) % 5;
         g_eff_split = opts[oi];
         GlobalVariableSet("RC_split", g_eff_split);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_cyy_") == 0) {
         // V1.27 : cycle-start YEAR stepper (YYYYMMDD double).
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
@@ -1365,7 +1398,7 @@ void HandleModalControl(const string act) {
         if (dd > DaysInMonth(y, m)) dd = DaysInMonth(y, m); // Feb 29 -> 28 in a non-leap year
         g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
         GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_cmm_") == 0) {
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
         if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
@@ -1374,7 +1407,7 @@ void HandleModalControl(const string act) {
         if (dd > DaysInMonth(y, m)) dd = DaysInMonth(y, m); // clamp to the new month's length
         g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
         GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_cdd_") == 0) {
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
         if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
@@ -1384,19 +1417,19 @@ void HandleModalControl(const string act) {
         dd = ((dd - 1 + d) % dim + dim) % dim + 1; // 1..days-in-month (calendar-aware)
         g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
         GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_mcv_") == 0) {
         // V1.27 : post-violation MARGIN cap (%) stepper.
         const double d = (StringFind(act, "_up") >= 0 ? 5.0 : -5.0);
         g_eff_margin_cap_viol = MathMax(5.0, MathMin(100.0, MathRound(g_eff_margin_cap_viol + d)));
         GlobalVariableSet("RC_mcap_viol", g_eff_margin_cap_viol);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_rcv_") == 0) {
         // V1.27 : post-violation RISK cap (%) stepper.
         const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
         g_eff_risk_cap_viol = MathMax(0.1, MathMin(5.0, MathRound((g_eff_risk_cap_viol + d) * 100.0) / 100.0));
         GlobalVariableSet("RC_rcap_viol", g_eff_risk_cap_viol);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (StringFind(act, "set_rm_") == 0) {
         // V1.27 : refresh period (ms) stepper ; re-arm the timer immediately.
         const int d = (StringFind(act, "_up") >= 0 ? 100 : -100);
@@ -1404,49 +1437,49 @@ void HandleModalControl(const string act) {
         GlobalVariableSet("RC_refresh_ms", (double)g_eff_refresh_ms);
         EventKillTimer();
         EventSetMillisecondTimer(g_eff_refresh_ms);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_mviol") {
         // V1.27 : mirror of the on-chart margin-violation toggle (same shadow + GV).
         g_margin_violation_active = !g_margin_violation_active;
         GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_rviol") {
         g_risk_violation_active = !g_risk_violation_active;
         GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_news") {
         g_eff_show_news = !g_eff_show_news;
         GlobalVariableSet("RC_show_news", g_eff_show_news ? 1.0 : 0.0);
-        ApplySettingsChange();
+        ApplySettingsChange(); // EXCEPTION : news bands live on the CHART (visible around the modal) -> apply live
     } else if (act == "set_news_high") {
         g_eff_news_high = !g_eff_news_high; // V1.29 R
         GlobalVariableSet("RC_news_high", g_eff_news_high ? 1.0 : 0.0);
-        ApplySettingsChange();
+        ApplySettingsChange(); // EXCEPTION : chart-side news bands -> apply live
     } else if (act == "set_news_med") {
         g_eff_news_med = !g_eff_news_med; // V1.29 R
         GlobalVariableSet("RC_news_med", g_eff_news_med ? 1.0 : 0.0);
-        ApplySettingsChange();
+        ApplySettingsChange(); // EXCEPTION : chart-side news bands -> apply live
     } else if (act == "set_comfort") {
         g_eff_comfort = !g_eff_comfort;
         GlobalVariableSet("RC_comfort", g_eff_comfort ? 1.0 : 0.0);
-        ApplySettingsChange();
+        ApplySettingsChange(); // EXCEPTION : comfort scale = chart zoom -> apply live
     } else if (act == "set_discipline") {
         g_eff_discipline = !g_eff_discipline;
         GlobalVariableSet("RC_discipline", g_eff_discipline ? 1.0 : 0.0);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_risktools") {
         // V1.29 J : master risk-tools ON/OFF (explicit choice persists, beats the Personal default).
         g_eff_risktools = !g_eff_risktools;
         GlobalVariableSet("RC_risktools", g_eff_risktools ? 1.0 : 0.0);
-        ApplySettingsChange();
+        ApplySettingsChange(); // EXCEPTION : clears/redraws chart SL lines + changes panel GEOMETRY (g_panel_height feeds the modal height) -> full rebuild
     } else if (act == "set_sound") {
         g_eff_sound = !g_eff_sound;
         GlobalVariableSet("RC_sound", g_eff_sound ? 1.0 : 0.0);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_telegram") {
         g_eff_telegram = !g_eff_telegram;
         GlobalVariableSet("RC_telegram", g_eff_telegram ? 1.0 : 0.0);
-        ApplySettingsChange();
+        RefreshModalOnly();
     } else if (act == "set_selflock") {
         // V1.24 G1 : arm the self-lock for the configured hours, persist, close the
         // popup so the full-panel STOP shows immediately.
@@ -1454,7 +1487,7 @@ void HandleModalControl(const string act) {
         GlobalVariableSet("RC_selflock_until", (double)g_selflock_until);
         g_unlock_arm = 0;
         g_settings_open = false;
-        ApplySettingsChange();
+        ApplySettingsChange(); // EXCEPTION : this CLOSES the modal + must show the STOP overlay immediately -> full rebuild
     }
 }
 
