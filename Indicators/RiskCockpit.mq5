@@ -247,7 +247,7 @@ CCanvasKit g_modal_kit;
 #define RC_R_CARD     10   // inner card corner radius
 // v1.4 dev : optional BUILD tag in the title bar (per modern phase during dev :
 // "R1", "R2"...). EMPTY = clean release (no tag drawn). NOT the Market version.
-#define RC_BUILD_TAG  "R3"
+#define RC_BUILD_TAG  ""   // FINAL : clean release, no dev tag
 
 void InitTheme(void) {
     // G3 : route through EffectiveTheme so the settings popup can switch
@@ -739,6 +739,11 @@ string g_pos_sym[RC_MAX_POSITIONS]; // V1.27 : per-row symbol so a position row 
 // RefreshSlLinesForChart) write it ; RepaintCanvas reads it to tint the row's status
 // pill on the canvas. OnTimer order (RefreshPanel THEN RepaintCanvas) keeps it fresh.
 ENUM_RC_STATUS g_pos_status[RC_MAX_POSITIONS];
+// FINAL (mockup .chip) : SWAP / Split chip rects, PANEL-RELATIVE offsets. ONE geometry
+// source : DrawAccountStrip computes + stores them (and centers its labels on them) ;
+// RepaintCanvas paints the tinted pill faces from the SAME offsets -> drag-proof,
+// label/face can never desync (the BE lesson). w == 0 -> chips not drawn.
+int g_chip_swap_dx = 0, g_chip_swap_w = 0, g_chip_split_dx = 0, g_chip_split_w = 0;
 int    g_recbar_y = 0;    // y-coordinate of the bar (set in BuildPanel)
 int    g_tfbar_y  = 0;    // P4 : y of the TF/control bar (copy-lot fields live here)
 int    g_footer_y = 0;    // P1 : y of the footer block (coloured info segments)
@@ -1906,7 +1911,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
     g_kit.SoftShadow(px, py, w, total_h, RC_R_PANEL, g_theme.bg_deep, 9, 95);
     // LOT B : idle CYAN edge glow (mockup .rc::after) - in the margin band, over the
     // chart, so real alpha is correct here ; the red breach glow (g_fx) overlays it.
-    g_kit.EdgeGlow(px, py, w, total_h, RC_R_PANEL, g_theme.accent, 6, 46);
+    g_kit.EdgeGlow(px, py, w, total_h, RC_R_PANEL, g_theme.accent, 6, 56); // FINAL : a touch more presence (~11% inner ring)
     // LOT B : near-invisible light border (mockup white-5%) - the visible edge is the glow.
     g_kit.Card(px, py, w, total_h, RC_R_PANEL, g_theme.bg_lift, g_theme.bg,
                TintOver(g_theme.bg_lift, C'255,255,255', 0.08));
@@ -1922,6 +1927,15 @@ void RepaintCanvas(const int x, const int y, const int w) {
     // NOT an opaque slab - the panel gradient reads through.
     g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0,
                     ColorToARGB(TintOver(g_theme.bg_lift, C'255,255,255', 0.02), 255));
+    // FINAL (mockup .chip) : SWAP (cyan-tint) + Split (green-tint) pill chips - faces
+    // painted from the SAME panel-relative rects DrawAccountStrip stored (single source).
+    if (g_chip_swap_w > 0) {
+        const int chy = cy + (InpRowHeight - 16) / 2;
+        g_kit.RoundFill(px + g_chip_swap_dx,  chy, g_chip_swap_w,  16, 8,
+                        ColorToARGB(TintOver(g_theme.bg_lift, g_theme.accent, 0.12), 255));
+        g_kit.RoundFill(px + g_chip_split_dx, chy, g_chip_split_w, 16, 8,
+                        ColorToARGB(TintOver(g_theme.bg_lift, g_theme.ok, 0.12), 255));
+    }
     cy += InpRowHeight;                            // account strip
     g_kit.Hairline(px + 1, cy, px + w - 2, hl);
 
@@ -1937,16 +1951,19 @@ void RepaintCanvas(const int x, const int y, const int w) {
             const int bw = w - 360 - 80 - RC_PAD;
             const int bh = 8;
             const int by = ry + (InpRowHeight - bh) / 2;
+            // FINAL (mockup .bar) : track = light white-6% film, pre-blended - always
+            // subtly visible even at 0% fill (never a black/empty slot).
+            const color track = TintOver(g_theme.bg, C'255,255,255', 0.06);
             if (g_rows[i].applies) {
                 const double ratio = (g_rows[i].max_pct > 0.0 ? g_rows[i].value_pct / g_rows[i].max_pct : 0.0);
                 color fa, fb; RiskFillColors(g_rows[i].status, fa, fb);
-                g_kit.Meter(bx, by, bw, bh, ratio, g_theme.bar_bg, fa, fb);
+                g_kit.Meter(bx, by, bw, bh, ratio, track, fa, fb);
                 // LOT A : status pill = LOW-ALPHA tint (mockup .p-ok/.p-warn/.p-red ~15%),
                 // pre-blended ; the chip label carries the semantic colour on top.
                 g_kit.RoundFill(px + w - 70, ry + 3, 60, InpRowHeight - 6, (InpRowHeight - 6) / 2,
                                 ColorToARGB(TintOver(g_theme.bg, StatusColor(g_rows[i].status), 0.15), 255));
             } else {
-                g_kit.Meter(bx, by, bw, bh, 0.0, g_theme.bar_bg, g_theme.text_dim, g_theme.text_dim);
+                g_kit.Meter(bx, by, bw, bh, 0.0, track, g_theme.text_dim, g_theme.text_dim);
                 g_kit.RoundFill(px + w - 70, ry + 3, 60, InpRowHeight - 6, (InpRowHeight - 6) / 2,
                                 ColorToARGB(TintOver(g_theme.bg, g_theme.text_dim, 0.10), 255)); // N/A pill
             }
@@ -2142,18 +2159,18 @@ void DrawTitleBar(int x, int y, int w) {
     string right = "";
     if (g_profile_ok || g_profile.is_default_fallback) {
         const int balance_k = (int)MathRound(g_profile.initial_balance / 1000.0);
-        right = g_profile.model + "  |  $" + IntegerToString(balance_k) + "K";
+        right = g_profile.model + " " + ShortToString((ushort)0x00B7) + " $" + IntegerToString(balance_k) + "K"; // FINAL : mockup "Name · Size" separator
     }
     StringReplace(right, " (no prop rules)", ""); // V1.29 K : shorten the Personal label so it clears the gear/X cluster
     // V1.29 K : model sits LEFT of the (left-shifted) clock zone, which sits left of the gear.
     DrawLabel(RC_PREFIX + "title_model", (gear_x - 8) - RC_TITLE_CLOCK_W, y + 8, right, g_theme.text, RC_FONT_SIZE);
     ObjectSetInteger(0, RC_PREFIX + "title_model", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
 
-    // LOT B (mockup .live) : initial LIVE reads GREEN (was indigo). NOTE : the mockup's
-    // glowing dot is SKIPPED on purpose - this zone is a dynamic multi-state field
-    // (news countdown / weekend hold / verdict badge via UpdateClockBlinker) and a
-    // static dot would collide with the right-anchored variable-width text.
-    DrawLabel(RC_PREFIX + "title_clock", gear_x - 8, y + 8, Tr("live"), g_theme.ok, RC_FONT_SIZE);
+    // FINAL (mockup .live) : "● LIVE" in green - the dot is PART OF THE LABEL TEXT
+    // (U+25CF), so it rides this right-anchored dynamic multi-state zone (news countdown /
+    // weekend hold / degraded verdict via UpdateClockBlinker) with zero collision.
+    DrawLabel(RC_PREFIX + "title_clock", gear_x - 8, y + 8,
+              ShortToString((ushort)0x25CF) + " " + Tr("live"), g_theme.ok, RC_FONT_SIZE);
     ObjectSetInteger(0, RC_PREFIX + "title_clock", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
 }
 
@@ -2174,9 +2191,26 @@ void DrawAccountStrip(int x, int y, int w) {
     // V1.29 I : a Personal account shows its REAL / DEMO type word (labeling only).
     const string perso_tag = (g_profile.plan_id == FN_PLAN_PERSONAL)
                                  ? (g_eff_personal_demo == 1 ? "DEMO  " : "REAL  ") : "";
+    // FINAL (mockup .chip) : account id alone in mono near-white ; SWAP + Split become
+    // tinted pill CHIPS - the rects are stored PANEL-RELATIVE (single geometry source,
+    // see the globals) and RepaintCanvas paints the pill faces underneath these labels.
     string left;
-    StringConcatenate(left, Tr("acc"), " #", acc_login, "  ", perso_tag, acc_type_str, "  ", split_str);
+    StringConcatenate(left, Tr("acc"), " #", acc_login, (perso_tag == "" ? "" : "  " + perso_tag));
     DrawLabel(RC_PREFIX + "strip_left", x + RC_PAD, y + 4, left, g_theme.text, RC_FONT_SIZE);
+    const int chip_h = 16;
+    const int chip_y = y + (InpRowHeight - chip_h) / 2;
+    int cdx = RC_PAD + 150; // chip column, right of the account id (fits "Acc #12345678  DEMO")
+    g_chip_swap_dx = cdx;
+    g_chip_swap_w  = (StringLen(acc_type_str) > 4 ? 78 : 50); // "SWAP-FREE" vs "SWAP"
+    DrawLabel(RC_PREFIX + "strip_chip1", x + cdx + g_chip_swap_w / 2, chip_y + chip_h / 2,
+              acc_type_str, g_theme.accent, RC_FONT_SIZE - 1, RC_FONT_UI_SB);
+    ObjectSetInteger(0, RC_PREFIX + "strip_chip1", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    cdx += g_chip_swap_w + 8;
+    g_chip_split_dx = cdx;
+    g_chip_split_w  = 78;
+    DrawLabel(RC_PREFIX + "strip_chip2", x + cdx + g_chip_split_w / 2, chip_y + chip_h / 2,
+              split_str, g_theme.ok, RC_FONT_SIZE - 1, RC_FONT_UI_SB);
+    ObjectSetInteger(0, RC_PREFIX + "strip_chip2", OBJPROP_ANCHOR, ANCHOR_CENTER);
 
     // Right: min-trading-days counter (date-free, computed from trade history).
     // FIX : the Cycle / Payout countdown was removed (too personal + required
@@ -2192,7 +2226,7 @@ void DrawAccountStrip(int x, int y, int w) {
                               (done >= min_days ? "  OK" : ""));
         }
     }
-    DrawLabel(RC_PREFIX + "strip_right", x + w - RC_PAD, y + 4, right, g_theme.text_dim, RC_FONT_SIZE);
+    DrawLabel(RC_PREFIX + "strip_right", x + w - RC_PAD, y + 4, right, g_theme.label, RC_FONT_SIZE, RC_FONT_UI); // FINAL : mockup --label tone, UI font
     ObjectSetInteger(0, RC_PREFIX + "strip_right", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
 }
 
@@ -2444,6 +2478,12 @@ void DrawHardLock(const string msg, bool show_unlock) {
 // bars are not recreated on top of the overlay every tick (MT5 redraws rectangle
 // labels in creation order, not ZORDER). Returns FALSE otherwise (red overlay
 // cleared, controls shown). The soft TILT banner is handled by DrawTiltBanner().
+// FIX lock-lifecycle : the previous tick's hard-lock state, so RefreshPanel can detect
+// the lock -> clear TRANSITION and force ONE full rebuild (during the lock the refresh
+// is skipped and the overlay hid/covered objects -> without a rebuild the panel came
+// back half-rendered ; a risk tool must always re-display its full state).
+bool g_disc_locked_prev = false;
+
 bool UpdateDisciplineOverlay(double daily_dd_pct, double daily_cap) {
     const string id        = RC_PREFIX + "discipline_overlay";
     const string txt_id    = RC_PREFIX + "discipline_text";
@@ -2568,7 +2608,7 @@ void DrawViolationToggle(const string key, int x, int y, int h, bool active) {
 //| Positions section                                                |
 //+------------------------------------------------------------------+
 int DrawPositionsSection(int x, int y, int w) {
-    DrawSectionHeader("sec_pos", x, y, w, Tr("open_pos"), g_theme.accent2);
+    DrawSectionHeader("sec_pos", x, y, w, Tr("open_pos"), g_theme.accent); // FINAL : all-cyan section headers (mockup .sec-h)
     int cy = y + RC_SECTION_HEIGHT;
     for (int i = 0; i < RC_MAX_POSITIONS; ++i) {
         const string id = RC_PREFIX + "pos_" + IntegerToString(i);
@@ -2640,7 +2680,18 @@ void RefreshPanel(void) {
     // the bars/chips every tick on top of the overlay (MT5 redraws rectangle
     // labels in creation order). The lingering rows from the last normal refresh
     // stay UNDER the freshly-created overlay ; controls are hidden by it too.
-    if (UpdateDisciplineOverlay(Live_DailyDdPct(), g_profile.daily_loss_pct))
+    const bool disc_locked = UpdateDisciplineOverlay(Live_DailyDdPct(), g_profile.daily_loss_pct);
+    // FIX lock-lifecycle : lock JUST cleared -> one FULL rebuild (DestroyAllObjects +
+    // BuildPanel + refresh + canvas repaint + ChartRedraw via ApplySettingsChange) so
+    // every object the overlay hid/covered is recreated. Clear the flag FIRST :
+    // ApplySettingsChange re-enters RefreshPanel once, which must take the normal path.
+    if (g_disc_locked_prev && !disc_locked) {
+        g_disc_locked_prev = false;
+        ApplySettingsChange();
+        return;
+    }
+    g_disc_locked_prev = disc_locked;
+    if (disc_locked)
         return;
 
     // V1.29 J : the whole prop rule-set (live values + rows + bars + chips +
@@ -2993,8 +3044,11 @@ void RefreshPositionsList(void) {
         if (i >= n || !PositionSelectByTicket(PositionGetTicket(i))) {
             // Empty slot - clear text AND reset all colors to panel-bg so
             // a previously red/green row doesn't ghost after a close.
-            ObjectSetString(0, id + "_lbl", OBJPROP_TEXT, " ");
+            // FINAL (optional) : with 0 positions the whole section is bare panel ->
+            // row 0 shows a discreet dim hint (not clickable -> tooltip suppressed).
+            ObjectSetString(0, id + "_lbl", OBJPROP_TEXT, (i == 0 && n == 0 ? Tr("pos_none") : " "));
             ObjectSetInteger(0, id + "_lbl", OBJPROP_COLOR, g_theme.text_dim);
+            ObjectSetString(0, id + "_lbl", OBJPROP_TOOLTIP, "\n"); // "\n" = tooltip disabled
             ObjectSetString(0, id + "_pnl", OBJPROP_TEXT, " ");
             ObjectSetInteger(0, id + "_pnl", OBJPROP_COLOR, g_theme.text_dim);
             ObjectSetString(0, id + "_age", OBJPROP_TEXT, " ");
@@ -3025,6 +3079,7 @@ void RefreshPositionsList(void) {
         StringConcatenate(lbl, sym_short, " ", type_str, " ", DoubleToString(vol, VolDigits(sym))); // V1.28 : up to 4 dp
         ObjectSetString(0, id + "_lbl", OBJPROP_TEXT, lbl);
         ObjectSetInteger(0, id + "_lbl", OBJPROP_COLOR, g_theme.text);
+        ObjectSetString(0, id + "_lbl", OBJPROP_TOOLTIP, Tr("pos_click_tip")); // restore (row 0 may have been the no-positions hint)
         ObjectSetString(0, RC_PREFIX + "pos_row_" + IntegerToString(i), OBJPROP_TEXT, lbl); // V1.27 : button mirrors the symbol cell
 
         string pnl_str;
@@ -3182,11 +3237,17 @@ void UpdateClockBlinker(void) {
             return;
         }
     }
-    // LOT 6 : default = single-glance verdict badge (ON TRACK / AT RISK /
-    // VIOLATION) + safety score 0-100, computed from the live g_rows ratios.
-    // Replaces the old static LIVE blinker.
+    // FINAL state-machine (mockup .live) : weekend > news countdown > DEGRADED verdict
+    // (AT RISK / VIOLATION + score - a risk tool must surface trouble) > healthy default
+    // = green dot + LIVE. The dot is part of the label TEXT (U+25CF), so it rides the
+    // right-anchored dynamic zone with zero collision and zero canvas work.
     VerdictResult v;
     ComputeVerdict(v);
+    if (v.clr == g_theme.ok) {
+        ObjectSetString(0, cid, OBJPROP_TEXT, ShortToString((ushort)0x25CF) + " " + Tr("live"));
+        ObjectSetInteger(0, cid, OBJPROP_COLOR, g_theme.ok);
+        return;
+    }
     ObjectSetString(0, cid, OBJPROP_TEXT, v.text);
     ObjectSetInteger(0, cid, OBJPROP_COLOR, v.clr);
 }
@@ -5100,7 +5161,7 @@ void RefreshFooterMetrics(void) {
                           "  ", Tr("f_margin"), " ", DoubleToString(used_margin, 2),
                           "/", DoubleToString(margin_cap_eff, 1), "%",
                           (g_margin_violation_active ? "!" : ""),
-                          " | ", addons_disp); // V1.29 D : tighter separator
+                          " " + ShortToString((ushort)0x00B7) + " ", addons_disp); // FINAL : middledot separator (mockup typography)
     } else {
         budget_line = addons_disp; // V1.29 N : risk-tools OFF -> add-ons summary only (no Cap/Risk/Margin)
     }
@@ -5131,7 +5192,7 @@ void RefreshFooterMetrics(void) {
             g_suglot_copy = s.broker_lot;           // V1.24 G3 copy
             StringConcatenate(sug_line,
                               Tr("f_lot"), " ", DoubleToString(s.broker_lot, sld),
-                              " | N", s.n_planned, " ", DoubleToString(s.dd_per_trade_pct, 2), "%/tr",
+                              " " + ShortToString((ushort)0x00B7) + " N", s.n_planned, " ", DoubleToString(s.dd_per_trade_pct, 2), "%/tr", // FINAL : middledot
                               "  ", Tr("f_free"), " ", DoubleToString(s.free_margin_pct, 0), "%");
             // FIX 8 : free-margin awareness. Priority : insufficient (red, unexecutable)
             // > risk-budget reduce > below-min > lot capped by free margin (info).
@@ -5510,7 +5571,7 @@ void InitI18n(void) {
     AddTr("v_ontrack",   "ON TRACK",      "EN VOIE",        "EN RUMBO");
     AddTr("v_atrisk",    "AT RISK",       "À RISQUE",       "EN RIESGO");
     AddTr("v_violation", "VIOLATION",     "VIOLATION",      "VIOLACIÓN");
-    AddTr("live",        "* LIVE",        "* LIVE",         "* LIVE");
+    AddTr("live",        "LIVE",          "LIVE",           "LIVE"); // FINAL : the green dot (U+25CF) is concatenated at the call sites - no more "* " placeholder
     AddTr("weekend_hold","WEEKEND HOLD!", "TENUE WEEKEND!", "RETENER FINDE!");
     AddTr("flatten",     "  FLATTEN!",    "  FERMER!",      "  CERRAR!");
     // --- status chips ---
@@ -5538,6 +5599,7 @@ void InitI18n(void) {
     // --- R4 : remaining panel-visible dynamic text ---
     AddTr("pos_lock", "LOCK",  "VERR",   "BLOQ");
     AddTr("pos_nosl", "NO SL", "SANS SL","SIN SL");
+    AddTr("pos_none", "no open positions", "aucune position ouverte", "sin posiciones abiertas"); // FINAL : empty-section hint
     AddTr("f_insuf",       "[insufficient margin]",       "[marge insuffisante]",        "[margen insuficiente]");
     AddTr("f_reduce",      "[reduce lot / tighten SL]",   "[réduire lot / resserrer SL]","[reducir lote / ajustar SL]");
     AddTr("f_belowmin",    "[below min]",                 "[sous min]",                  "[bajo min]");
@@ -6251,7 +6313,7 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
         if (g_modal_kit.Ready()) {
             g_modal_kit.Begin();
             g_modal_kit.SoftShadow(SM, SM, ow, oh, RC_R_PANEL, g_theme.bg_deep, 9, 95);
-            g_modal_kit.EdgeGlow(SM, SM, ow, oh, RC_R_PANEL, g_theme.accent, 6, 46);
+            g_modal_kit.EdgeGlow(SM, SM, ow, oh, RC_R_PANEL, g_theme.accent, 6, 56);
             g_modal_kit.Card(SM, SM, ow, oh, RC_R_PANEL, g_theme.bg_lift, g_theme.bg,
                              TintOver(g_theme.bg_lift, C'255,255,255', 0.08));
             // title zone gradient + hairline under the tab bar (mockup .title / .divider)
