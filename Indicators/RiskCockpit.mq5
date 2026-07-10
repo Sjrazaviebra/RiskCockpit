@@ -180,6 +180,9 @@ input int InpCooldownLosses = 3;   // Cooldown : consecutive losing trades that 
 input int InpCooldownMin    = 30;  // Cooldown : minutes to wait after the streak
 input int InpSelfLockHours  = 2;   // Self-lock : default duration of the "Lock me" button (hours)
 
+input group "9 - DIAGNOSTICS"
+input bool InpVerboseLog = false;  // Verbose dev diagnostics to the Experts log (news-card scan) ; OFF for normal use
+
 // clang-format on
 
 //+------------------------------------------------------------------+
@@ -1872,6 +1875,8 @@ void RepaintCanvas(const int x, const int y, const int w) {
                     ColorToARGB(g_theme.surface_hi, 235));
     cy += RC_TITLE_HEIGHT;
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+    // BATCH 2 : account-strip band on the canvas (replaces the legacy strip_bg rect)
+    g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0, ColorToARGB(g_theme.surface, 255));
     cy += InpRowHeight;                            // account strip
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
 
@@ -1880,6 +1885,10 @@ void RepaintCanvas(const int x, const int y, const int w) {
         cy += RC_SECTION_HEIGHT;
         for (int i = 0; i < RC_RULE_COUNT; ++i) {
             const int ry = cy + i * InpRowHeight;
+            // BATCH 2 : rule-row band on the canvas (replaces the legacy {rule}_rowbg rect) ;
+            // drawn for EVERY row (incl. the text-only ones below) before the meter on top.
+            g_kit.RoundFill(px + 1, ry, w - 2, InpRowHeight, 0,
+                            ColorToARGB((i % 2 == 0 ? g_theme.surface : g_theme.surface_hi), 255));
             const string k = g_rows[i].key;
             if (k == "rule_margin_pt" || k == "rule_newsstats") continue; // text-only rows
             const int bx = px + 360;
@@ -1900,11 +1909,22 @@ void RepaintCanvas(const int x, const int y, const int w) {
     }
     // positions header tick + section
     g_kit.RoundFill(px + 6, cy + 5, 3, RC_SECTION_HEIGHT - 10, 1, ColorToARGB(g_theme.accent2, 255));
+    // BATCH 2 : position-row bands on the canvas (replaces the legacy {pos}_rowbg rects)
+    {
+        const int pcy = cy + RC_SECTION_HEIGHT;
+        for (int p = 0; p < RC_MAX_POSITIONS; ++p)
+            g_kit.RoundFill(px + 1, pcy + p * InpRowHeight, w - 2, InpRowHeight, 0,
+                            ColorToARGB((p % 2 == 0 ? g_theme.surface : g_theme.surface_hi), 255));
+    }
     cy += RC_SECTION_HEIGHT + positions_h;
     // dividers above footer / tf bar / recent bar
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+    // BATCH 2 : footer band on the canvas (replaces the legacy footer_bg rect)
+    g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight * footer_rows - 1, 0, ColorToARGB(g_theme.surface, 255));
     cy += InpRowHeight * footer_rows;                       // -> timeframe bar row
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+    // BATCH 2 : TF-bar band on the canvas (replaces the legacy tfbar_bg rect) ; the dark track sits on top
+    g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0, ColorToARGB(g_theme.surface, 255));
     // v1.4 R2/R3 : segmented TF control - a dark rounded track, then 9 segment
     // faces painted on top (active = cyan). The text labels + click zones live in
     // DrawTimeframeBar. 2px gaps let the dark track show between segments.
@@ -1923,6 +1943,8 @@ void RepaintCanvas(const int x, const int y, const int w) {
     }
     cy += InpRowHeight;
     g_kit.Hairline(px + 1, cy, px + w - 2, g_theme.border);
+    // BATCH 2 : recent-symbols band on the canvas (replaces the legacy recbar_bg rect)
+    g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0, ColorToARGB(g_theme.surface, 255));
 
     PaintFaces();     // v1.4.1 R3 : paint every registered control face (rounded btns / pills)
     g_kit.Commit();
@@ -1994,7 +2016,7 @@ void BuildPanel(void) {
 //| Title bar                                                        |
 //+------------------------------------------------------------------+
 void DrawTitleBar(int x, int y, int w) {
-    DrawRect(RC_PREFIX + "title_bg", x, y, w, RC_TITLE_HEIGHT, g_theme.surface_hi, g_theme.border, 1);
+    // BATCH 2 : title band now drawn on the canvas (RepaintCanvas) ; legacy title_bg rect removed.
 
     // R3 : header logo - a FIXED asset (RC_LOGO_FILE), not a user input. MT5
     // renders it via an OBJ_BITMAP_LABEL pointing at MQL5\Images\<file> (shipped
@@ -2074,7 +2096,7 @@ void DrawTitleBar(int x, int y, int w) {
 //| Account strip (cycle, account #, type, days remaining)           |
 //+------------------------------------------------------------------+
 void DrawAccountStrip(int x, int y, int w) {
-    DrawRect(RC_PREFIX + "strip_bg", x, y, w, InpRowHeight, g_theme.surface, g_theme.border, 0);
+    // BATCH 2 : account-strip band now drawn on the canvas (RepaintCanvas) ; legacy strip_bg rect removed.
 
     const long acc_login = AccountInfoInteger(ACCOUNT_LOGIN);
     const string acc_type_str = (g_profile.swap_charged ? "SWAP" : "SWAP-FREE");
@@ -2145,12 +2167,7 @@ void DrawRuleRow(const string key_prefix, int idx,
                  ENUM_RC_STATUS status, bool applies) {
     const string id = RC_PREFIX + key_prefix;
 
-    // Row background - premium zebra : every row gets a surface fill so the
-    // rules area reads as one continuous card (surface / surface_hi alternation).
-    {
-        const color rowc = ((idx % 2) == 0) ? g_theme.surface : g_theme.surface_hi;
-        DrawRect(id + "_rowbg", x + 1, y, w - 2, h, rowc, rowc, 0);
-    }
+    // BATCH 2 : rule-row zebra now drawn on the canvas (RepaintCanvas) ; legacy _rowbg rect removed.
 
     const color text_clr = applies ? g_theme.text : g_theme.text_dim;
 
@@ -2491,9 +2508,7 @@ int DrawPositionsSection(int x, int y, int w) {
     int cy = y + RC_SECTION_HEIGHT;
     for (int i = 0; i < RC_MAX_POSITIONS; ++i) {
         const string id = RC_PREFIX + "pos_" + IntegerToString(i);
-        DrawRect(id + "_rowbg", x + 1, cy, w - 2, InpRowHeight,
-                 ((i % 2) == 0 ? g_theme.surface : g_theme.surface_hi),
-                 ((i % 2) == 0 ? g_theme.surface : g_theme.surface_hi), 0);
+        // BATCH 2 : position-row zebra now drawn on the canvas (RepaintCanvas) ; legacy _rowbg rect removed.
         DrawLabel(id + "_lbl", x + RC_PAD, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
         DrawLabel(id + "_pnl", x + 220, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
         DrawLabel(id + "_age", x + 320, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
@@ -2521,8 +2536,7 @@ int DrawPositionsSection(int x, int y, int w) {
 //+------------------------------------------------------------------+
 void DrawFooter(int x, int y, int w) {
     // 3 rows by default; +1 row (L4) when pyramid advisor is enabled.
-    const int rows = (InpEnablePyramidSafe ? 4 : 3);
-    DrawRect(RC_PREFIX + "footer_bg", x, y, w, InpRowHeight * rows, g_theme.surface, g_theme.border, 0);
+    // BATCH 2 : footer band + row count now live on the canvas (RepaintCanvas.footer_rows) ; legacy footer_bg rect removed.
 
     // Row 1 - profit metrics : drawn as individually-coloured segments
     // (RC_ + "fseg_*") by RefreshFooterMetrics (P1). Just record the row y here.
@@ -3900,7 +3914,7 @@ void ComputeNewsStats(void) {
     // FN dashboard is diagnosable from the Experts journal alone.
     static double s_news_sig = -1.0;
     const double sig = ndiag * 100000000.0 + npos * 1000000.0 + win_n * 10000.0 + win_pnl;
-    if (sig != s_news_sig) {
+    if (InpVerboseLog && sig != s_news_sig) { // BATCH 1 : dev diagnostics gated OFF for the shipped build
         s_news_sig = sig;
         PrintFormat("RC news-card : %d matched, %d winning, win-pnl %.2f, eligible %.2f (window +/-%d min, scan from %s, %d deal~event encounters)",
                     npos, win_n, win_pnl, g_news_eligible, g_profile.news_window_minutes, TimeToString(from, TIME_DATE), ndiag);
@@ -5556,7 +5570,7 @@ string Tr(const string key) {
 //| triggers OnDeinit + OnInit (chart-change re-init) - clean.        |
 //+------------------------------------------------------------------+
 void DrawTimeframeBar(int x, int y, int w) {
-    DrawRect(RC_PREFIX + "tfbar_bg", x, y, w, InpRowHeight, g_theme.surface, g_theme.border, 0);
+    // BATCH 2 : TF-bar band now drawn on the canvas (RepaintCanvas) ; legacy tfbar_bg rect removed.
     DrawLabel(RC_PREFIX + "tfbar_lbl", x + RC_PAD, y + 5, Tr("tf"), g_theme.text_dim, RC_FONT_SIZE - 1);
     string tfs[9];
     tfs[0]="M1"; tfs[1]="M5"; tfs[2]="M15"; tfs[3]="M30"; tfs[4]="H1";
@@ -5779,7 +5793,7 @@ void DrawBreakevenLines(void) {
 }
 
 void DrawRecentSymbolsBar(int x, int y, int w) {
-    DrawRect(RC_PREFIX + "recbar_bg", x, y, w, InpRowHeight, g_theme.surface, g_theme.border, 0);
+    // BATCH 2 : recent-symbols band now drawn on the canvas (RepaintCanvas) ; legacy recbar_bg rect removed.
     DrawLabel(RC_PREFIX + "recbar_lbl", x + RC_PAD, y + 5, Tr("recent"), g_theme.text_dim, RC_FONT_SIZE - 1);
     const int btn_w = (g_eff_comfort ? 72 : 96); // FIX 6 : narrower when the Re-center button is shown
     const int btn_h = InpRowHeight - 6;
