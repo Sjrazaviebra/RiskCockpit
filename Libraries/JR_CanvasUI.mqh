@@ -229,21 +229,19 @@ public:
       if(!m_ready) return;
       const int r = h/2;
       if(on) {
-         Capsule(x, y, w, h, A(onA));  // CAPSULE REWRITE : clean pill ends
-         const int gx0 = x+r, gx1 = x+w-r, bands = 10;
-         if(gx1 > gx0) { const int bw = MathMax(1,(gx1-gx0)/bands);
-            for(int b=0; b*bw<(gx1-gx0); ++b)
-               m_cv.FillRectangle(gx0+b*bw, y+1, MathMin(gx1,gx0+(b+1)*bw), y+h-2,
-                                  Lerp(A(onA), A(onB), (double)(b*bw)/(double)(gx1-gx0))); }
+         // v2.01 RELIEF : vertical light->dark gradient (onB = bright accent on top,
+         // onA = deep end at the bottom) = same relief language as Segment/Card.
+         CapsuleGradient(x, y, w, h, A(onB), A(onA));
       } else {
-         Capsule(x, y, w, h, A(offTrack));
+         Capsule(x, y, w, h, A(offTrack)); // OFF = flat recessed film (mockup .sw track)
       }
       const double t = (knobT >= 0.0 ? knobT : (on ? 1.0 : 0.0));
       const int kr = r - 2;
       const int kx = (int)(x + r + t * (w - 2*r));
       // knob DROP shadow (offset down, mockup 0 2px 4px) : OPAQUE pre-blend against the
       // track tone - a translucent circle inside the card would chart-through (overwrite).
-      const uint sh = Lerp(A(on ? onB : offTrack), A(clrBlack), 0.30);
+      // v2.01 : blends against onA = the LOWER gradient tone, where the shadow sits.
+      const uint sh = Lerp(A(on ? onA : offTrack), A(clrBlack), 0.30);
       m_cv.FillCircle(kx, y + r + 1, kr + 1, sh);
       m_cv.FillCircle(kx, y + r, kr, A(knob));
    }
@@ -259,9 +257,9 @@ public:
                 const bool active, const color fillA, const color fillB, const color idle) {
       if(!m_ready) return;
       if(active) {
-         // CAPSULE REWRITE : scanline capsule = mathematically clean pill ends
-         // (RoundFill @ r=h/2 bulged 1-2px at the caps = the "dog-bone").
-         Capsule(x, y, w, h, A(fillA));
+         // v2.01 RELIEF : gradient capsule (scanline = clean pill ends, PLUS the
+         // vertical fillA->fillB relief the old gradient face had).
+         CapsuleGradient(x, y, w, h, A(fillA), A(fillB));
       } else {
          Capsule(x, y, w, h, A(idle));
       }
@@ -292,6 +290,27 @@ public:
       Capsule(x, y, w, h, ring);
       const int t = (th < 1 ? 1 : th);
       if(w - 2*t > 0 && h - 2*t > 0) Capsule(x + t, y + t, w - 2*t, h - 2*t, inner);
+   }
+   //--- Capsule avec RELIEF 3D : meme trace scanline que Capsule() (zero os-de-chien) ---
+   //--- mais chaque rangee est teintee Lerp(top,bot, row/h) -> pilule bombee, haut    ---
+   //--- clair -> bas fonce. C'est le MEME langage de relief que Card/Button (gradient ---
+   //--- vertical raise->surface / accent->accent_deep) : une seule famille de formes. ---
+   void CapsuleGradient(const int x, const int y, const int w, const int h,
+                        const uint top, const uint bot) {
+      if(!m_ready || w <= 0 || h <= 0) return;
+      double r = h / 2.0;                 if(r > w / 2.0) r = w / 2.0;
+      double cxL = x + r, cxR = x + w - r, cy = h / 2.0;
+      const double dn = (h > 1 ? (double)(h - 1) : 1.0); // last row = bot exactly
+      for(int row = 0; row < h; ++row) {
+         double dyc = (row + 0.5) - cy;
+         double s   = r*r - dyc*dyc;
+         double hw  = (s > 0.0 ? MathSqrt(s) : 0.0);
+         int xl = (int)MathRound(cxL - hw);
+         int xr = (int)MathRound(cxR + hw) - 1;
+         if(xl < x) xl = x; if(xr > x + w - 1) xr = x + w - 1;
+         if(xr >= xl) m_cv.FillRectangle(xl, y + row, xr, y + row,
+                                         Lerp(top, bot, (double)row / dn));
+      }
    }
 };
 

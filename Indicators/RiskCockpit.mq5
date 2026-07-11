@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "2.00"
+#property version "2.01"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -265,7 +265,7 @@ void InitTheme(void) {
         g_theme.border     = C'51,65,85';    // border
         g_theme.border_hi  = C'61,79,110';   // border hover
         g_theme.accent      = C'34,211,238'; // 7c VIVID : cyan-400 #22D3EE (was sky-400 #38BDF8 - punchier, matches the wordmark)
-        g_theme.accent_deep = C'14,116,144'; // cyan deep end (mockup --cyan-deep #0e7490)
+        g_theme.accent_deep = C'8,145,178';  // v2.01 : cyan-600 #0891B2 (was cyan-700 - livelier deep end under the vivid cyan-400 accent)
         g_theme.accent2     = C'129,140,248';// indigo
         g_theme.raise       = C'34,48,78';   // raised control top (mockup --raise #22304e)
         g_theme.text       = C'232,238,247'; // near-white
@@ -285,16 +285,16 @@ void InitTheme(void) {
         g_theme.surface_hi = C'241,245,249';
         g_theme.border     = C'203,213,225';
         g_theme.border_hi  = C'148,163,184';
-        g_theme.accent      = C'2,132,199';  // cyan-700 (readable on light)
-        g_theme.accent_deep = C'2,109,133';  // cyan deep end (light variant)
+        g_theme.accent      = C'3,105,161';  // v2.01 : sky-700 #0369A1 (was #0284C7 ~4.0:1 - now ~5.9:1 on the light bg)
+        g_theme.accent_deep = C'7,89,133';   // v2.01 : sky-800 #075985 (deep end follows the darkened accent)
         g_theme.accent2     = C'79,70,229';  // indigo-600
         g_theme.raise       = C'226,232,240';// raised control top (light variant)
         g_theme.text       = C'15,23,42';
         g_theme.label      = C'71,85,105';
         g_theme.text_dim   = C'100,116,139';
-        g_theme.ok         = C'22,163,74';   // green-600
-        g_theme.warn       = C'202,138,4';   // amber-600
-        g_theme.red        = C'220,38,38';   // red-600
+        g_theme.ok         = C'21,128,61';   // v2.01 : green-700 #15803D (green-600 was ~3.6:1 on light - now >=4.5:1)
+        g_theme.warn       = C'161,98,7';    // v2.01 : amber-700 #A16207 (amber-600 was ~3.1:1 on light - now >=4.5:1)
+        g_theme.red        = C'220,38,38';   // red-600 (~4.6:1, kept)
         g_theme.bar_bg     = C'226,232,240';
     }
 }
@@ -1128,6 +1128,10 @@ int OnInit(void) {
 
     DestroyAllObjects();
     BuildPanel();
+    MovePanelBy(0, 0); // v2.01 : re-clamp with the REAL height (BuildPanel just set
+                       // g_panel_height ; the pre-build clamp above only had the 52px
+                       // fallback) - a bottom-persisted anchor self-heals at load
+                       // instead of teleporting on the first drag. No-op when legal.
 
     // First refresh silently - we don't want a sound burst on init or
     // timeframe switch. Alerts arm only after the panel reflects current state.
@@ -1968,10 +1972,13 @@ void RiskFillColors(const ENUM_RC_STATUS s, color &a, color &b) {
     // fills/rings match the darker light-theme text tokens ; the DARK path below is
     // byte-identical (frozen look).
     if (EffectiveTheme() != RC_THEME_GLASS_DARK) {
+        // v2.01 : light ramps re-anchored on the darkened light tokens (b == g_theme.*,
+        // a = one step LIGHTER) - the meter darkens toward its end = more salient on a
+        // light bg, mirroring the dark theme where it BRIGHTENS toward the end.
         switch (s) {
-            case RC_STATUS_RED:  a = C'220,38,38';  b = C'239,68,68';  break;
-            case RC_STATUS_WARN: a = C'202,138,4';  b = C'245,158,11'; break;
-            case RC_STATUS_OK:   a = C'22,163,74';  b = C'34,197,94';  break;
+            case RC_STATUS_RED:  a = C'239,68,68';  b = C'220,38,38';  break; // red-500 -> red-600 (token)
+            case RC_STATUS_WARN: a = C'202,138,4';  b = C'161,98,7';   break; // amber-600 -> amber-700 (token)
+            case RC_STATUS_OK:   a = C'22,163,74';  b = C'21,128,61';  break; // green-600 -> green-700 (token)
             default:             a = g_theme.text_dim; b = g_theme.text_dim; break;
         }
         return;
@@ -1999,8 +2006,10 @@ void PaintStatusPill(const int x, const int y, const ENUM_RC_STATUS s, const boo
         color fa, fb; RiskFillColors(s, fa, fb);
         ring = fa;
     }
-    g_kit.CapsuleStroke(x, y, w, h, ColorToARGB(ring, 255), // CAPSULE REWRITE : exact-height pill (no dog-bone)
-                        ColorToARGB(TintOver(g_theme.bg, StatusColor(s), na ? 0.12 : 0.28), 255), 1); // 7c : interior tint 0.24 -> 0.28
+    g_kit.Capsule(x, y, w, h, ColorToARGB(ring, 255)); // saturated ring (1px, interior overdraws inset)
+    g_kit.CapsuleGradient(x + 1, y + 1, w - 2, h - 2,  // v2.01 RELIEF : tinted interior, light top -> dark bottom
+                          ColorToARGB(TintOver(g_theme.bg, StatusColor(s), na ? 0.16 : 0.34), 255),
+                          ColorToARGB(TintOver(g_theme.bg, StatusColor(s), na ? 0.10 : 0.24), 255));
 }
 
 //+------------------------------------------------------------------+
@@ -2049,10 +2058,12 @@ void RepaintCanvas(const int x, const int y, const int w) {
     // painted from the SAME panel-relative rects DrawAccountStrip stored (single source).
     if (g_chip_swap_w > 0) {
         const int chy = cy + (InpRowHeight - 16) / 2;
-        g_kit.Capsule(px + g_chip_swap_dx,  chy, g_chip_swap_w,  16, // CAPSULE REWRITE + 7c : tint 0.12 -> 0.16
-                      ColorToARGB(TintOver(g_theme.bg_lift, g_theme.accent, 0.16), 255));
-        g_kit.Capsule(px + g_chip_split_dx, chy, g_chip_split_w, 16,
-                      ColorToARGB(TintOver(g_theme.bg_lift, g_theme.ok, 0.16), 255));
+        g_kit.CapsuleGradient(px + g_chip_swap_dx,  chy, g_chip_swap_w,  16, // v2.01 RELIEF : tinted chip, light top -> dark bottom
+                              ColorToARGB(TintOver(g_theme.bg_lift, g_theme.accent, 0.20), 255),
+                              ColorToARGB(TintOver(g_theme.bg_lift, g_theme.accent, 0.12), 255));
+        g_kit.CapsuleGradient(px + g_chip_split_dx, chy, g_chip_split_w, 16,
+                              ColorToARGB(TintOver(g_theme.bg_lift, g_theme.ok, 0.20), 255),
+                              ColorToARGB(TintOver(g_theme.bg_lift, g_theme.ok, 0.12), 255));
     }
     cy += InpRowHeight;                            // account strip
     g_kit.Hairline(px + 1, cy, px + w - 2, hl);
@@ -2079,7 +2090,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
                 // E1 : "clear" dot - a 0% SAFE meter shows a start-of-track dot (mockup
                 // News window : clear) instead of an apparently-dead bar. fa = SAFE green.
                 if (ratio < 0.01 && g_rows[i].status == RC_STATUS_OK)
-                    g_kit.Capsule(bx, by, bh, bh, ColorToARGB(fa, 255)); // CAPSULE REWRITE : exact circle-in-track
+                    g_kit.CapsuleGradient(bx, by, bh, bh, ColorToARGB(fb, 255), ColorToARGB(fa, 255)); // v2.01 RELIEF : bright top -> deep bottom dot
                 // E2 : saturated ring + tinted interior, one shared painter.
                 PaintStatusPill(px + w - 70, ry + 3, g_rows[i].status, false);
             } else {
@@ -5518,17 +5529,19 @@ void MovePanelBy(int dx, int dy) {
     g_footer_y += dy;
 }
 
-// B2 : clamp an anchor so the title bar can NEVER leave the chart (fixes
-// "dragged off-screen, cannot grab it back"). Keeps >=120px of the bar visible.
+// B2 : clamp an anchor so the panel can NEVER leave the chart (fixes "dragged
+// off-screen, cannot grab it back"). v2.01 : the WHOLE panel stays visible
+// (was : >=120px of the title bar), left/top edges win when the chart is
+// smaller than the panel itself.
 void ClampAnchor(int &ax, int &ay) {
     const int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
     const int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
     if (cw <= 0 || ch <= 0) return;
-    const int MIN_VIS = 120;
-    if (ax < MIN_VIS - InpPanelWidth) ax = MIN_VIS - InpPanelWidth;
-    if (ax > cw - MIN_VIS)            ax = cw - MIN_VIS;
-    if (ay < 0)                       ay = 0;
-    if (ay > ch - RC_TITLE_HEIGHT)   ay = ch - RC_TITLE_HEIGHT;
+    if (ax > cw - InpPanelWidth) ax = cw - InpPanelWidth; // right edge fully on-screen
+    if (ax < 0)                  ax = 0;                  // left edge wins (chart narrower than panel -> 0)
+    const int ph = (g_panel_height > 0 ? g_panel_height : RC_TITLE_HEIGHT + InpRowHeight);
+    if (ay > ch - ph) ay = ch - ph;                       // bottom edge fully on-screen
+    if (ay < 0)       ay = 0;                             // top edge wins (chart shorter than panel -> 0)
 }
 
 void PersistAnchor(void) {
@@ -6182,9 +6195,10 @@ void DrawSetButton(const string id, int x, int y, int w, int h, const string tex
     ObjectDelete(0, id); // drop the stale native OBJ_BUTTON from any previous build
     if (g_modal_kit.Ready()) {
         const int SM = RC_KIT_MARGIN;
-        g_modal_kit.CapsuleStroke((x - g_anchor_x) + SM, (y - g_anchor_y) + SM, w, h, // CAPSULE REWRITE : exact pill, no corner bulge (flat face, gradient dropped)
-                                  ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255),
-                                  ColorToARGB(g_theme.raise, 255), 1);
+        const int blx = (x - g_anchor_x) + SM, bly = (y - g_anchor_y) + SM;
+        g_modal_kit.Capsule(blx, bly, w, h, ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255)); // soft ring
+        g_modal_kit.CapsuleGradient(blx + 1, bly + 1, w - 2, h - 2, // v2.01 RELIEF : raise->surface, same language as Card/Button
+                                    ColorToARGB(g_theme.raise, 255), ColorToARGB(g_theme.surface, 255));
     }
     SetLbl(id + "_l", x + w / 2, y + h / 2, text, g_theme.text);
     ObjectSetInteger(0, id + "_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
@@ -6201,10 +6215,12 @@ void HighlightSetButton(const string id, bool active) {
         if (g_hits[i].act == act) {
             if (g_modal_kit.Ready()) {
                 const int SM = RC_KIT_MARGIN;
-                g_modal_kit.CapsuleStroke(g_hits[i].x1 + SM, g_hits[i].y1 + SM, // CAPSULE REWRITE : accent rim + deepened face
-                                          g_hits[i].x2 - g_hits[i].x1, g_hits[i].y2 - g_hits[i].y1,
-                                          ColorToARGB(g_theme.accent, 255),
-                                          ColorToARGB(TintOver(g_theme.accent, g_theme.accent_deep, 0.35), 255), 1);
+                const int hx = g_hits[i].x1 + SM, hy = g_hits[i].y1 + SM;
+                const int hww = g_hits[i].x2 - g_hits[i].x1, hhh = g_hits[i].y2 - g_hits[i].y1;
+                g_modal_kit.Capsule(hx, hy, hww, hhh, ColorToARGB(g_theme.accent, 255)); // accent rim
+                g_modal_kit.CapsuleGradient(hx + 1, hy + 1, hww - 2, hhh - 2, // v2.01 RELIEF : accent->deep, same language as BTN_ON
+                                            ColorToARGB(g_theme.accent, 255),
+                                            ColorToARGB(g_theme.accent_deep, 255));
             }
             ObjectSetInteger(0, id + "_l", OBJPROP_COLOR, g_theme.bg);
             return;
@@ -6545,9 +6561,10 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
             // step 1 : X-close face = red-edged rounded button (same language as the panel X)
             // POLISH D : modal X UNIFIED with the header X/gear - same 22x20 capsule,
             // same soft slate ring (all-discreet decision, no red ; readable both themes).
-            g_modal_kit.CapsuleStroke((cxx - ox) + SM, SM + 6, 22, 20, // CAPSULE REWRITE : exact pill (flat face, matches DrawSetButton)
-                                      ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255),
-                                      ColorToARGB(g_theme.raise, 255), 1);
+            g_modal_kit.Capsule((cxx - ox) + SM, SM + 6, 22, 20, // soft ring, same as DrawSetButton
+                                ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255));
+            g_modal_kit.CapsuleGradient((cxx - ox) + SM + 1, SM + 7, 20, 18, // v2.01 RELIEF : raise->surface
+                                        ColorToARGB(g_theme.raise, 255), ColorToARGB(g_theme.surface, 255));
             // D-FULL step 2 : NO Commit here - the canvas stays OPEN so the body's
             // DrawSetButton / SetToggleBtn / SetStepper calls paint their faces into
             // it ; the single Commit lives at the END of DrawSettingsOverlay.
@@ -6567,7 +6584,7 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     // Title + close (centered label + zone on the SAME rect as the face).
     SetLbl(RC_PREFIX + "set_title", ox + 16, oy + 9, Tr("settings"), g_theme.accent);
     ObjectSetInteger(0, RC_PREFIX + "set_title", OBJPROP_FONTSIZE, RC_FONT_SIZE_TITLE);
-    SetLbl(RC_PREFIX + "set_close_l", cxx + 11, oy + 16, ShortToString((ushort)0x00D7), g_theme.label); // POLISH D : same glyph/tone/geometry as the header X
+    SetLbl(RC_PREFIX + "set_close_l", cxx + 11, oy + 16, ShortToString((ushort)0x2190), g_theme.label); // v2.01 : BACK arrow (was the 0x00D7 X - read "leave settings", NOT "kill the indicator")
     ObjectSetInteger(0, RC_PREFIX + "set_close_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
     HitAdd(cxx, oy + 6, cxx + 22, oy + 26, "set_close", -1, RCF_NONE);
 
@@ -6845,6 +6862,9 @@ void ApplySettingsChange(void) {
     }
     DestroyAllObjects();
     BuildPanel();
+    MovePanelBy(0, 0); // v2.01 : geometry may have GROWN (risktools ON = +264px) -
+                       // re-clamp against the fresh g_panel_height so the panel
+                       // never ends below the chart. No-op when already legal.
     // V1.29 S : CHART elements live on the price area (NOT the panel), so a popup
     // change must reflect on them IMMEDIATELY - refresh them ALWAYS (no modal
     // bleed-through, they're off-panel). Only RefreshPanel (the panel rows) stays
