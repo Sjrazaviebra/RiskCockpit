@@ -298,9 +298,17 @@ public:
    void CapsuleGradient(const int x, const int y, const int w, const int h,
                         const uint top, const uint bot) {
       if(!m_ready || w <= 0 || h <= 0) return;
+      // v2.01.03 : relief AMPLIFIE - le haut est eclairci et le bas assombri autour
+      // des tons demandes (vrai volume, plus le degrade discret d'avant), plus un
+      // HIGHLIGHT 1px en haut (~ +10%) et une OMBRE 1px en bas - le tout DANS le
+      // trace scanline (les rangees 0 / h-1 suivent la corde, jamais de rect carre).
+      const uint topA = Lerp(top, A(clrWhite), 0.12);   // amplified light end
+      const uint botA = Lerp(bot, A(clrBlack), 0.20);   // amplified dark end
+      const uint hi   = Lerp(topA, A(clrWhite), 0.10);  // 1px top highlight line
+      const uint shd  = Lerp(botA, A(clrBlack), 0.25);  // 1px bottom shadow line
       double r = h / 2.0;                 if(r > w / 2.0) r = w / 2.0;
       double cxL = x + r, cxR = x + w - r, cy = h / 2.0;
-      const double dn = (h > 1 ? (double)(h - 1) : 1.0); // last row = bot exactly
+      const double dn = (h > 1 ? (double)(h - 1) : 1.0); // last row = botA exactly
       for(int row = 0; row < h; ++row) {
          double dyc = (row + 0.5) - cy;
          double s   = r*r - dyc*dyc;
@@ -308,8 +316,13 @@ public:
          int xl = (int)MathRound(cxL - hw);
          int xr = (int)MathRound(cxR + hw) - 1;
          if(xl < x) xl = x; if(xr > x + w - 1) xr = x + w - 1;
-         if(xr >= xl) m_cv.FillRectangle(xl, y + row, xr, y + row,
-                                         Lerp(top, bot, (double)row / dn));
+         if(xr < xl) continue;
+         uint c = Lerp(topA, botA, (double)row / dn);
+         if(h >= 6) {                       // tiny shapes keep the plain gradient
+            if(row == 0)          c = hi;
+            else if(row == h - 1) c = shd;
+         }
+         m_cv.FillRectangle(xl, y + row, xr, y + row, c);
       }
    }
 };

@@ -837,17 +837,32 @@ bool HitTest(const int mx, const int my, string &act, int &idx) {
 }
 // Paint one control face at LOCAL canvas coords (relative rect + RC_KIT_MARGIN).
 void DrawFace(const int lx, const int ly, const int w, const int h, const int style) {
-    const int r = MathMin(RC_R_CARD, h / 2);
     // LOT C : mockup fidelity - buttons = raise->surface vertical gradient + FAINT border
     // (.bt) ; ON states = accent->accent_deep gradient (.bt.primary / .sw.on / .seg .act) ;
     // pill OFF track = faint light film (.sw white-9%) with a soft outline. All tints are
     // PRE-BLENDED via TintOver (CCanvas overwrite semantics - see TintOver).
+    // v2.01.03 : ONE shape family - the last rounded-rect Button faces (Re-center /
+    // Auto-SL / recent-symbols / X / gear) become capsules too : ring + relief
+    // gradient, the exact construction of the modal buttons. (The old local radius
+    // `r` is retired with Button - capsules derive their radius from h.)
     const color pill_off  = FilmOver(g_theme.bg, 0.09); // .sw track
     const color soft_line = TintOver(g_theme.bg, C'148,163,184', 0.25); // pill outline
     switch (style) {
-        case RCF_BTN:      g_kit.Button(lx, ly, w, h, r, g_theme.raise, g_theme.surface, g_theme.border);          break;
-        case RCF_BTN_ON:   g_kit.Button(lx, ly, w, h, r, g_theme.accent, g_theme.accent_deep, g_theme.accent);     break;
-        case RCF_BTN_RED:  g_kit.Button(lx, ly, w, h, r, g_theme.raise, g_theme.surface, g_theme.red);             break;
+        case RCF_BTN:
+            g_kit.Capsule(lx, ly, w, h, ColorToARGB(g_theme.border, 255)); // faint ring
+            g_kit.CapsuleGradient(lx + 1, ly + 1, w - 2, h - 2,
+                                  ColorToARGB(g_theme.raise, 255), ColorToARGB(g_theme.surface, 255));
+            break;
+        case RCF_BTN_ON:
+            g_kit.Capsule(lx, ly, w, h, ColorToARGB(g_theme.accent, 255)); // accent ring
+            g_kit.CapsuleGradient(lx + 1, ly + 1, w - 2, h - 2,
+                                  ColorToARGB(g_theme.accent, 255), ColorToARGB(g_theme.accent_deep, 255));
+            break;
+        case RCF_BTN_RED:
+            g_kit.Capsule(lx, ly, w, h, ColorToARGB(g_theme.red, 255)); // red ring (danger affordance)
+            g_kit.CapsuleGradient(lx + 1, ly + 1, w - 2, h - 2,
+                                  ColorToARGB(g_theme.raise, 255), ColorToARGB(g_theme.surface, 255));
+            break;
         case RCF_BTN_GHOST: // E5 : outline-only (mockup ghost button) - capsule ring + bg interior
             g_kit.CapsuleStroke(lx - 1, ly - 1, w + 2, h + 2,
                                 ColorToARGB(g_theme.border, 255), ColorToARGB(g_theme.bg, 255), 1);
@@ -3377,7 +3392,11 @@ void UpdateClockBlinker(void) {
     VerdictResult v;
     ComputeVerdict(v);
     if (v.clr == g_theme.ok) {
-        ObjectSetString(0, cid, OBJPROP_TEXT, ShortToString((ushort)0x25CF) + " " + Tr("live"));
+        // v2.01.03 : the healthy state now SAYS the health - "● SAIN 82/100" - instead
+        // of the mute "● LIVE". The dot keeps the live-heartbeat read, the word + /100
+        // make the score meaning obvious (mandate : "14 = quoi ?"). Same zone, same
+        // green, right-anchored (grows toward the title, never the gear).
+        ObjectSetString(0, cid, OBJPROP_TEXT, ShortToString((ushort)0x25CF) + " " + v.text);
         ObjectSetInteger(0, cid, OBJPROP_COLOR, g_theme.ok);
         return;
     }
@@ -3404,14 +3423,16 @@ void ComputeVerdict(VerdictResult &out) {
     if (score < 0)   score = 0;
     if (score > 100) score = 100;
     out.score = score;
+    // v2.01.03 : the score is the account HEALTH /100 (100 = safe, 0 = rule hit) -
+    // say it : "SAIN 82/100" / "PRUDENCE 14/100", the colour carrying the zone.
     if (max_ratio >= 1.0) {
-        out.text = Tr("v_violation") + " " + IntegerToString(score);
+        out.text = Tr("v_violation") + " " + IntegerToString(score) + "/100";
         out.clr  = g_theme.red;
     } else if (max_ratio >= 0.80) {
-        out.text = Tr("v_atrisk") + " " + IntegerToString(score);
+        out.text = Tr("v_atrisk") + " " + IntegerToString(score) + "/100";
         out.clr  = g_theme.warn;
     } else {
-        out.text = Tr("v_ontrack") + " " + IntegerToString(score);
+        out.text = Tr("v_ontrack") + " " + IntegerToString(score) + "/100";
         out.clr  = g_theme.ok;
     }
 }
@@ -5717,9 +5738,9 @@ void InitI18n(void) {
     AddTr("rule_newsstats",  "News Trades",            "Trades news",         "Ops noticias");
     AddTr("rule_msgs",       "Server msgs (orders)",   "Msgs serveur (ordres)","Msgs servidor (órdenes)");
     // --- verdict badge + clock ---
-    AddTr("v_ontrack",   "ON TRACK",      "EN VOIE",        "EN RUMBO");
-    AddTr("v_atrisk",    "AT RISK",       "À RISQUE",       "EN RIESGO");
-    AddTr("v_violation", "VIOLATION",     "VIOLATION",      "VIOLACIÓN");
+    AddTr("v_ontrack",   "HEALTHY",       "SAIN",           "SANO");        // v2.01.03 : health words - the score is account HEALTH /100
+    AddTr("v_atrisk",    "CAUTION",       "PRUDENCE",       "PRECAUCIÓN");
+    AddTr("v_violation", "DANGER",        "DANGER",         "PELIGRO");
     AddTr("live",        "LIVE",          "LIVE",           "LIVE"); // FINAL : the green dot (U+25CF) is concatenated at the call sites - no more "* " placeholder
     AddTr("weekend_hold","WEEKEND HOLD!", "TENUE WEEKEND!", "RETENER FINDE!");
     AddTr("flatten",     "  FLATTEN!",    "  FERMER!",      "  CERRAR!");
