@@ -148,6 +148,31 @@ public:
       }
    }
 
+   //--- vertical gradient band : SQUARE top, ROUNDED BOTTOM corners - for the LAST  --
+   //--- band of a card (a square fill there covers the card's bottom rounding).     --
+   //--- Scanline rows : full width until the bottom r rows, then clipped to the     --
+   //--- corner chord (same math as Capsule). The corner notches are NEVER painted,  --
+   //--- so whatever sits there (shadow / glow / chart) stays intact.                --
+   void GradientVFillB(const int x, const int y, const int w, const int h, int r,
+                       const uint top, const uint bot) {
+      if(!m_ready || w <= 0 || h <= 0) return;
+      if(r > w/2) r = w/2; if(r > h/2) r = h/2; if(r < 0) r = 0;
+      const double cxL = x + r, cxR = x + w - r; // bottom corner-circle centres (x)
+      for(int row = 0; row < h; ++row) {
+         const uint c = Lerp(top, bot, (double)row / (double)h);
+         int xl = x, xr = x + w - 1;
+         const double dyc = (row + 0.5) - (double)(h - r); // >0 = inside the rounding
+         if(dyc > 0.0) {
+            const double s  = (double)r*r - dyc*dyc;
+            const double hw = (s > 0.0 ? MathSqrt(s) : 0.0);
+            xl = (int)MathRound(cxL - hw);
+            xr = (int)MathRound(cxR + hw) - 1;
+            if(xl < x) xl = x; if(xr > x + w - 1) xr = x + w - 1;
+         }
+         if(xr >= xl) m_cv.FillRectangle(xl, y + row, xr, y + row, c);
+      }
+   }
+
    //--- card : border ring + vertical gradient interior + faint top sheen. --
    void Card(const int x, const int y, const int w, const int h, const int r,
              const color top, const color bot, const color border) {
@@ -181,10 +206,10 @@ public:
       if(!m_ready) return;
       if(ratio < 0.0) ratio = 0.0; if(ratio > 1.0) ratio = 1.0;
       const int r = h/2;
-      RoundFill(x, y, w, h, r, A(track));
+      Capsule(x, y, w, h, A(track));   // CAPSULE REWRITE : clean pill ends
       const int fw = (int)MathRound(w * ratio);
       if(fw >= 2) {
-         RoundFill(x, y, fw, h, r, A(fillA));
+         Capsule(x, y, fw, h, A(fillA)); // Capsule self-clamps r=min(h/2, fw/2) when fw<h
          // subtle left->right gradient on the straight middle of the fill
          const int gx0 = x + r, gx1 = x + fw - r, bands = 16;
          if(gx1 > gx0) {
@@ -204,14 +229,14 @@ public:
       if(!m_ready) return;
       const int r = h/2;
       if(on) {
-         RoundFill(x, y, w, h, r, A(onA));
+         Capsule(x, y, w, h, A(onA));  // CAPSULE REWRITE : clean pill ends
          const int gx0 = x+r, gx1 = x+w-r, bands = 10;
          if(gx1 > gx0) { const int bw = MathMax(1,(gx1-gx0)/bands);
             for(int b=0; b*bw<(gx1-gx0); ++b)
                m_cv.FillRectangle(gx0+b*bw, y+1, MathMin(gx1,gx0+(b+1)*bw), y+h-2,
                                   Lerp(A(onA), A(onB), (double)(b*bw)/(double)(gx1-gx0))); }
       } else {
-         RoundFill(x, y, w, h, r, A(offTrack));
+         Capsule(x, y, w, h, A(offTrack));
       }
       const double t = (knobT >= 0.0 ? knobT : (on ? 1.0 : 0.0));
       const int kr = r - 2;
@@ -234,13 +259,39 @@ public:
                 const bool active, const color fillA, const color fillB, const color idle) {
       if(!m_ready) return;
       if(active) {
-         // POLISH A1 : ONE full rounded fill only. The 2-tone bottom half clamped its
-         // radius below the capsule's -> "dog-bone" corners ; and the older gradient
-         // band loop painted square. A single capsule is clean and consistent.
-         RoundFill(x, y, w, h, r, A(fillA));
+         // CAPSULE REWRITE : scanline capsule = mathematically clean pill ends
+         // (RoundFill @ r=h/2 bulged 1-2px at the caps = the "dog-bone").
+         Capsule(x, y, w, h, A(fillA));
       } else {
-         RoundFill(x, y, w, h, r, A(idle));
+         Capsule(x, y, w, h, A(idle));
       }
+   }
+
+   //--- Capsule pleine, bouts arrondis parfaits, hauteur EXACTE h (0 debordement). ---
+   //--- SCANLINES : chaque rangee = sa demi-corde exacte, inscrite dans la boite h  ---
+   //--- -> flancs a ras, demi-cercles tangents. (RoundFill @ r=h/2 bombait de 1-2px ---
+   //--- aux bouts = l'"os de chien" ; ce primitif le remplace pour les pilules.)    ---
+   void Capsule(const int x, const int y, const int w, const int h, const uint argb) {
+      if(!m_ready || w <= 0 || h <= 0) return;
+      double r = h / 2.0;                 if(r > w / 2.0) r = w / 2.0;
+      double cxL = x + r, cxR = x + w - r, cy = h / 2.0;
+      for(int row = 0; row < h; ++row) {
+         double dyc = (row + 0.5) - cy;
+         double s   = r*r - dyc*dyc;
+         double hw  = (s > 0.0 ? MathSqrt(s) : 0.0);
+         int xl = (int)MathRound(cxL - hw);
+         int xr = (int)MathRound(cxR + hw) - 1;
+         if(xl < x) xl = x; if(xr > x + w - 1) xr = x + w - 1;
+         if(xr >= xl) m_cv.FillRectangle(xl, y + row, xr, y + row, argb);
+      }
+   }
+   //--- Anneau capsule d'epaisseur UNIFORME (ring puis interieur inset th). ---------
+   void CapsuleStroke(const int x, const int y, const int w, const int h,
+                      const uint ring, const uint inner, const int th = 1) {
+      if(!m_ready || w <= 0 || h <= 0) return;
+      Capsule(x, y, w, h, ring);
+      const int t = (th < 1 ? 1 : th);
+      if(w - 2*t > 0 && h - 2*t > 0) Capsule(x + t, y + t, w - 2*t, h - 2*t, inner);
    }
 };
 

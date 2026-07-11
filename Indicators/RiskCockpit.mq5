@@ -264,16 +264,16 @@ void InitTheme(void) {
         g_theme.surface_hi = C'34,46,69';    // raised / hover
         g_theme.border     = C'51,65,85';    // border
         g_theme.border_hi  = C'61,79,110';   // border hover
-        g_theme.accent      = C'56,189,248'; // cyan
+        g_theme.accent      = C'34,211,238'; // 7c VIVID : cyan-400 #22D3EE (was sky-400 #38BDF8 - punchier, matches the wordmark)
         g_theme.accent_deep = C'14,116,144'; // cyan deep end (mockup --cyan-deep #0e7490)
         g_theme.accent2     = C'129,140,248';// indigo
         g_theme.raise       = C'34,48,78';   // raised control top (mockup --raise #22304e)
         g_theme.text       = C'232,238,247'; // near-white
         g_theme.label      = C'159,176,200'; // muted label
         g_theme.text_dim   = C'100,116,139'; // dim
-        g_theme.ok         = C'74,222,128';  // green (safe) - FINESSE 3a : #4ADE80 = end of the SAFE canvas ramp (token==ramp-end convention, was off-ramp emerald)
-        g_theme.warn       = C'251,191,36';  // amber  (warn)
-        g_theme.red        = C'248,113,113'; // red    (breach)
+        g_theme.ok         = C'34,197,94';   // 7c VIVID : green-500 #22C55E (saturated, token==ramp-end below)
+        g_theme.warn       = C'245,158,11';  // 7c VIVID : amber-500 #F59E0B
+        g_theme.red        = C'239,68,68';   // 7c VIVID : red-500 #EF4444
         g_theme.bar_bg     = C'22,32,56';    // meter track
     } else // GLASS_LIGHT
     {
@@ -337,6 +337,16 @@ color FilmOver(const color base, const double t) {
 #define RC_FONT_SIZE 9
 #define RC_FONT_SIZE_TITLE 11
 #define RC_FONT_SIZE_LABEL 8                 // small muted labels
+// CAPSULE TEXT : font size proportional to the capsule height (a 16px chip cannot hold
+// a 9pt Segoe box) + text-measured width so labels can never overflow their pill,
+// whatever the locale or the DPI scale.
+int RC_CapFont(const int h) { int pt = h / 2 - 1; if (pt < 7) pt = 7; if (pt > RC_FONT_SIZE) pt = RC_FONT_SIZE; return pt; }
+int RC_CapWidth(const string txt, const int h, const string font) {
+    uint tw = 0, th = 0;
+    TextSetFont(font, -RC_CapFont(h) * 10);
+    TextGetSize(txt, tw, th);
+    return (int)tw + h + 8; // text + the two rounded caps + padding
+}
 #define RC_MAX_POSITIONS 10
 
 //+------------------------------------------------------------------+
@@ -838,16 +848,16 @@ void DrawFace(const int lx, const int ly, const int w, const int h, const int st
         case RCF_BTN:      g_kit.Button(lx, ly, w, h, r, g_theme.raise, g_theme.surface, g_theme.border);          break;
         case RCF_BTN_ON:   g_kit.Button(lx, ly, w, h, r, g_theme.accent, g_theme.accent_deep, g_theme.accent);     break;
         case RCF_BTN_RED:  g_kit.Button(lx, ly, w, h, r, g_theme.raise, g_theme.surface, g_theme.red);             break;
-        case RCF_BTN_GHOST: // E5 : outline-only (mockup ghost button) - ring then bg interior
-            g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, r + 1, ColorToARGB(g_theme.border, 255));
-            g_kit.RoundFill(lx, ly, w, h, r, ColorToARGB(g_theme.bg, 255));
+        case RCF_BTN_GHOST: // E5 : outline-only (mockup ghost button) - capsule ring + bg interior
+            g_kit.CapsuleStroke(lx - 1, ly - 1, w + 2, h + 2,
+                                ColorToARGB(g_theme.border, 255), ColorToARGB(g_theme.bg, 255), 1);
             break;
         case RCF_PILL_OFF:
-            g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2, ColorToARGB(soft_line)); // soft 1px outline
+            g_kit.Capsule(lx - 1, ly - 1, w + 2, h + 2, ColorToARGB(soft_line)); // soft 1px outline (capsule : track covers interior)
             g_kit.PillToggle(lx, ly, w, h, false, pill_off, g_theme.accent_deep, g_theme.accent, C'203,213,225');
             break;
         case RCF_PILL_ON:
-            g_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2, ColorToARGB(soft_line)); // soft 1px outline
+            g_kit.Capsule(lx - 1, ly - 1, w + 2, h + 2, ColorToARGB(soft_line)); // soft 1px outline (capsule : track covers interior)
             g_kit.PillToggle(lx, ly, w, h, true,  pill_off, g_theme.accent_deep, g_theme.accent, C'255,255,255');
             break;
     }
@@ -913,6 +923,7 @@ int  g_drag_last_x = 0;
 int  g_drag_last_y = 0;
 void MovePanelBy(int dx, int dy);
 void PersistAnchor(void);
+void ClampAnchor(int &ax, int &ay); // B2 : keep panel title bar on-screen
 
 // SuggestedLot breakdown so the panel can show why a lot was/wasn't suggested
 struct SuggestedLot {
@@ -1007,6 +1018,7 @@ int OnInit(void) {
     g_anchor_y = (int)InpAnchorY;
     if (GlobalVariableCheck("RC_anchor_x")) g_anchor_x = (int)GlobalVariableGet("RC_anchor_x");
     if (GlobalVariableCheck("RC_anchor_y")) g_anchor_y = (int)GlobalVariableGet("RC_anchor_y");
+    ClampAnchor(g_anchor_x, g_anchor_y); // B2 : never load off-screen
     ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
 
     // Free-account detection note (Server 3 / demo = free/competition heuristic).
@@ -1178,6 +1190,22 @@ void OnTimer(void) {
     // the %-bar bleed-through. The overlay is static between clicks (a click
     // rebuilds it via ApplySettingsChange), so we just skip the refresh.
     if (g_settings_open) { ChartRedraw(0); return; }
+    // 7a GLOW FLUIDE : while a breach is LIVE the timer runs at 40 ms (~25 fps) so the
+    // glow breath is a real animation ; the FULL panel refresh below keeps its
+    // configured cadence through a GetTickCount accumulator (fast ticks pulse the FX
+    // canvas ONLY - ~1 bitmap update, none of the heavy panel work). No breach =
+    // plain g_eff_refresh_ms timer, exactly the old behaviour. Re-arming every tick
+    // also self-heals the period after the modal's refresh stepper re-arms it slow.
+    const bool fx_fast = RiskIsBreaching();
+    EventKillTimer();
+    EventSetMillisecondTimer(fx_fast ? 40 : g_eff_refresh_ms);
+    if (fx_fast) {
+        RenderFx();                                    // fluid pulse every 40 ms
+        static uint s_last_full = 0;
+        const uint  now = GetTickCount();
+        if (now - s_last_full < (uint)g_eff_refresh_ms) { ChartRedraw(0); return; }
+        s_last_full = now;                             // fall through : full refresh
+    }
     RefreshPanel();
     RepaintCanvas(g_anchor_x, g_anchor_y, InpPanelWidth); // v1.4 : redraw modern body with fresh values
     RenderFx();            // v1.4 : refresh the breach-glow pulse
@@ -1949,9 +1977,11 @@ void RiskFillColors(const ENUM_RC_STATUS s, color &a, color &b) {
         return;
     }
     switch (s) {
-        case RC_STATUS_RED:  a = C'239,68,68';  b = C'248,113,113'; break;
-        case RC_STATUS_WARN: a = C'245,158,11'; b = C'251,191,36';  break;
-        case RC_STATUS_OK:   a = C'34,197,94';  b = C'74,222,128';  break; // E1 : SAFE green #22C55E -> #4ADE80 (mockup)
+        // 7c VIVID : dark ramps re-anchored on the -500 tokens (b == g_theme.* token,
+        // a = the matching -600 start) so meters end EXACTLY on the pill/text hue.
+        case RC_STATUS_RED:  a = C'220,38,38';  b = C'239,68,68';  break; // red-600 -> red-500
+        case RC_STATUS_WARN: a = C'217,119,6';  b = C'245,158,11'; break; // amber-600 -> amber-500
+        case RC_STATUS_OK:   a = C'22,163,74';  b = C'34,197,94';  break; // green-600 -> green-500
         default:             a = g_theme.text_dim;   b = g_theme.text_dim; break;
     }
 }
@@ -1969,9 +1999,8 @@ void PaintStatusPill(const int x, const int y, const ENUM_RC_STATUS s, const boo
         color fa, fb; RiskFillColors(s, fa, fb);
         ring = fa;
     }
-    g_kit.RoundFill(x, y, w, h, h / 2, ColorToARGB(ring, 255));                       // ring
-    g_kit.RoundFill(x + 1, y + 1, w - 2, h - 2, (h - 2) / 2,                          // interior
-                    ColorToARGB(TintOver(g_theme.bg, StatusColor(s), na ? 0.12 : 0.24), 255));
+    g_kit.CapsuleStroke(x, y, w, h, ColorToARGB(ring, 255), // CAPSULE REWRITE : exact-height pill (no dog-bone)
+                        ColorToARGB(TintOver(g_theme.bg, StatusColor(s), na ? 0.12 : 0.28), 255), 1); // 7c : interior tint 0.24 -> 0.28
 }
 
 //+------------------------------------------------------------------+
@@ -2020,10 +2049,10 @@ void RepaintCanvas(const int x, const int y, const int w) {
     // painted from the SAME panel-relative rects DrawAccountStrip stored (single source).
     if (g_chip_swap_w > 0) {
         const int chy = cy + (InpRowHeight - 16) / 2;
-        g_kit.RoundFill(px + g_chip_swap_dx,  chy, g_chip_swap_w,  16, 8,
-                        ColorToARGB(TintOver(g_theme.bg_lift, g_theme.accent, 0.12), 255));
-        g_kit.RoundFill(px + g_chip_split_dx, chy, g_chip_split_w, 16, 8,
-                        ColorToARGB(TintOver(g_theme.bg_lift, g_theme.ok, 0.12), 255));
+        g_kit.Capsule(px + g_chip_swap_dx,  chy, g_chip_swap_w,  16, // CAPSULE REWRITE + 7c : tint 0.12 -> 0.16
+                      ColorToARGB(TintOver(g_theme.bg_lift, g_theme.accent, 0.16), 255));
+        g_kit.Capsule(px + g_chip_split_dx, chy, g_chip_split_w, 16,
+                      ColorToARGB(TintOver(g_theme.bg_lift, g_theme.ok, 0.16), 255));
     }
     cy += InpRowHeight;                            // account strip
     g_kit.Hairline(px + 1, cy, px + w - 2, hl);
@@ -2050,7 +2079,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
                 // E1 : "clear" dot - a 0% SAFE meter shows a start-of-track dot (mockup
                 // News window : clear) instead of an apparently-dead bar. fa = SAFE green.
                 if (ratio < 0.01 && g_rows[i].status == RC_STATUS_OK)
-                    g_kit.RoundFill(bx, by, bh, bh, bh / 2, ColorToARGB(fa, 255));
+                    g_kit.Capsule(bx, by, bh, bh, ColorToARGB(fa, 255)); // CAPSULE REWRITE : exact circle-in-track
                 // E2 : saturated ring + tinted interior, one shared painter.
                 PaintStatusPill(px + w - 70, ry + 3, g_rows[i].status, false);
             } else {
@@ -2090,9 +2119,8 @@ void RepaintCanvas(const int x, const int y, const int w) {
     // LOT C : segmented TF control, mockup .seg - a subtle LIGHT track (white-5%, soft
     // 1px ring, radius 10) ; idle segments draw NOTHING (label-only, .seg b) ; the
     // ACTIVE segment is a vertical accent->accent_deep gradient (.seg b.act, radius 7).
-    g_kit.RoundFill(px + 28, cy + 3, 322, InpRowHeight - 6, 10, ColorToARGB(hl, 255));       // ring
-    g_kit.RoundFill(px + 29, cy + 4, 320, InpRowHeight - 8, 9,
-                    ColorToARGB(FilmOver(g_theme.bg, 0.05), 255));           // track
+    g_kit.CapsuleStroke(px + 28, cy + 3, 322, InpRowHeight - 6, ColorToARGB(hl, 255), // CAPSULE REWRITE : ring + track
+                        ColorToARGB(FilmOver(g_theme.bg, 0.05), 255), 1);
     {
         const ENUM_TIMEFRAMES tfv2[9] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
                                          PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
@@ -2106,10 +2134,12 @@ void RepaintCanvas(const int x, const int y, const int w) {
     }
     cy += InpRowHeight;
     g_kit.Hairline(px + 1, cy, px + w - 2, hl);
-    // LOT B : recent-symbols band = same subtle gradient
-    g_kit.GradientVFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0,
-                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface_hi, 0.45), 255),
-                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface, 0.20), 255));
+    // LOT B : recent-symbols band = same subtle gradient. 7b : this is the LAST band -
+    // rounded BOTTOM corners so it stops covering the card's r=15 bottom rounding
+    // (interior radius = RC_R_PANEL-1, the band sits 1px inside the border ring).
+    g_kit.GradientVFillB(px + 1, cy + 1, w - 2, InpRowHeight - 1, RC_R_PANEL - 1,
+                         ColorToARGB(TintOver(g_theme.bg, g_theme.surface_hi, 0.45), 255),
+                         ColorToARGB(TintOver(g_theme.bg, g_theme.surface, 0.20), 255));
 
     PaintFaces();     // v1.4.1 R3 : paint every registered control face (rounded btns / pills)
     g_kit.Commit();
@@ -2293,15 +2323,15 @@ void DrawAccountStrip(int x, int y, int w) {
     const int chip_y = y + (InpRowHeight - chip_h) / 2;
     int cdx = RC_PAD + 164; // FINESSE 6a : +14px cushion for long Personal logins (chips slide together, strip_right is right-anchored)
     g_chip_swap_dx = cdx;
-    g_chip_swap_w  = (StringLen(acc_type_str) > 4 ? 78 : 50); // "SWAP-FREE" vs "SWAP"
+    g_chip_swap_w  = RC_CapWidth(acc_type_str, chip_h, RC_FONT_UI_SB); // CAPSULE TEXT : measured, never overflows
     DrawLabel(RC_PREFIX + "strip_chip1", x + cdx + g_chip_swap_w / 2, chip_y + chip_h / 2,
-              acc_type_str, g_theme.accent, RC_FONT_SIZE - 1, RC_FONT_UI_SB);
+              acc_type_str, g_theme.accent, RC_CapFont(chip_h), RC_FONT_UI_SB);
     ObjectSetInteger(0, RC_PREFIX + "strip_chip1", OBJPROP_ANCHOR, ANCHOR_CENTER);
     cdx += g_chip_swap_w + 8;
     g_chip_split_dx = cdx;
-    g_chip_split_w  = 78;
+    g_chip_split_w  = RC_CapWidth(split_str, chip_h, RC_FONT_UI_SB); // CAPSULE TEXT
     DrawLabel(RC_PREFIX + "strip_chip2", x + cdx + g_chip_split_w / 2, chip_y + chip_h / 2,
-              split_str, g_theme.ok, RC_FONT_SIZE - 1, RC_FONT_UI_SB);
+              split_str, g_theme.ok, RC_CapFont(chip_h), RC_FONT_UI_SB);
     ObjectSetInteger(0, RC_PREFIX + "strip_chip2", OBJPROP_ANCHOR, ANCHOR_CENTER);
 
     // Right: min-trading-days counter (date-free, computed from trade history).
@@ -2666,7 +2696,7 @@ void DrawStatusChip(const string id, int x, int y, int w, int h, ENUM_RC_STATUS 
     // opaque _bg rect rendered OVER the canvas pill and flattened it -> dropped.
     ObjectDelete(0, id + "_bg"); // clear the legacy rect from any previous build
     const color txt_clr = (status == RC_STATUS_NA ? g_theme.text_dim : StatusColor(status));
-    DrawLabel(id + "_txt", x + w / 2, y + h / 2, StatusLabel(status), txt_clr, RC_FONT_SIZE - 1, RC_FONT_UI_SB);
+    DrawLabel(id + "_txt", x + w / 2, y + h / 2, StatusLabel(status), txt_clr, RC_CapFont(h), RC_FONT_UI_SB); // CAPSULE TEXT : font follows the pill height
     ObjectSetInteger(0, id + "_txt", OBJPROP_ANCHOR, ANCHOR_CENTER); // centered like .pill
 }
 
@@ -5458,6 +5488,7 @@ void PersistMaxParallel(void) {
 //| chart price lines (SL/TP/NEWS) are left untouched.                |
 //+------------------------------------------------------------------+
 void MovePanelBy(int dx, int dy) {
+    { int nx = g_anchor_x + dx, ny = g_anchor_y + dy; ClampAnchor(nx, ny); dx = nx - g_anchor_x; dy = ny - g_anchor_y; } // B2 : bar cannot be dragged off-screen
     if (dx == 0 && dy == 0)
         return;
     const int total = ObjectsTotal(0);
@@ -5485,6 +5516,19 @@ void MovePanelBy(int dx, int dy) {
     g_recbar_y += dy;
     g_tfbar_y  += dy;
     g_footer_y += dy;
+}
+
+// B2 : clamp an anchor so the title bar can NEVER leave the chart (fixes
+// "dragged off-screen, cannot grab it back"). Keeps >=120px of the bar visible.
+void ClampAnchor(int &ax, int &ay) {
+    const int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+    const int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+    if (cw <= 0 || ch <= 0) return;
+    const int MIN_VIS = 120;
+    if (ax < MIN_VIS - InpPanelWidth) ax = MIN_VIS - InpPanelWidth;
+    if (ax > cw - MIN_VIS)            ax = cw - MIN_VIS;
+    if (ay < 0)                       ay = 0;
+    if (ay > ch - RC_TITLE_HEIGHT)   ay = ch - RC_TITLE_HEIGHT;
 }
 
 void PersistAnchor(void) {
@@ -5806,7 +5850,7 @@ void DrawTimeframeBar(int x, int y, int w) {
         if (ObjectFind(0, bid) >= 0) ObjectDelete(0, bid); // drop any pre-R3 OBJ_BUTTON
         const string lid = RC_PREFIX + "tflab_" + tfs[i];
         DrawLabel(lid, bx + btn_w / 2, y + 3 + btn_h / 2, tfs[i],
-                  active ? g_theme.bg : g_theme.text, RC_FONT_SIZE - 1, RC_FONT_UI);
+                  active ? g_theme.bg : g_theme.text, RC_CapFont(btn_h), RC_FONT_UI); // CAPSULE TEXT
         ObjectSetInteger(0, lid, OBJPROP_ANCHOR, ANCHOR_CENTER);
         HitAdd(bx, y + 3, bx + btn_w, y + 3 + btn_h, "tf", i);
     }
@@ -6138,9 +6182,9 @@ void DrawSetButton(const string id, int x, int y, int w, int h, const string tex
     ObjectDelete(0, id); // drop the stale native OBJ_BUTTON from any previous build
     if (g_modal_kit.Ready()) {
         const int SM = RC_KIT_MARGIN;
-        g_modal_kit.Card((x - g_anchor_x) + SM, (y - g_anchor_y) + SM, w, h, MathMin(RC_R_CARD, h / 2), // FINESSE 4a : capsule like the panel (DrawFace)
-                         g_theme.raise, g_theme.surface,
-                         TintOver(g_theme.bg, C'148,163,184', 0.25));
+        g_modal_kit.CapsuleStroke((x - g_anchor_x) + SM, (y - g_anchor_y) + SM, w, h, // CAPSULE REWRITE : exact pill, no corner bulge (flat face, gradient dropped)
+                                  ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255),
+                                  ColorToARGB(g_theme.raise, 255), 1);
     }
     SetLbl(id + "_l", x + w / 2, y + h / 2, text, g_theme.text);
     ObjectSetInteger(0, id + "_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
@@ -6157,10 +6201,10 @@ void HighlightSetButton(const string id, bool active) {
         if (g_hits[i].act == act) {
             if (g_modal_kit.Ready()) {
                 const int SM = RC_KIT_MARGIN;
-                g_modal_kit.Card(g_hits[i].x1 + SM, g_hits[i].y1 + SM,
-                                 g_hits[i].x2 - g_hits[i].x1, g_hits[i].y2 - g_hits[i].y1,
-                                 MathMin(RC_R_CARD, (g_hits[i].y2 - g_hits[i].y1) / 2), // FINESSE 4a : capsule (real hit height)
-                                 g_theme.accent, g_theme.accent_deep, g_theme.accent);
+                g_modal_kit.CapsuleStroke(g_hits[i].x1 + SM, g_hits[i].y1 + SM, // CAPSULE REWRITE : accent rim + deepened face
+                                          g_hits[i].x2 - g_hits[i].x1, g_hits[i].y2 - g_hits[i].y1,
+                                          ColorToARGB(g_theme.accent, 255),
+                                          ColorToARGB(TintOver(g_theme.accent, g_theme.accent_deep, 0.35), 255), 1);
             }
             ObjectSetInteger(0, id + "_l", OBJPROP_COLOR, g_theme.bg);
             return;
@@ -6186,8 +6230,8 @@ void SetToggleBtn(const string id, int x, int y, bool on) {
     if (g_modal_kit.Ready()) {
         const int SM = RC_KIT_MARGIN;
         const int lx = (x - g_anchor_x) + SM, ly = (y - g_anchor_y) + SM;
-        g_modal_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2,
-                              ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255));
+        g_modal_kit.Capsule(lx - 1, ly - 1, w + 2, h + 2, // CAPSULE REWRITE : outline (track covers interior)
+                            ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255));
         g_modal_kit.PillToggle(lx, ly, w, h, on,
                                FilmOver(g_theme.bg, 0.09),
                                g_theme.accent_deep, g_theme.accent,
@@ -6205,17 +6249,18 @@ void DrawSetSeg2(const string id, int x, int y, int w, int h,
     if (g_modal_kit.Ready()) {
         const int SM = RC_KIT_MARGIN;
         const int lx = (x - g_anchor_x) + SM, ly = (y - g_anchor_y) + SM;
-        g_modal_kit.RoundFill(lx - 1, ly - 1, w + 2, h + 2, (h + 2) / 2,
-                              ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255));
-        g_modal_kit.RoundFill(lx, ly, w, h, h / 2,
-                              ColorToARGB(FilmOver(g_theme.bg, 0.05), 255));
+        g_modal_kit.CapsuleStroke(lx - 1, ly - 1, w + 2, h + 2, // CAPSULE REWRITE : uniform seg track
+                                  ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255),
+                                  ColorToARGB(FilmOver(g_theme.bg, 0.05), 255), 1);
         g_modal_kit.Segment(lx + (activeIdx == 0 ? 1 : cw), ly + 1, cw - 1, h - 2, (h - 2) / 2, true, // POLISH A1 : r=h/2 exact
                             g_theme.accent, g_theme.accent_deep, g_theme.surface);
     }
     SetLbl(id + "_la", x + cw / 2, y + h / 2, labelA, (activeIdx == 0 ? g_theme.bg : g_theme.label));
     ObjectSetInteger(0, id + "_la", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    ObjectSetInteger(0, id + "_la", OBJPROP_FONTSIZE, RC_FONT_SIZE_LABEL); // CAPSULE TEXT : seg labels 8pt (fit the 20px capsule halves)
     SetLbl(id + "_lb", x + cw + cw / 2, y + h / 2, labelB, (activeIdx == 1 ? g_theme.bg : g_theme.label));
     ObjectSetInteger(0, id + "_lb", OBJPROP_ANCHOR, ANCHOR_CENTER);
+    ObjectSetInteger(0, id + "_lb", OBJPROP_FONTSIZE, RC_FONT_SIZE_LABEL); // CAPSULE TEXT
     HitAdd(x, y, x + w, y + h, StringSubstr(id, StringLen(RC_PREFIX)), -1, RCF_NONE);
 }
 // A [-] value [+] stepper. id_base+"_dn" / id_base+"_up" are the click targets.
@@ -6493,16 +6538,16 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
                              TintOver(g_theme.bg, g_theme.surface, 0.20), mline);
             // step 1 : segmented TAB control (mockup .seg) - light track + soft ring ;
             // idle tabs are transparent (labels only), ACTIVE tab = cyan gradient segment
-            g_modal_kit.RoundFill(SM + 10, SM + 30, ow - 20, 26, 13, ColorToARGB(mline, 255)); // FINESSE 4b : capsule track (like TF / SetSeg2)
-            g_modal_kit.RoundFill(SM + 11, SM + 31, ow - 22, 24, 12,
-                                  ColorToARGB(FilmOver(g_theme.bg, 0.05), 255));
+            g_modal_kit.CapsuleStroke(SM + 10, SM + 30, ow - 20, 26, ColorToARGB(mline, 255),
+                                      ColorToARGB(FilmOver(g_theme.bg, 0.05), 255), 1); // CAPSULE REWRITE : uniform tab track
             g_modal_kit.Segment(SM + 12 + tw * g_settings_tab, SM + 32, tw - 4, 22, 11, true, // POLISH A1 : r=h/2 exact = true capsule
                                 g_theme.accent, g_theme.accent_deep, g_theme.surface);
             // step 1 : X-close face = red-edged rounded button (same language as the panel X)
             // POLISH D : modal X UNIFIED with the header X/gear - same 22x20 capsule,
             // same soft slate ring (all-discreet decision, no red ; readable both themes).
-            g_modal_kit.Card((cxx - ox) + SM, SM + 6, 22, 20, MathMin(RC_R_CARD, 20 / 2),
-                             g_theme.raise, g_theme.surface, TintOver(g_theme.bg, C'148,163,184', 0.25));
+            g_modal_kit.CapsuleStroke((cxx - ox) + SM, SM + 6, 22, 20, // CAPSULE REWRITE : exact pill (flat face, matches DrawSetButton)
+                                      ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255),
+                                      ColorToARGB(g_theme.raise, 255), 1);
             // D-FULL step 2 : NO Commit here - the canvas stays OPEN so the body's
             // DrawSetButton / SetToggleBtn / SetStepper calls paint their faces into
             // it ; the single Commit lives at the END of DrawSettingsOverlay.
@@ -6600,7 +6645,7 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
             if (PlanIsFundedNext()) {
                 SetLbl(RC_PREFIX + "set_at_lbl", lx, by + 3, Tr("set_acct_type"), g_theme.text);
                 // E7 : SWAP | SWAP-FREE segment toggle (mockup .seg), right-aligned on rx
-                DrawSetSeg2(RC_PREFIX + "set_acct_type", rx - 110, by, 110, 20,
+                DrawSetSeg2(RC_PREFIX + "set_acct_type", rx - 150, by, 150, 20, // CAPSULE TEXT : "SWAP-FREE" needs the room at 8pt
                             "SWAP", "SWAP-FREE", g_eff_acct_type);
                 by += step;
 
