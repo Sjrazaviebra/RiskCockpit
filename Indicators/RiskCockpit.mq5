@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "1.50"
+#property version "2.00"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1862,6 +1862,21 @@ bool RiskIsBreaching(void) {
 //| everywhere except a fading RED halo in the outer margin band that |
 //| breathes via GetTickCount. No breach -> the bitmap stays empty.   |
 //+------------------------------------------------------------------+
+// FIX SQUARES : rounded fill on the RAW g_fx canvas (the kit's RoundFill is private to
+// g_kit). Same 2-rects + 4-discs construction as JR_CanvasUI ; used by the rounded
+// breach glow below. Additive file-local helper - the kit itself is untouched.
+void FxRoundFill(const int x, const int y, const int w, const int h, int r, const uint argb) {
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+    if (r < 0) r = 0;
+    g_fx.FillRectangle(x + r, y, x + w - 1 - r, y + h - 1, argb);
+    g_fx.FillRectangle(x, y + r, x + w - 1, y + h - 1 - r, argb);
+    g_fx.FillCircle(x + r,         y + r,         r, argb);
+    g_fx.FillCircle(x + w - 1 - r, y + r,         r, argb);
+    g_fx.FillCircle(x + r,         y + h - 1 - r, r, argb);
+    g_fx.FillCircle(x + w - 1 - r, y + h - 1 - r, r, argb);
+}
+
 void RenderFx(void) {
     if (!g_fx_on) return;
     const bool breach = RiskIsBreaching();
@@ -1874,13 +1889,19 @@ void RenderFx(void) {
         const double s    = 0.5 - 0.5 * MathCos(ph * 2.0 * M_PI);  // 0..1 smooth breath
         const int    peak = (int)(80.0 + 150.0 * s);               // 80..230 alpha near the edge
         const int    m    = RC_FX_MARGIN;
-        // Concentric 1px outlines inside the margin band : brightest next to the
-        // panel edge (i = m-1), fading to nothing at the bitmap edge (i = 0). The
-        // panel body occupies the centre and is never painted -> content stays clear.
+        // FIX SQUARES : ROUNDED concentric rings (the old 1px Rectangle outlines were
+        // square-cornered). Overwrite trick, same as EdgeGlow : filled ROUNDED rects
+        // drawn outside-in - each inner fill overwrites the previous interior, leaving
+        // 1px rounded fringes - then the centre is cleared back to transparent so the
+        // panel content is never covered. Ring at inset i sits (m-i)px outside the
+        // panel edge -> radius RC_R_PANEL + (m-i) follows the panel corners.
         for (int i = 0; i < m; ++i) {
             const int a = (int)(peak * (double)(i + 1) / (double)m);
-            g_fx.Rectangle(i, i, g_fx_w - 1 - i, g_fx_h - 1 - i, ColorToARGB(g_theme.red, (uchar)a));
+            FxRoundFill(i, i, g_fx_w - 2 * i, g_fx_h - 2 * i, RC_R_PANEL + (m - i),
+                        ColorToARGB(g_theme.red, (uchar)a));
         }
+        FxRoundFill(m, m, g_fx_w - 2 * m, g_fx_h - 2 * m, RC_R_PANEL,
+                    ColorToARGB(clrBlack, 0)); // re-clear the centre (panel stays uncovered)
     }
     g_fx.Update(true);
 }
@@ -5793,7 +5814,7 @@ void DrawTimeframeBar(int x, int y, int w) {
     // its LEFT (the full "Break-even" word would collide with the Max copy field, which
     // ends ~x+w-58). Pill 34x18, right edge x+w-7 ; caption right-anchored at pill-3px,
     // clear of the Max edit. Zone = face rect (single source) ; act "be" unchanged.
-    const int be_w = 34, be_h = 18;
+    const int be_w = 30, be_h = 16; // FIX SQUARES 3 : slimmer capsule (r=8, knob kr=r-2 follows)
     const int be_x = x + w - 7 - be_w, be_y = y + 3 + (btn_h - be_h) / 2;
     HitAdd(be_x, be_y, be_x + be_w, be_y + be_h, "be", -1, g_be_visible ? RCF_PILL_ON : RCF_PILL_OFF);
     DrawLabel(RC_PREFIX + "be_l", be_x - 3, be_y + be_h / 2, "BE",

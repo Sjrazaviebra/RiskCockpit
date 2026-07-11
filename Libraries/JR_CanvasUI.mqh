@@ -234,11 +234,11 @@ public:
                 const bool active, const color fillA, const color fillB, const color idle) {
       if(!m_ready) return;
       if(active) {
-         RoundFill(x, y, w, h, r, A(fillA));
-         const int gy0=y, gy1=y+h, bands=8, bh=MathMax(1,(gy1-gy0)/bands);
-         for(int b=0; b*bh<(gy1-gy0); ++b)
-            m_cv.FillRectangle(x+1, gy0+b*bh, x+w-2, MathMin(gy1,gy0+(b+1)*bh),
-                               Lerp(A(fillA), A(fillB), (double)(b*bh)/(double)(gy1-gy0)));
+         // FIX SQUARES : the old vertical-gradient band loop painted SQUARE
+         // FillRectangles over the full height, repainting the rounded corners ->
+         // the blue square on active TF / tabs / account-type. Rounded fills ONLY :
+         RoundFill(x, y, w, h, r, A(fillA));                     // full capsule (accent)
+         RoundFill(x, y + h/2, w, h - h/2, r, A(fillB));         // subtle 2-tone bottom, still rounded
       } else {
          RoundFill(x, y, w, h, r, A(idle));
       }
