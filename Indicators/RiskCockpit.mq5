@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "2.01"
+#property version "2.02"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -57,6 +57,15 @@
 enum ENUM_RC_THEME {
     RC_THEME_GLASS_DARK = 0, // glass dark (default)
     RC_THEME_GLASS_LIGHT = 1 // glass light
+};
+
+// v2.02 MULTI-THEMES : brand PALETTE axis, orthogonal to the dark/light MODE
+// above (3 palettes x 2 modes = 6 combos). The risk colours SAFE/WATCH/BREACH
+// stay green/amber/red in every combo - only the brand tones change.
+enum ENUM_RC_PALETTE {
+    RC_PAL_EMERALD = 0, // Emeraude Nuit (default)
+    RC_PAL_INDIGO  = 1, // Indigo Royal
+    RC_PAL_MONO    = 2  // Ardoise Mono
 };
 
 //+------------------------------------------------------------------+
@@ -160,7 +169,8 @@ input string InpCycleStartIso = "2026-05-09";     // Cycle start (YYYY-MM-DD ; '
 input group "7 - DISPLAY & PANEL"
 #endif
 input bool          InpShowNews              = true;                // Show economic-calendar news on the chart
-input ENUM_RC_THEME InpTheme                 = RC_THEME_GLASS_DARK; // Panel theme (Glass Dark / Glass Light)
+input ENUM_RC_THEME InpTheme                 = RC_THEME_GLASS_DARK; // Panel mode (Glass Dark / Glass Light)
+input ENUM_RC_PALETTE InpPalette             = RC_PAL_EMERALD;      // Brand palette (Emeraude / Indigo / Ardoise) - v2.02
 input ENUM_RC_LANG  InpLang                  = RC_LANG_EN;          // UI language (EN / FR / ES)
 input int           InpAnchorX               = 20;                  // Panel X offset from chart top-left (px)
 input int           InpAnchorY               = 100;                 // Panel Y offset (px ; clears MT5 one-click panel)
@@ -253,49 +263,67 @@ CCanvasKit g_modal_kit;
 void InitTheme(void) {
     // G3 : route through EffectiveTheme so the settings popup can switch
     // dark/light at runtime without re-opening MT5 Inputs.
-    if (EffectiveTheme() == RC_THEME_GLASS_DARK) {
-        // PREMIUM slate + cyan + semantic (aligned with StrategyDeck for a
-        // coherent product family). C'r,g,b' = plain RGB, easier to reason about.
-        g_theme.bg_deep    = C'10,14,22';    // deepest (shadow, gradient bottom, edits)
-        g_theme.bg         = C'15,23,42';    // base
-        g_theme.bg_lift    = C'22,32,56';    // gradient top
-        g_theme.bg_section = C'20,28,48';    // section header
-        g_theme.surface    = C'30,41,59';    // bento card
-        g_theme.surface_hi = C'34,46,69';    // raised / hover
-        g_theme.border     = C'51,65,85';    // border
-        g_theme.border_hi  = C'61,79,110';   // border hover
-        g_theme.accent      = C'34,211,238'; // 7c VIVID : cyan-400 #22D3EE (was sky-400 #38BDF8 - punchier, matches the wordmark)
-        g_theme.accent_deep = C'8,145,178';  // v2.01 : cyan-600 #0891B2 (was cyan-700 - livelier deep end under the vivid cyan-400 accent)
-        g_theme.accent2     = C'129,140,248';// indigo
-        g_theme.raise       = C'34,48,78';   // raised control top (mockup --raise #22304e)
-        g_theme.text       = C'232,238,247'; // near-white
-        g_theme.label      = C'159,176,200'; // muted label
-        g_theme.text_dim   = C'100,116,139'; // dim
-        g_theme.ok         = C'34,197,94';   // 7c VIVID : green-500 #22C55E (saturated, token==ramp-end below)
-        g_theme.warn       = C'245,158,11';  // 7c VIVID : amber-500 #F59E0B
-        g_theme.red        = C'239,68,68';   // 7c VIVID : red-500 #EF4444
-        g_theme.bar_bg     = C'22,32,56';    // meter track
-    } else // GLASS_LIGHT
-    {
-        g_theme.bg_deep    = C'226,232,240';
-        g_theme.bg         = C'241,245,249';
-        g_theme.bg_lift    = C'248,250,252';
-        g_theme.bg_section = C'226,232,240';
-        g_theme.surface    = C'255,255,255';
-        g_theme.surface_hi = C'241,245,249';
-        g_theme.border     = C'203,213,225';
-        g_theme.border_hi  = C'148,163,184';
-        g_theme.accent      = C'3,105,161';  // v2.01 : sky-700 #0369A1 (was #0284C7 ~4.0:1 - now ~5.9:1 on the light bg)
-        g_theme.accent_deep = C'7,89,133';   // v2.01 : sky-800 #075985 (deep end follows the darkened accent)
-        g_theme.accent2     = C'79,70,229';  // indigo-600
-        g_theme.raise       = C'226,232,240';// raised control top (light variant)
-        g_theme.text       = C'15,23,42';
-        g_theme.label      = C'71,85,105';
-        g_theme.text_dim   = C'100,116,139';
-        g_theme.ok         = C'21,128,61';   // v2.01 : green-700 #15803D (green-600 was ~3.6:1 on light - now >=4.5:1)
-        g_theme.warn       = C'161,98,7';    // v2.01 : amber-700 #A16207 (amber-600 was ~3.1:1 on light - now >=4.5:1)
-        g_theme.red        = C'220,38,38';   // red-600 (~4.6:1, kept)
-        g_theme.bar_bg     = C'226,232,240';
+    // v2.02 MULTI-THEMES : palette (brand) x mode (dark/light) = 6 combos. Each
+    // palette gives its 6 PRIMARY tokens ; ApplyPaletteTokens derives every
+    // secondary token with the SAME relations the historical slate theme used,
+    // so films / relief / rings keep working identically in every combo.
+    const bool dark = (EffectiveTheme() == RC_THEME_GLASS_DARK);
+    switch (EffectivePalette()) {
+        case RC_PAL_INDIGO: // Indigo Royal
+            // deep end = indigo-500 #6366F1 (NOT the spec's #4F46E5) : active labels are
+            // drawn in bg colour on the accent->deep gradient, and #4F46E5 amplified
+            // bottomed at ~2.1:1 - indigo-500 keeps the hue at ~4.1:1. 1-line revert.
+            if (dark) ApplyPaletteTokens(C'129,140,248', C'99,102,241', C'11,15,30',    C'23,27,51',    C'238,240,255', C'154,160,192', true);
+            else      ApplyPaletteTokens(C'79,70,229',   C'67,56,202',  C'238,240,250', C'255,255,255', C'30,27,75',    C'107,112,149', false);
+            break;
+        case RC_PAL_MONO:   // Ardoise Mono - neutral accent : the risk pills are
+                            // the ONLY vivid colours on screen (deliberate focus).
+            // dark dim = zinc-400 #A1A1AA (NOT the spec's #71717A) : the derived
+            // text_dim off zinc-500 read ~2.6:1 on the near-black bg (NA rows barely
+            // visible) - zinc-400 restores ~4:1, same hierarchy as the other darks.
+            if (dark) ApplyPaletteTokens(C'212,212,216', C'161,161,170', C'10,10,11',   C'24,24,27',    C'250,250,250', C'161,161,170', true);
+            else      ApplyPaletteTokens(C'63,63,70',    C'39,39,42',   C'244,244,245', C'255,255,255', C'24,24,27',    C'113,113,122', false);
+            break;
+        default:            // RC_PAL_EMERALD - Emeraude Nuit (default)
+            if (dark) ApplyPaletteTokens(C'45,212,191',  C'13,148,136', C'7,20,16',     C'16,36,28',    C'236,253,245', C'107,155,138', true);
+            else      ApplyPaletteTokens(C'13,148,136',  C'15,118,110', C'240,253,250', C'255,255,255', C'4,47,42',     C'94,122,115', false);
+            break;
+    }
+}
+
+// v2.02 MULTI-THEMES : fill g_theme from a palette's 6 primary tokens (accent /
+// accent_deep / bg / surface / text / dim). Secondary tokens are DERIVED with the
+// relations fitted on the v2.01 slate values (bg_lift = bg-surface midpoint,
+// light bg_deep/raise/bg_section = one slightly-darker tone, etc.) - one rule set
+// for every palette. ok/warn/red stay palette-INDEPENDENT (risk = green/amber/red
+// everywhere, dark/light variant only - the RiskFillColors ramps match them).
+void ApplyPaletteTokens(const color accent, const color accent_deep,
+                        const color bg, const color surface,
+                        const color text, const color dim, const bool dark) {
+    g_theme.accent      = accent;
+    g_theme.accent_deep = accent_deep;
+    g_theme.bg          = bg;
+    g_theme.surface     = surface;
+    g_theme.text        = text;
+    g_theme.label       = dim;
+    g_theme.text_dim    = TintOver(dim, bg, 0.30);                    // dimmer = toward the bg
+    g_theme.bg_deep     = TintOver(bg, clrBlack, dark ? 0.35 : 0.06); // shadow / gradient bottom / edits
+    g_theme.bg_lift     = TintOver(bg, surface, 0.50);                // gradient top (bg-surface midpoint)
+    g_theme.bg_section  = (dark ? TintOver(bg, surface, 0.33) : g_theme.bg_deep);
+    g_theme.surface_hi  = (dark ? TintOver(surface, text, 0.05) : bg);
+    g_theme.border      = TintOver(surface, dim, dark ? 0.16 : 0.28);
+    g_theme.border_hi   = TintOver(g_theme.border, dim, 0.30);
+    g_theme.raise       = (dark ? TintOver(surface, accent, 0.12) : g_theme.bg_deep); // control top, brand-tinted in dark
+    g_theme.accent2     = accent_deep;                                // secondary accent follows the palette
+    g_theme.bar_bg      = (dark ? g_theme.bg_lift : g_theme.bg_deep); // meter track
+    if (dark) {
+        g_theme.ok   = C'34,197,94';   // 7c VIVID : green-500 #22C55E (token==ramp-end)
+        g_theme.warn = C'245,158,11';  // amber-500 #F59E0B
+        g_theme.red  = C'239,68,68';   // red-500 #EF4444
+    } else {
+        g_theme.ok   = C'21,128,61';   // green-700 #15803D (>=4.5:1 on light)
+        g_theme.warn = C'161,98,7';    // amber-700 #A16207
+        g_theme.red  = C'220,38,38';   // red-600 #DC2626
     }
 }
 
@@ -528,6 +556,11 @@ ENUM_FN_PLAN EffectivePlan(void) {
 ENUM_RC_THEME EffectiveTheme(void) {
     if (g_active_theme_idx < 0) return InpTheme;
     return (ENUM_RC_THEME)g_active_theme_idx;
+}
+// v2.02 MULTI-THEMES : same resolution for the brand-palette axis.
+ENUM_RC_PALETTE EffectivePalette(void) {
+    if (g_active_palette_idx < 0) return InpPalette;
+    return (ENUM_RC_PALETTE)g_active_palette_idx;
 }
 
 // G2 : seed the runtime-mutable shadow settings from the inputs, then let any
@@ -893,6 +926,7 @@ int  g_panel_height = 0;
 // dialog. -1 = use the Input as-is.
 int  g_active_plan_idx  = -1;   // -1 = InpPlan, else cast to ENUM_FN_PLAN
 int  g_active_theme_idx = -1;   // -1 = InpTheme, else 0 = DARK, 1 = LIGHT
+int  g_active_palette_idx = -1; // v2.02 : -1 = InpPalette, else 0..2 (Emeraude / Indigo / Ardoise)
 bool g_settings_open    = false;
 int  g_settings_tab     = 0;    // 0=Account 1=Risk 2=Display 3=Alerts
 // D-FULL step 3 : g_swallow_click REMOVED. It existed because native modal OBJ_BUTTONs
@@ -1000,6 +1034,8 @@ int OnInit(void) {
     }
     if (GlobalVariableCheck("RC_theme_override"))
         g_active_theme_idx = (int)GlobalVariableGet("RC_theme_override");
+    if (GlobalVariableCheck("RC_palette_override")) // v2.02 : restore BEFORE the first InitTheme
+        g_active_palette_idx = (int)GlobalVariableGet("RC_palette_override");
     InitTheme();
     DefineRules();
     BuildAddonsMask();
@@ -1318,6 +1354,14 @@ void HandleModalControl(const string act) {
         g_active_theme_idx = (act == "set_theme_dark" ? 0 : 1);
         GlobalVariableSet("RC_theme_override", (double)g_active_theme_idx);
         RefreshModalOnly();
+    } else if (act == "set_pal_prev" || act == "set_pal_next") {
+        // v2.02 MULTI-THEMES : cycle the brand palette (0..2), persist, FULL rebuild -
+        // EVERY surface (panel canvas + chart lines + modal) re-tints at once ; the
+        // proven exception path (BuildPanel redraws the open overlay itself).
+        const int d = (act == "set_pal_next" ? 1 : -1);
+        g_active_palette_idx = (((int)EffectivePalette() + d) % 3 + 3) % 3;
+        GlobalVariableSet("RC_palette_override", (double)g_active_palette_idx);
+        ApplySettingsChange(); // EXCEPTION : re-tints beyond the modal -> full rebuild
     } else if (act == "set_vendor_prev" || act == "set_vendor_next") {
         // V1.27 CASCADE step 1 : pick the BROKER. Snap the type to that
         // vendor's first plan and the size to that plan's first legal size.
@@ -5702,6 +5746,13 @@ void InitI18n(void) {
           "Afficher aussi les news MOYEN (ta prop firm peut les compter dans sa fenêtre news).",
           "Mostrar también noticias de impacto MEDIO (tu prop firm puede contarlas en su ventana).");
     AddTr("set_theme",       "Theme :",               "Thème :",               "Tema :");
+    // v2.02 MULTI-THEMES : palette (brand) axis + dark/light relabelled as MODE ;
+    // hover taglines for the 3 palettes.
+    AddTr("set_palette",     "Theme :",               "Thème :",               "Tema :");
+    AddTr("set_mode",        "Mode :",                "Mode :",                "Modo :");
+    AddTr("pal_tip_emerald", "Green momentum, cool head",  "L'élan vert, la tête froide",  "Impulso verde, mente fría");
+    AddTr("pal_tip_indigo",  "Depth & composure",          "Profondeur & sang-froid",      "Profundidad y sangre fría");
+    AddTr("pal_tip_mono",    "Absolute focus, zero noise", "Focus absolu, zéro bruit",     "Enfoque absoluto, cero ruido");
     AddTr("set_language",    "Language :",            "Langue :",              "Idioma :");
     AddTr("set_news",        "News on chart :",       "News graphique :",      "Noticias graf :");
     AddTr("set_news_high",   "News HIGH :",           "News HIGH :",           "Noticias ALTA :");
@@ -6499,6 +6550,18 @@ string PhaseLabelLocal(int ph) {
 void SetTip1(const string id, const string tipkey) {
     ObjectSetString(0, RC_PREFIX + id, OBJPROP_TOOLTIP, Tr(tipkey));
 }
+// v2.02 MULTI-THEMES : display name + tooltip key of a brand palette. The names
+// are BRAND names (same in every language) ; the taglines go through Tr().
+string PaletteName(const ENUM_RC_PALETTE p) {
+    if (p == RC_PAL_INDIGO) return "Indigo Royal";
+    if (p == RC_PAL_MONO)   return "Ardoise Mono";
+    return "Émeraude Nuit";
+}
+string PaletteTipKey(const ENUM_RC_PALETTE p) {
+    if (p == RC_PAL_INDIGO) return "pal_tip_indigo";
+    if (p == RC_PAL_MONO)   return "pal_tip_mono";
+    return "pal_tip_emerald";
+}
 void SetTip3(const string id_base, const string tipkey) {
     // D-FULL step 2 : the -/+ native buttons are gone ; the hover carriers are now the
     // centered glyph LABELS DrawSetButton creates (id + "_l") plus the value label.
@@ -6762,7 +6825,15 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
         }
     } else if (g_settings_tab == 2) {
         // ===== Display =====
-        SetLbl(RC_PREFIX + "set_th_lbl", lx, by + 3, Tr("set_theme"), g_theme.text);
+        // v2.02 MULTI-THEMES : brand palette cycle < name > (plan-cascade pattern) +
+        // hover tagline on the name. Click -> HandleModalControl set_pal_prev/next.
+        SetLbl(RC_PREFIX + "set_pal_lbl", lx, by + 3, Tr("set_palette"), g_theme.text);
+        DrawSetButton(RC_PREFIX + "set_pal_prev", cx, by, 24, 20, "<");
+        SetLbl(RC_PREFIX + "set_pal_val", cx + 30, by + 3, PaletteName(EffectivePalette()), g_theme.accent);
+        DrawSetButton(RC_PREFIX + "set_pal_next", ox + ow - 40, by, 24, 20, ">");
+        SetTip1("set_pal_val", PaletteTipKey(EffectivePalette()));
+        by += step;
+        SetLbl(RC_PREFIX + "set_th_lbl", lx, by + 3, Tr("set_mode"), g_theme.text); // v2.02 : the dark/light axis is now the MODE
         DrawSetButton(RC_PREFIX + "set_theme_dark",  cx, by, 78, 20, "DARK");
         DrawSetButton(RC_PREFIX + "set_theme_light", cx + 84, by, 78, 20, "LIGHT");
         HighlightSetButton(RC_PREFIX + "set_theme_dark",  EffectiveTheme() == RC_THEME_GLASS_DARK);
