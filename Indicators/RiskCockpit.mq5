@@ -1885,9 +1885,13 @@ void RenderFx(void) {
     g_fx.Erase(ColorToARGB(clrBlack, 0)); // fully transparent
     if (breach) {
         const uint   ms   = GetTickCount();
-        const double ph   = (double)(ms % 1600) / 1600.0;          // 1.6 s cycle
+        // POLISH F1 : the ease was ALREADY sinusoidal - the perceived jerk came from
+        // too few timer frames per cycle (1.6s / ~500ms refresh = ~3 steps). Slower
+        // cycle (2x the frames) + gentler amplitude = far smaller alpha delta per
+        // frame -> visually fluid breath, with NO change to the repaint cadence.
+        const double ph   = (double)(ms % 3200) / 3200.0;          // 3.2 s cycle
         const double s    = 0.5 - 0.5 * MathCos(ph * 2.0 * M_PI);  // 0..1 smooth breath
-        const int    peak = (int)(80.0 + 150.0 * s);               // 80..230 alpha near the edge
+        const int    peak = (int)(120.0 + 90.0 * s);               // 120..210 alpha near the edge
         const int    m    = RC_FX_MARGIN;
         // FIX SQUARES : ROUNDED concentric rings (the old 1px Rectangle outlines were
         // square-cornered). Overwrite trick, same as EdgeGlow : filled ROUNDED rects
@@ -2096,7 +2100,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
         for (int s = 0; s < 9; ++s) {
             const int sx = px + 32 + s * 35; // FINESSE 5a : +2px, strip centred in its track (LOCKSTEP with DrawTimeframeBar x0)
             if (tfv2[s] != curp) continue; // idle = transparent (label only)
-            g_kit.Segment(sx, cy + 3, 33, InpRowHeight - 6, 7, true,
+            g_kit.Segment(sx, cy + 3, 33, InpRowHeight - 6, (InpRowHeight - 6) / 2, true, // POLISH A1 : r=h/2 exact = true capsule
                           g_theme.accent, g_theme.accent_deep, g_theme.surface);
         }
     }
@@ -2130,11 +2134,13 @@ void BuildPanel(void) {
     const int total_h = RC_TITLE_HEIGHT + InpRowHeight + (g_eff_risktools ? RC_SECTION_HEIGHT : 0) + rules_h + RC_SECTION_HEIGHT + positions_h + InpRowHeight * footer_rows + tfbar_h + recbar_h; // V1.29 L : drop the rules header height too when OFF
     g_panel_height = total_h; // fix #5 : exposed for UpdateDisciplineOverlay
 
-    // Premium (v1.4) : soft drop shadow behind the panel for depth, then the
-    // panel body as a deep base with a crisp defined edge - the section bands
-    // (surface) sit on top and read as a raised card stack.
-    DrawRect(RC_PREFIX + "shadow", x + 5, y + 6, w, total_h, C'6,9,16', C'6,9,16', 0);
-    DrawRect(RC_PREFIX + "bg", x, y, w, total_h, g_theme.bg_deep, g_theme.border_hi, 1);
+    // POLISH A2 : the v1.4 legacy SQUARE rects are RETIRED - "shadow" (offset +5/+6)
+    // poked out past the rounded card with sharp corners, and "bg" showed its square
+    // corners inside the r=15 corner notches. The canvas already provides the ROUNDED
+    // drop shadow (SoftShadow) + glow + opaque Card ; outside the card the chart shows
+    // through, which is exactly what rounded corners should do.
+    ObjectDelete(0, RC_PREFIX + "shadow");
+    ObjectDelete(0, RC_PREFIX + "bg");
     // v1.4 MODERN : draw the panel body into g_kit, created FIRST so the text
     // (OBJ_LABEL) + controls from the section draws below render ON TOP of it, and
     // the glow (g_fx) above that. The rect backgrounds above are now hidden under
@@ -2233,7 +2239,7 @@ void DrawTitleBar(int x, int y, int w) {
     // E3 : discreet grey close (mockup .ico) - red was too loud for an idle header
     // control. RCF_BTN_RED stays defined as a future BREACH-state hook.
     HitAdd(kill_x, y + 5, kill_x + 22, y + 25, "kill", -1, RCF_BTN);
-    DrawLabel(RC_PREFIX + "kill_x", kill_x + 11, y + 15, ShortToString((ushort)0x00D7), g_theme.text_dim, RC_FONT_SIZE + 1, RC_FONT_UI);
+    DrawLabel(RC_PREFIX + "kill_x", kill_x + 11, y + 15, ShortToString((ushort)0x00D7), g_theme.label, RC_FONT_SIZE + 1, RC_FONT_UI); // POLISH D : glyph tone unified with the gear (readable both themes)
     ObjectSetInteger(0, RC_PREFIX + "kill_x", OBJPROP_ANCHOR, ANCHOR_CENTER);
     ObjectSetString (0, RC_PREFIX + "kill_x", OBJPROP_TOOLTIP, Tr("kill_tip"));
 
@@ -5964,6 +5970,7 @@ void DrawBreakevenLines(void) {
         ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.accent2);
         ObjectSetInteger(0, id, OBJPROP_STYLE, STYLE_DASH);
         ObjectSetInteger(0, id, OBJPROP_WIDTH, 2);
+        ObjectSetInteger(0, id, OBJPROP_BACK, true); // POLISH B1 : behind the panel (SL/TP/news lines already are) ; still selectable/draggable
         ObjectSetInteger(0, id, OBJPROP_SELECTABLE, true);
         ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
         ObjectSetString(0, id, OBJPROP_TOOLTIP,
@@ -6163,7 +6170,11 @@ void HighlightSetButton(const string id, bool active) {
 // G2/G4 : an overlay label at ZORDER 250 (between the modal cover 240 and the
 // buttons 260). Free-standing helper so every row stays one call.
 void SetLbl(const string id, int x, int y, const string t, color c) {
-    DrawLabel(id, x, y, t, c, RC_FONT_SIZE);
+    // POLISH E1 : modal prose in the UI face (Segoe UI) - the type hierarchy is
+    // SB 11 titles > Segoe 9 labels > Consolas numbers ; the modal was the one
+    // surface still setting its LABELS in mono. Numeric stepper values keep mono
+    // via an explicit override in SetStepper.
+    DrawLabel(id, x, y, t, c, RC_FONT_SIZE, RC_FONT_UI);
     ObjectSetInteger(0, id, OBJPROP_ZORDER, 250);
 }
 // A labelled ON/OFF toggle button (60 px). The id encodes the setting.
@@ -6198,7 +6209,7 @@ void DrawSetSeg2(const string id, int x, int y, int w, int h,
                               ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255));
         g_modal_kit.RoundFill(lx, ly, w, h, h / 2,
                               ColorToARGB(FilmOver(g_theme.bg, 0.05), 255));
-        g_modal_kit.Segment(lx + (activeIdx == 0 ? 1 : cw), ly + 1, cw - 1, h - 2, 7, true,
+        g_modal_kit.Segment(lx + (activeIdx == 0 ? 1 : cw), ly + 1, cw - 1, h - 2, (h - 2) / 2, true, // POLISH A1 : r=h/2 exact
                             g_theme.accent, g_theme.accent_deep, g_theme.surface);
     }
     SetLbl(id + "_la", x + cw / 2, y + h / 2, labelA, (activeIdx == 0 ? g_theme.bg : g_theme.label));
@@ -6211,6 +6222,7 @@ void DrawSetSeg2(const string id, int x, int y, int w, int h,
 void SetStepper(const string id_base, int x, int y, const string value_text) {
     DrawSetButton(id_base + "_dn", x, y, 22, 20, "-");
     SetLbl(id_base + "_val", x + 28, y + 3, value_text, g_theme.accent);
+    ObjectSetString(0, id_base + "_val", OBJPROP_FONT, RC_FONT); // POLISH E1 : numeric values stay mono/tabular
     DrawSetButton(id_base + "_up", x + 96, y, 22, 20, "+");
 }
 // Context-aware helpers : which option groups are relevant for the plan/broker.
@@ -6484,10 +6496,13 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
             g_modal_kit.RoundFill(SM + 10, SM + 30, ow - 20, 26, 13, ColorToARGB(mline, 255)); // FINESSE 4b : capsule track (like TF / SetSeg2)
             g_modal_kit.RoundFill(SM + 11, SM + 31, ow - 22, 24, 12,
                                   ColorToARGB(FilmOver(g_theme.bg, 0.05), 255));
-            g_modal_kit.Segment(SM + 12 + tw * g_settings_tab, SM + 32, tw - 4, 22, 7, true,
+            g_modal_kit.Segment(SM + 12 + tw * g_settings_tab, SM + 32, tw - 4, 22, 11, true, // POLISH A1 : r=h/2 exact = true capsule
                                 g_theme.accent, g_theme.accent_deep, g_theme.surface);
             // step 1 : X-close face = red-edged rounded button (same language as the panel X)
-            g_modal_kit.Card((cxx - ox) + SM, SM + 6, 24, 20, MathMin(RC_R_CARD, 20 / 2), g_theme.raise, g_theme.surface, g_theme.red); // FINESSE 4a : capsule == panel X
+            // POLISH D : modal X UNIFIED with the header X/gear - same 22x20 capsule,
+            // same soft slate ring (all-discreet decision, no red ; readable both themes).
+            g_modal_kit.Card((cxx - ox) + SM, SM + 6, 22, 20, MathMin(RC_R_CARD, 20 / 2),
+                             g_theme.raise, g_theme.surface, TintOver(g_theme.bg, C'148,163,184', 0.25));
             // D-FULL step 2 : NO Commit here - the canvas stays OPEN so the body's
             // DrawSetButton / SetToggleBtn / SetStepper calls paint their faces into
             // it ; the single Commit lives at the END of DrawSettingsOverlay.
@@ -6507,9 +6522,9 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     // Title + close (centered label + zone on the SAME rect as the face).
     SetLbl(RC_PREFIX + "set_title", ox + 16, oy + 9, Tr("settings"), g_theme.accent);
     ObjectSetInteger(0, RC_PREFIX + "set_title", OBJPROP_FONTSIZE, RC_FONT_SIZE_TITLE);
-    SetLbl(RC_PREFIX + "set_close_l", cxx + 12, oy + 16, "X", g_theme.label); // FINESSE 3c : discreet close, consistent with the grey header X
+    SetLbl(RC_PREFIX + "set_close_l", cxx + 11, oy + 16, ShortToString((ushort)0x00D7), g_theme.label); // POLISH D : same glyph/tone/geometry as the header X
     ObjectSetInteger(0, RC_PREFIX + "set_close_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
-    HitAdd(cxx, oy + 6, cxx + 24, oy + 26, "set_close", -1, RCF_NONE);
+    HitAdd(cxx, oy + 6, cxx + 22, oy + 26, "set_close", -1, RCF_NONE);
 
     // Tab bar : centered labels + click zones on the SAME rects as the faces.
     {
@@ -6527,9 +6542,9 @@ void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
     }
 
     const int lx = ox + 16;   // label column
-    const int cx = ox + 150;  // control column
+    const int cx = ox + 172;  // control column - POLISH C2 : constant air after long labels ("Max margin/trade % :")
     const int rx = ox + ow - 40; // E7 : shared RIGHT edge (matches the steppers' ">"/"+" column)
-    int by = oy + 64;         // body cursor
+    int by = oy + 74;         // body cursor - POLISH C1 : breathe below the tab divider
     const int step = 26;
 
     if (g_settings_tab == 0) {

@@ -234,11 +234,10 @@ public:
                 const bool active, const color fillA, const color fillB, const color idle) {
       if(!m_ready) return;
       if(active) {
-         // FIX SQUARES : the old vertical-gradient band loop painted SQUARE
-         // FillRectangles over the full height, repainting the rounded corners ->
-         // the blue square on active TF / tabs / account-type. Rounded fills ONLY :
-         RoundFill(x, y, w, h, r, A(fillA));                     // full capsule (accent)
-         RoundFill(x, y + h/2, w, h - h/2, r, A(fillB));         // subtle 2-tone bottom, still rounded
+         // POLISH A1 : ONE full rounded fill only. The 2-tone bottom half clamped its
+         // radius below the capsule's -> "dog-bone" corners ; and the older gradient
+         // band loop painted square. A single capsule is clean and consistent.
+         RoundFill(x, y, w, h, r, A(fillA));
       } else {
          RoundFill(x, y, w, h, r, A(idle));
       }
