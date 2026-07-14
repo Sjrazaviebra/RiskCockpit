@@ -86,11 +86,12 @@ enum ENUM_RC_LANG {
 //| of every plan's sizes; the valid per-plan subset is :             |
 //|   1-Step / 2-Step : 6 / 15 / 25 / 50 / 100 / 200 K                |
 //|   Lite            : 5 / 25 / 50 / 100 / 200 K                      |
-//|   Instant         : <= 50 K (exact tiers to confirm)              |
+//|   Instant         : 2 / 5 / 10 / 15 / 25 K                        |
 //|   Free Trial      : 6 -> 200 K                                    |
 //|   Free Competition: single size, varies per monthly event         |
 //+------------------------------------------------------------------+
 enum ENUM_FN_ACCT_SIZE {
+    FN_SIZE_2K   = 2000,   // 2 000  (Instant)
     FN_SIZE_5K   = 5000,   // 5 000  (Lite)
     FN_SIZE_6K   = 6000,   // 6 000  (1-Step / 2-Step / Free Trial)
     FN_SIZE_10K  = 10000,  // 10 000 (B-AVATRADE-PROFILE : demo perso AvaTrade)
@@ -6429,9 +6430,12 @@ int ValidSizesForPlan(const ENUM_FN_PLAN p, double &out[]) {
             out[0]=5000; out[1]=25000; out[2]=50000; out[3]=100000; out[4]=200000;
             return 5;
         case FN_PLAN_STELLAR_INSTANT:
-            ArrayResize(out, 4);
-            out[0]=5000; out[1]=15000; out[2]=25000; out[3]=50000;
-            return 4;
+            // v2.02.04 : real Instant tiers = 2 / 5 / 10 / 15 / 25 K (JR's account is a
+            // 2000) - 2K/10K were missing so the size stepper could never reach them and
+            // SnapSizeToPlan EJECTED a 2000 to 5000. 50K kept for legacy tolerance.
+            ArrayResize(out, 6);
+            out[0]=2000; out[1]=5000; out[2]=10000; out[3]=15000; out[4]=25000; out[5]=50000;
+            return 6;
         case FN_PLAN_FTMO_2STEP:
         case FN_PLAN_E8_8PCT:
         case FN_PLAN_MFF_RAPID:
