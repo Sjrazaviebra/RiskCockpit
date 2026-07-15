@@ -450,7 +450,8 @@ CPyramidEngine g_pyramid_engine;
 
 // Live-state caches (T7)
 datetime g_day_start = 0;
-double g_peak_equity = 0.0;
+double g_peak_balance = 0.0; // v2.02.05 FIX 1 : REALIZED-balance high-water mark (FN Instant trailing
+                             // floor follows the balance, not equity) ; persisted per login (RC_ins_pb_<login>)
 ENUM_RC_STATUS g_last_status[RC_RULE_COUNT];
 
 // Last-seen position ticket list (used to detect open/close and refresh SL lines)
@@ -733,10 +734,12 @@ int Live_TradesToday(void);
 int Live_OrdersToday(void);
 bool Live_InNewsWindow(void);
 datetime Live_NextNewsEvt(void);
+datetime Live_NextMedNewsEvt(void); // v2.02.05 FIX 2b : MEDIUM vigilance (never the rule)
 int Live_OpenPositionsCount(void);
 
 // T7 state + helpers
 void UpdatePeakEquity(void);
+void LoadOrSeedPeakBalance(void); // v2.02.05 : per-login peak persistence + self-healing seed
 double ComputePositionRiskMoney(const string sym, const int type,
                                 const double price_open, const double sl,
                                 const double vol, const double costs = 0.0); // Phase 3.5 : net-of-costs, direction-aware
@@ -948,7 +951,9 @@ double g_eff_max_margin_pt = 25.0;
 double g_eff_max_risk_pt   = 1.0;
 bool   g_eff_show_news     = true;
 bool   g_eff_news_high     = true; // V1.29 R : show HIGH-impact news (bars + counter)
-bool   g_eff_news_med      = true; // V1.29 R : show MEDIUM-impact news (FN counts these too)
+bool   g_eff_news_med      = true; // v2.02.05 FIX 2d : MEDIUM = informational VIGILANCE only ; the FN 40%
+                                   // rule is HIGH-only, but MQL5 under-classes some FN-high events as
+                                   // MEDIUM (central-bank speeches) -> shown as "check FN", never the rule
 bool   g_eff_comfort       = true;
 bool   g_eff_discipline    = true;
 bool   g_eff_sound         = true;
@@ -1144,7 +1149,9 @@ int OnInit(void) {
     }
 
     // Live-state baseline
-    g_peak_equity = AccountInfoDouble(ACCOUNT_EQUITY);
+    // v2.02.05 FIX 1 : realized-balance high-water mark, persisted PER LOGIN (GV name
+    // carries the login, so switching accounts NEVER destroys another login's peak).
+    LoadOrSeedPeakBalance();
     MqlDateTime mdt;
     TimeToStruct(TimeCurrent(), mdt);
     mdt.hour = 0;
@@ -1326,6 +1333,7 @@ void RefreshModalOnly(void) {
         g_margin_violation_active = false;
         g_risk_violation_active   = false;
     }
+    LoadOrSeedPeakBalance(); // v2.02.05 : self-heal a poisoned first seed after a size/plan change
     // The on-chart SL/TP recommendation lines are VISIBLE around the modal and feed on
     // values steppers change live (N / sl / tp / max-risk / violation caps) - refresh
     // them here so they always track the fresh state. Chart objects only (self-guarded
@@ -3016,13 +3024,53 @@ void RefreshPanel(void) {
 
     // 4: Overall DD - Personal / no-prop profile has max_loss_pct=0 -> show N/A
     // instead of a meaningless "2.0% / 0.0%".
+    // v2.02.05 FIX 3 : on a trailing (Instant) profile the row leads with the SAME
+    // DOLLARS the FN dashboard shows (room above the floor) ; the abstract % drops
+    // to a secondary mention and the full detail (floor / fixed permitted loss /
+    // breakeven-lock progression) rides the hover tooltip. Non-trailing presets
+    // (2-Step, 1-Step, FTMO, E8, The5ers...) keep the previous % display EXACTLY.
     const bool max_loss_applies = (g_profile.max_loss_pct > 0.0);
-    UpdateRow(4, overall_dd_pct, g_profile.max_loss_pct,
-              max_loss_applies
-                  ? (FormatPct(overall_dd_pct) + " / " + FormatPct(g_profile.max_loss_pct) +
-                     (g_profile.max_loss_trailing ? "  (trailing)" : ""))
-                  : "N/A",
-              ComputeRangeStatus(overall_dd_pct, g_profile.max_loss_pct, 0.70, 1.00),
+    string        maxloss_text   = "N/A";
+    ENUM_RC_STATUS maxloss_status = ComputeRangeStatus(overall_dd_pct, g_profile.max_loss_pct, 0.70, 1.00);
+    if (max_loss_applies && g_profile.max_loss_trailing && g_profile.initial_balance > 0.0) {
+        const double ins_init      = g_profile.initial_balance;
+        const double ins_permitted = (g_profile.max_loss_pct / 100.0) * ins_init;      // fixed $ (120 on 2K)
+        const double ins_floor     = MathMin(g_peak_balance - ins_permitted, ins_init); // breakeven cap
+        const double ins_room      = AccountInfoDouble(ACCOUNT_EQUITY) - ins_floor;     // $ before breach
+        const bool   ins_locked    = (ins_floor >= ins_init - 0.005);                   // floor == initial
+        maxloss_text = Tr("ins_margin") + " " +
+                       DoubleToString(ins_room, ins_room < 1000.0 ? 2 : 0) + " $ " + // adaptive : 5-digit rooms (25K+) keep the ~190px column
+                       ShortToString((ushort)0x00B7) + " " +
+                       (ins_locked ? Tr("ins_locked")
+                                   : DoubleToString(overall_dd_pct, 1) + "/" +
+                                     DoubleToString(g_profile.max_loss_pct, 0) + "%");
+        // status on the $ margin : WATCH once HALF the permitted loss is consumed,
+        // BREACH (RED chip) only at a REAL breach (equity at/under the floor) - the
+        // chip must never cry BREACH while the account is still alive.
+        maxloss_status = ComputeRangeStatus(overall_dd_pct, g_profile.max_loss_pct, 0.50, 1.00);
+        const double ins_lockprog = (ins_permitted > 0.0
+            ? MathMin(100.0, MathMax(0.0, 100.0 * (g_peak_balance - ins_init) / ins_permitted)) : 0.0);
+        const string ins_tip = Tr("ins_tip_floor") + " " + DoubleToString(ins_floor, 2) + " $ (" +
+                               Tr("ins_tip_floor2") + ") | " +
+                               Tr("ins_tip_permitted") + " " + DoubleToString(ins_permitted, 2) + " $ (" +
+                               DoubleToString(g_profile.max_loss_pct, 0) + "%) | " +
+                               DoubleToString(overall_dd_pct, 2) + "% / " +
+                               DoubleToString(g_profile.max_loss_pct, 0) + "% | " +
+                               (ins_locked
+                                    ? Tr("ins_tip_locked1") + " " + DoubleToString(ins_init, 0) + " $ " + Tr("ins_tip_locked2")
+                                    : Tr("ins_tip_lock") + " " + DoubleToString(ins_lockprog, 0) + "% (" +
+                                      DoubleToString(g_peak_balance, 2) + " -> " +
+                                      DoubleToString(ins_init + ins_permitted, 0) + " $)");
+        ObjectSetString(0, RC_PREFIX + "rule_overall_dd_lbl", OBJPROP_TOOLTIP, ins_tip);
+        ObjectSetString(0, RC_PREFIX + "rule_overall_dd_val", OBJPROP_TOOLTIP, ins_tip);
+    } else {
+        if (max_loss_applies)
+            maxloss_text = FormatPct(overall_dd_pct) + " / " + FormatPct(g_profile.max_loss_pct);
+        // clear a stale Instant tooltip after a plan switch (trailing -> non-trailing)
+        ObjectSetString(0, RC_PREFIX + "rule_overall_dd_lbl", OBJPROP_TOOLTIP, " ");
+        ObjectSetString(0, RC_PREFIX + "rule_overall_dd_val", OBJPROP_TOOLTIP, " ");
+    }
+    UpdateRow(4, overall_dd_pct, g_profile.max_loss_pct, maxloss_text, maxloss_status,
               max_loss_applies);
 
     // 5: Profit Target - PROGRESS meter, NOT a risk meter. FIX 3 (V1.0.1) : the old
@@ -3045,6 +3093,10 @@ void RefreshPanel(void) {
                   : "-- (funded)",
               tgt_status,
               tgt_applies);
+    // v2.02.05 FIX 3 : on Instant the 5% is the first-PAYOUT eligibility threshold,
+    // NOT a challenge target to pass - relabel the row (catalog value unchanged).
+    ObjectSetString(0, RC_PREFIX + "rule_target_lbl", OBJPROP_TEXT,
+                    Tr(g_profile.max_loss_trailing ? "rule_payout" : "rule_target"));
 
     // 6: Quick Strike Ratio
     UpdateRow(6, qs_ratio_pct, g_profile.quick_strike_violate_pct,
@@ -3065,11 +3117,14 @@ void RefreshPanel(void) {
               ComputeRangeStatus(hyper_pct, 100.0, 0.75, 1.00),
               true);
 
-    // 8: News Window - V1.29 (Coordinator) : the bar FILLS over the hour BEFORE the
-    // event, stays ACTIVE through the +/-window (broker rule, e.g. FundedNext +/-5 min),
-    // then goes idle. HIGH + MEDIUM (per the level toggles).
+    // 8: News Window - the bar FILLS over the hour BEFORE the event, stays ACTIVE
+    // through the +/-window (FN +/-5 min), then goes idle.
+    // v2.02.05 FIX 2 : the RULE state (red-amber "ACTIVE eligible 40%") fires on
+    // HIGH-impact ONLY. When no HIGH is near but a MEDIUM is, the row shows a
+    // DISTINCT amber vigilance hint ("Medium - check FN", no 40% implication) :
+    // the FN calendar treats some events as HIGH that MQL5 classes MODERATE.
     const bool news_applies = g_profile.news_rule_applies;
-    const datetime news_evt = Live_NextNewsEvt();
+    const datetime news_evt = Live_NextNewsEvt(); // HIGH only = the RULE
     double news_pct = 0.0; bool news_active = false; int news_mins = 0;
     if (news_evt > 0) {
         const int      nwin = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
@@ -3083,13 +3138,27 @@ void RefreshPanel(void) {
             news_mins = (int)((nws - nnow) / 60) + 1;
         }
     }
+    bool news_med_vigil = false;
+    if (news_applies && news_evt == 0) { // no HIGH near -> medium VIGILANCE (display only)
+        const datetime med_evt = Live_NextMedNewsEvt();
+        if (med_evt > 0) {
+            news_med_vigil = true;
+            const int      nwin = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
+            const datetime nnow = TimeCurrent();
+            if (nnow >= med_evt - nwin && nnow <= med_evt + nwin) news_pct = 100.0;
+            else if (nnow < med_evt - nwin && nnow >= med_evt - 3600 && 3600 - nwin > 0)
+                news_pct = 100.0 * (double)(nnow - (med_evt - 3600)) / (double)(3600 - nwin);
+        }
+    }
     string news_text;
     if (!news_applies)
         news_text = "N/A (challenge)";
     else if (news_active)
-        news_text = "ACTIVE  eligible " + DoubleToString(g_profile.news_profit_share_pct, 0) + "%"; // FN : a news-window trade keeps only 40 % of profit
-    else if (news_pct > 0.0)
+        news_text = "ACTIVE  eligible " + DoubleToString(g_profile.news_profit_share_pct, 0) + "%"; // FN : winning news-window trade keeps only 40 % of its profit (losses count 100 %)
+    else if (news_pct > 0.0 && !news_med_vigil)
         news_text = "in " + IntegerToString(news_mins) + "m";
+    else if (news_med_vigil)
+        news_text = Tr("news_med_check"); // amber hint, NO 40% implication
     else
         news_text = "Inactive";
     UpdateRow(8,
@@ -3099,6 +3168,9 @@ void RefreshPanel(void) {
               !news_applies ? RC_STATUS_NA
                             : ((news_active || news_pct > 0.0) ? RC_STATUS_WARN : RC_STATUS_OK),
               news_applies);
+    // v2.02.05 FIX 2e : explain the rule vs the vigilance on hover.
+    ObjectSetString(0, RC_PREFIX + "rule_news_lbl", OBJPROP_TOOLTIP, Tr("news_rule_tip"));
+    ObjectSetString(0, RC_PREFIX + "rule_news_val", OBJPROP_TOOLTIP, Tr("news_rule_tip"));
 
     // 9: Server messages today (orders touched - placed/modified/cancelled/filled)
     const int orders_today = Live_OrdersToday();
@@ -3859,15 +3931,28 @@ double Live_DailyDdPct(void) {
 }
 
 double Live_OverallDdPct(void) {
-    UpdatePeakEquity();
+    UpdatePeakEquity(); // maintains the realized-balance high-water mark (persisted)
     const double cur_eq = AccountInfoDouble(ACCOUNT_EQUITY);
     if (g_profile.max_loss_trailing) {
-        if (g_peak_equity <= 0.0)
+        // v2.02.05 FIX 1 : FN "Max Loss Limit" EXACTLY as the official FN API defines
+        // it : permitted_loss = max_loss_pct% of the INITIAL balance (a FIXED $, 120
+        // on 2K - NOT 6% of a growing peak) ; floor = (realized balance high) -
+        // permitted, CAPPED at the initial balance (breakeven lock) ; breach when
+        // EQUITY crosses the floor ; losses never lower the floor. Live oracle
+        // (login 11986032, Instant 2K) : peak 2003.28 -> floor 1883.28, permitted 120.
+        const double init = g_profile.initial_balance;
+        if (init <= 0.0)
             return 0.0;
-        const double dd = g_peak_equity - cur_eq;
-        if (dd <= 0.0)
-            return 0.0;
-        return 100.0 * dd / g_peak_equity;
+        const double permitted = (g_profile.max_loss_pct / 100.0) * init;
+        const double floorv    = MathMin(g_peak_balance - permitted, init);
+        static bool s_floor_logged = false; // acceptance : must match the FN dashboard
+        if (!s_floor_logged) {
+            PrintFormat("RiskCockpit Instant floor: floor=%.2f permitted=%.2f peak_bal=%.2f",
+                        floorv, permitted, g_peak_balance);
+            s_floor_logged = true;
+        }
+        const double dd_pct = 100.0 * (permitted + floorv - cur_eq) / init; // = max_loss_pct exactly AT the floor
+        return MathMax(0.0, dd_pct);
     }
     if (g_profile.initial_balance <= 0.0)
         return 0.0;
@@ -4002,13 +4087,11 @@ bool Live_InNewsWindow(void) {
         MqlCalendarEvent ev;
         if (!CalendarEventById(values[i].event_id, ev))
             continue;
-        // V1.29 (Coordinator) : treat MEDIUM like HIGH for the news-window rule meter
-        // (FundedNext counts medium news too) ; respect the level toggles like the bars.
-        const bool is_high = (ev.importance == CALENDAR_IMPORTANCE_HIGH);
-        const bool is_med  = (ev.importance == CALENDAR_IMPORTANCE_MODERATE);
-        if (!is_high && !is_med) continue;          // skip LOW only
-        if (is_high && !g_eff_news_high) continue;
-        if (is_med  && !g_eff_news_med)  continue;
+        // v2.02.05 FIX 2a : the FN rule is HIGH-impact ONLY (support-verified, June
+        // 2026). MEDIUM never triggers the 40% rule - it only gets the separate
+        // "check FN" vigilance display (Live_NextMedNewsEvt).
+        if (ev.importance != CALENDAR_IMPORTANCE_HIGH) continue;
+        if (!g_eff_news_high) continue;
 
         MqlCalendarCountry country;
         if (!CalendarCountryById(ev.country_id, country))
@@ -4039,11 +4122,36 @@ datetime Live_NextNewsEvt(void) {
         MqlCalendarEvent ev;
         if (!CalendarEventById(values[i].event_id, ev))
             continue;
-        const bool is_high = (ev.importance == CALENDAR_IMPORTANCE_HIGH);
-        const bool is_med  = (ev.importance == CALENDAR_IMPORTANCE_MODERATE);
-        if (!is_high && !is_med) continue;
-        if (is_high && !g_eff_news_high) continue;
-        if (is_med  && !g_eff_news_med)  continue;
+        // v2.02.05 FIX 2a : the RULE tracks HIGH-impact ONLY (FN : 40% of winning-
+        // trade profit in the ±window ; MEDIUM has NO rule -> vigilance helper below).
+        if (ev.importance != CALENDAR_IMPORTANCE_HIGH) continue;
+        if (!g_eff_news_high) continue;
+        const datetime te = values[i].time;
+        if (now >= te - 3600 && now <= te + win_sec) {
+            if (best == 0 || te < best) best = te;
+        }
+    }
+    return best;
+}
+
+// v2.02.05 FIX 2b : nearest MEDIUM event, VIGILANCE display ONLY - never the rule.
+// Kept because the FN calendar treats some events as HIGH that MQL5 classes
+// MODERATE (central-bank speeches : Ueda, Lagarde...) -> the row shows an amber
+// "check FN" hint instead of silently ignoring them. Same scan as Live_NextNewsEvt.
+datetime Live_NextMedNewsEvt(void) {
+    if (!g_profile.news_rule_applies || !g_eff_news_med)
+        return 0;
+    const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
+    const datetime now = TimeCurrent();
+    MqlCalendarValue values[];
+    if (!CalendarValueHistory(values, now - win_sec, now + 3600 + win_sec, NULL, NULL))
+        return 0;
+    datetime best = 0;
+    for (int i = 0; i < ArraySize(values); ++i) {
+        MqlCalendarEvent ev;
+        if (!CalendarEventById(values[i].event_id, ev))
+            continue;
+        if (ev.importance != CALENDAR_IMPORTANCE_MODERATE) continue;
         const datetime te = values[i].time;
         if (now >= te - 3600 && now <= te + win_sec) {
             if (best == 0 || te < best) best = te;
@@ -4172,8 +4280,7 @@ void ComputeNewsStats(void) {
         bool innews = false; string minfo = "";
         for (int k = 0; k < ne; ++k) {
             if (MathAbs((long)dt - (long)evt[k]) > win_sec) continue;
-            const bool lvl_ok = (evtimp[k] == (int)CALENDAR_IMPORTANCE_HIGH ||
-                                 evtimp[k] == (int)CALENDAR_IMPORTANCE_MODERATE);
+            const bool lvl_ok = (evtimp[k] == (int)CALENDAR_IMPORTANCE_HIGH); // v2.02.05 FIX 2c : the 40% rule counts HIGH only
             const bool mapped = NewsCcyAffectsSymbol(dsym, evtccy[k]); // official FN instrument<->currency table
             const string impl = (evtimp[k] == (int)CALENDAR_IMPORTANCE_HIGH ? "HIGH" :
                                  (evtimp[k] == (int)CALENDAR_IMPORTANCE_MODERATE ? "MED" : "LOW"));
@@ -4181,8 +4288,8 @@ void ComputeNewsStats(void) {
             diag[ndiag++] = dsym + " deal " + TimeToString(dt, TIME_DATE | TIME_SECONDS) +
                             " ~ evt " + TimeToString(evt[k], TIME_DATE | TIME_MINUTES) + " " + evtccy[k] +
                             " " + impl + " '" + evtname[k] + "' (FN-table " + (mapped ? "y" : "n") + ") -> " +
-                            (lvl_ok && mapped ? "COUNTED" : (!mapped ? "skipped (not FN-mapped)" : "skipped (LOW)"));
-            if (lvl_ok && mapped && !innews) { // count rule : HIGH/MED event mapped per the FN-confirmed table
+                            (lvl_ok && mapped ? "COUNTED" : (!mapped ? "skipped (not FN-mapped)" : "skipped (not HIGH)"));
+            if (lvl_ok && mapped && !innews) { // count rule : HIGH event mapped per the FN-confirmed table (v2.02.05 FIX 2c)
                 innews = true;
                 minfo = dsym + " deal " + TimeToString(dt, TIME_DATE | TIME_SECONDS) +
                         " ~ evt " + TimeToString(evt[k], TIME_DATE | TIME_MINUTES) + " " + evtccy[k];
@@ -4490,10 +4597,42 @@ double ComputePositionRiskMoney(const string sym, const int type,
 // A1 : UpdateDayStartEquity + g_equity_at_day_start removed (dead code - the
 // daily-DD figure is reconstructed live via SumClosedDealsPnL, never from these).
 
+// v2.02.05 FIX 1 : the FN Instant trailing floor follows the realized BALANCE
+// high (floating equity spikes do NOT raise the FN floor). Persist on increase
+// only (no GV write per tick). Name kept : caller chain unchanged.
+string PeakBalGV(void)  { return "RC_ins_pb_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)); }
+string PeakSeedGV(void) { return "RC_ins_sd_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)); }
 void UpdatePeakEquity(void) {
-    const double eq = AccountInfoDouble(ACCOUNT_EQUITY);
-    if (eq > g_peak_equity)
-        g_peak_equity = eq;
+    const double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+    if (bal > g_peak_balance) {
+        g_peak_balance = bal;
+        GlobalVariableSet(PeakBalGV(), g_peak_balance);
+    }
+}
+// v2.02.05 : load the per-login peak, or seed it at max(initial, balance). The seed
+// value is ALSO persisted so a bad first seed can SELF-HEAL : if the stored peak
+// never grew past its own seed (poison case : first attach with the default 25K
+// size on the 2K account seeded peak=25000) and the profile now yields a SMALLER
+// seed, re-seed. A peak that genuinely grew (real balance highs) is never touched.
+// Called from OnInit + after every profile re-Resolve (size/plan popup changes).
+void LoadOrSeedPeakBalance(void) {
+    const string k_pb = PeakBalGV(), k_sd = PeakSeedGV();
+    const double seed = MathMax(g_profile.initial_balance, AccountInfoDouble(ACCOUNT_BALANCE));
+    if (GlobalVariableCheck(k_pb)) {
+        g_peak_balance = GlobalVariableGet(k_pb);
+        if (GlobalVariableCheck(k_sd)) {
+            const double sd = GlobalVariableGet(k_sd);
+            if (g_peak_balance <= sd + 0.005 && seed < sd - 0.005) { // never grew + smaller profile -> heal
+                g_peak_balance = seed;
+                GlobalVariableSet(k_pb, g_peak_balance);
+                GlobalVariableSet(k_sd, seed);
+            }
+        }
+    } else {
+        g_peak_balance = seed;
+        GlobalVariableSet(k_pb, g_peak_balance);
+        GlobalVariableSet(k_sd, seed);
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -5789,6 +5928,25 @@ void InitI18n(void) {
     AddTr("rule_news",       "News Window",            "Fenêtre news",        "Ventana noticias");
     AddTr("rule_newsstats",  "News Trades",            "Trades news",         "Ops noticias");
     AddTr("rule_msgs",       "Server msgs (orders)",   "Msgs serveur (ordres)","Msgs servidor (órdenes)");
+    // --- v2.02.05 : FN Instant (trailing floor) presentation + news vigilance ---
+    AddTr("rule_payout",     "Payout eligibility",     "Éligibilité payout",  "Elegibilidad pago");
+    AddTr("ins_margin",      "Room",                   "Marge",               "Margen");
+    AddTr("ins_locked",      "locked",                 "verrouillé",          "bloqueado"); // short : must fit the _val column with the $ figure
+    AddTr("ins_tip_floor",   "Floor:",                 "Plancher :",          "Suelo :");
+    AddTr("ins_tip_floor2",  "equity below = account lost",
+                             "équity dessous = compte perdu",
+                             "equity debajo = cuenta perdida");
+    AddTr("ins_tip_permitted","max loss, fixed",       "perte max fixe",      "pérdida máx fija");
+    AddTr("ins_tip_lock",    "breakeven lock",         "verrou breakeven",    "bloqueo breakeven");
+    AddTr("ins_tip_locked1", "floor LOCKED at",        "plancher VERROUILLÉ à","suelo BLOQUEADO en");
+    AddTr("ins_tip_locked2", "- firm capital protected",
+                             "- capital firme protégé",
+                             "- capital protegido");
+    AddTr("news_med_check",  "Medium - check FN",      "Medium - vérifier FN","Medium - verificar FN");
+    AddTr("news_rule_tip",
+          "40% rule = HIGH-impact only (5min +/-, winning-trade profits). Medium = check the FN calendar/Clarity (MQL5 under-classes some central-bank speeches).",
+          "Règle 40% = high-impact (5min +/-, profits gagnants). Medium = à vérifier sur le calendrier/Clarity FN (MQL5 sous-classe parfois les discours banques centrales).",
+          "Regla 40% = solo high-impact (5min +/-, beneficios ganadores). Medium = verificar en el calendario/Clarity FN (MQL5 subclasifica algunos discursos de bancos centrales).");
     // --- verdict badge + clock ---
     AddTr("v_ontrack",   "HEALTHY",       "SAIN",           "SANO");        // v2.01.03 : health words - the score is account HEALTH /100
     AddTr("v_atrisk",    "CAUTION",       "PRUDENCE",       "PRECAUCIÓN");
@@ -6956,6 +7114,7 @@ void ApplySettingsChange(void) {
         g_margin_violation_active = false;
         g_risk_violation_active   = false;
     }
+    LoadOrSeedPeakBalance(); // v2.02.05 : self-heal a poisoned first seed after a size/plan change
     DestroyAllObjects();
     BuildPanel();
     MovePanelBy(0, 0); // v2.01 : geometry may have GROWN (risktools ON = +264px) -
