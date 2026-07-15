@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "2.02"
+#property version "2.13"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -452,6 +452,29 @@ CPyramidEngine g_pyramid_engine;
 datetime g_day_start = 0;
 double g_peak_balance = 0.0; // v2.02.05 FIX 1 : REALIZED-balance high-water mark (FN Instant trailing
                              // floor follows the balance, not equity) ; persisted per login (RC_ins_pb_<login>)
+
+// ===== v2.03 F1-F3 : ForexFactory public feed (FairEconomy) = PRIMARY news source =====
+// FN classifies news via a ForexFactory feed, and the MT5 calendar under-classes some
+// FN-restricted events (central-bank speeches, PPI) -> fetch the public FF JSON, classify
+// restricted = FF High OR the FN override list, and fall back to the MT5 calendar when
+// the feed is unavailable (FEATURE 3 : never a silent empty screen).
+struct FFEvent {
+    datetime t_utc;      // event time, EPOCH UTC (the feed's ISO8601 offset parsed out)
+    string   ccy;        // FF `country` field = currency code (USD/EUR/GBP/...)
+    string   title;      // event title (bucket tooltips)
+    bool     restricted; // F2 : FF "High" OR FN override -> the 40% RULE (red)
+};
+FFEvent  g_ff_events[];       // parsed cache (this-week feed, refreshed 1/60 min)
+bool     g_ff_active = false; // feed fetched + parsed OK -> FF drives rule + display
+datetime g_ff_last_try = 0;   // fetch throttle (0 = fetch on the first timer tick)
+
+// v2.03 F4 : unified display event (FF or MT5 fallback), SERVER-time for the chart axis.
+struct NewsDispItem {
+    datetime t_srv;
+    string   ccy;
+    string   title;
+    bool     restricted;
+};
 ENUM_RC_STATUS g_last_status[RC_RULE_COUNT];
 
 // Last-seen position ticket list (used to detect open/close and refresh SL lines)
@@ -604,9 +627,12 @@ void InitEffectiveSettings(void) {
     }
     // V1.29 I : Personal type auto-detected (Demo if the broker account is a demo).
     g_eff_personal_demo = (AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_DEMO) ? 1 : 0;
-    if (GlobalVariableCheck("RC_size"))       g_eff_size          = GlobalVariableGet("RC_size");
-    if (GlobalVariableCheck("RC_acct_type"))  g_eff_acct_type     = (int)GlobalVariableGet("RC_acct_type");
-    if (GlobalVariableCheck("RC_phase"))      g_eff_phase         = (int)GlobalVariableGet("RC_phase");
+    // v2.13 FEATURE C : account-profile settings load PER LOGIN (legacy global =
+    // one-time seed fallback), then re-save under the login so migration sticks.
+    double gvv = 0.0;
+    if (GVGetLogin("RC_size", gvv))      { g_eff_size      = gvv;      GVSetLogin("RC_size", gvv); }
+    if (GVGetLogin("RC_acct_type", gvv)) { g_eff_acct_type = (int)gvv; GVSetLogin("RC_acct_type", gvv); }
+    if (GVGetLogin("RC_phase", gvv))     { g_eff_phase     = (int)gvv; GVSetLogin("RC_phase", gvv); }
     if (GlobalVariableCheck("RC_sl_pct"))     g_eff_sl_pct        = GlobalVariableGet("RC_sl_pct");
     if (GlobalVariableCheck("RC_tp_pct"))     g_eff_tp_pct        = GlobalVariableGet("RC_tp_pct");
     if (GlobalVariableCheck("RC_mm_pt"))      g_eff_max_margin_pt = GlobalVariableGet("RC_mm_pt");
@@ -618,8 +644,8 @@ void InitEffectiveSettings(void) {
     if (GlobalVariableCheck("RC_discipline")) g_eff_discipline    = (GlobalVariableGet("RC_discipline") != 0.0);
     if (GlobalVariableCheck("RC_sound"))      g_eff_sound         = (GlobalVariableGet("RC_sound")      != 0.0);
     if (GlobalVariableCheck("RC_telegram"))   g_eff_telegram      = (GlobalVariableGet("RC_telegram")   != 0.0);
-    if (GlobalVariableCheck("RC_perso_demo")) g_eff_personal_demo = (int)GlobalVariableGet("RC_perso_demo");     // V1.29 I
-    if (GlobalVariableCheck("RC_addons"))     g_addons_mask       = (int)GlobalVariableGet("RC_addons");
+    if (GVGetLogin("RC_perso_demo", gvv)) { g_eff_personal_demo = (int)gvv; GVSetLogin("RC_perso_demo", gvv); } // V1.29 I + v2.13 C
+    if (GVGetLogin("RC_addons", gvv))     { g_addons_mask       = (int)gvv; GVSetLogin("RC_addons", gvv); }
     // V1.24 G1 : restore an active self-lock so it survives reattach / VPS reboot.
     if (GlobalVariableCheck("RC_selflock_until")) g_selflock_until = (datetime)GlobalVariableGet("RC_selflock_until");
     if (GlobalVariableCheck("RC_tilt_n"))     g_eff_tilt_n      = (int)GlobalVariableGet("RC_tilt_n");
@@ -633,8 +659,8 @@ void InitEffectiveSettings(void) {
     g_eff_risk_cap_viol   = InpRiskCapViolated;
     g_eff_refresh_ms      = InpRefreshMs;
     g_eff_cycle_ymd       = IsoToYmd(InpCycleStartIso); // 0 if parse fails -> falls back to the Inp string
-    if (GlobalVariableCheck("RC_split"))      g_eff_split           = GlobalVariableGet("RC_split");
-    if (GlobalVariableCheck("RC_cycle_ymd"))  g_eff_cycle_ymd       = GlobalVariableGet("RC_cycle_ymd");
+    if (GVGetLogin("RC_split", gvv))     { g_eff_split     = gvv; GVSetLogin("RC_split", gvv); }     // v2.13 C
+    if (GVGetLogin("RC_cycle_ymd", gvv)) { g_eff_cycle_ymd = gvv; GVSetLogin("RC_cycle_ymd", gvv); } // v2.13 C
     if (GlobalVariableCheck("RC_mcap_viol"))  g_eff_margin_cap_viol = GlobalVariableGet("RC_mcap_viol");
     if (GlobalVariableCheck("RC_rcap_viol"))  g_eff_risk_cap_viol   = GlobalVariableGet("RC_rcap_viol");
     if (GlobalVariableCheck("RC_refresh_ms")) g_eff_refresh_ms      = (int)GlobalVariableGet("RC_refresh_ms");
@@ -740,11 +766,26 @@ int Live_OpenPositionsCount(void);
 // T7 state + helpers
 void UpdatePeakEquity(void);
 void LoadOrSeedPeakBalance(void); // v2.02.05 : per-login peak persistence + self-healing seed
+// v2.13 FEATURE C : per-login config persistence (account-profile settings)
+string LoginKey(const string base);
+bool GVGetLogin(const string base, double &v);
+void GVSetLogin(const string base, const double v);
+// v2.13 FEATURE B : SL-vs-limit guard (20% survival margin)
+double Live_NearestLimitRoom(void);
+bool Live_SlGuardBreached(string &reco_sym, double &reco_sl);
+void DrawSlGuardBanner(void);
 double ComputePositionRiskMoney(const string sym, const int type,
                                 const double price_open, const double sl,
                                 const double vol, const double costs = 0.0); // Phase 3.5 : net-of-costs, direction-aware
 void RefreshSlLines(void);
 void RefreshNewsZones(void);
+// v2.03 F1-F2 : ForexFactory feed fetch (throttled) + FF-side rule/vigilance helpers
+void FetchFFCalendar(void);
+bool FFLoadFromFile(void);           // file bridge (indicator-safe FF path + warm cache)
+void FFSaveToFile(const string json);
+bool FFRestrictedOverride(const string ccy, const string title);
+datetime FFNextEvt(const bool restricted_class);
+bool FFInNewsWindow(void);
 string FormatAge(int seconds);
 string PositionStatusLabel(ENUM_RC_STATUS s, int age, bool sl_missing);
 void TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status);
@@ -1013,6 +1054,7 @@ struct SuggestedLot {
     double free_margin_pct;       // = 100 * free / balance
     bool   margin_bound;          // real free margin is the TIGHTEST constraint on the lot
     bool   margin_insufficient;   // free margin can't cover even the broker min lot
+    bool   floor_capped;          // v2.13 B1 : budget capped at 80% of the nearest-limit room (20% survival margin)
 };
 
 bool Live_ComputeSuggestedLot(SuggestedLot& out);
@@ -1026,8 +1068,13 @@ int OnInit(void) {
     IndicatorSetString(INDICATOR_SHORTNAME, "RiskCockpit");
     // G3 : load settings-popup overrides BEFORE InitTheme + before catalog
     // Resolve so the persisted theme/plan choice survives reattach.
-    if (GlobalVariableCheck("RC_plan_override"))
-        g_active_plan_idx = (int)GlobalVariableGet("RC_plan_override");
+    { // v2.13 FEATURE C : plan choice follows the LOGIN (legacy global = seed)
+        double plan_gv = 0.0;
+        if (GVGetLogin("RC_plan_override", plan_gv)) {
+            g_active_plan_idx = (int)plan_gv;
+            GVSetLogin("RC_plan_override", plan_gv);
+        }
+    }
     // V1.27 : a stale non-MT5 Futures plan restored from GV isn't in the cascade
     // -> normalise it to FundedNext's first type so broker/type steppers stay sane.
     if (g_active_plan_idx == (int)FN_PLAN_FUTURES_BOLT ||
@@ -1036,7 +1083,7 @@ int OnInit(void) {
         ENUM_FN_PLAN vp[];
         PlansForVendor(0, vp);
         g_active_plan_idx = (int)vp[0];
-        GlobalVariableSet("RC_plan_override", (double)g_active_plan_idx);
+        GVSetLogin("RC_plan_override", (double)g_active_plan_idx); // v2.13 C : per-login
     }
     if (GlobalVariableCheck("RC_theme_override"))
         g_active_theme_idx = (int)GlobalVariableGet("RC_theme_override");
@@ -1278,6 +1325,7 @@ void OnTimer(void) {
     // Was the n#1 freeze cause - the panel kept updating but the event queue
     // starved while this held the thread, and OBJECT_CLICK never fired.
     if (TimeCurrent() - g_news_last_refresh >= 30) {
+        FetchFFCalendar(); // v2.03 F1 : throttled internally (first tick + 1/60 min, 3 s timeout)
         RefreshNewsZones();
         g_news_last_refresh = TimeCurrent();
     }
@@ -1381,7 +1429,7 @@ void HandleModalControl(const string act) {
         const int vn = PlansForVendor(v, vplans);
         if (vn > 0) {
             g_active_plan_idx = (int)vplans[0];
-            GlobalVariableSet("RC_plan_override", (double)g_active_plan_idx);
+            GVSetLogin("RC_plan_override", (double)g_active_plan_idx); // v2.13 C : per-login
             SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
             SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
         }
@@ -1399,7 +1447,7 @@ void HandleModalControl(const string act) {
         if (np > 0) {
             pidx = ((pidx + delta) % np + np) % np;
             g_active_plan_idx = (int)plans[pidx];
-            GlobalVariableSet("RC_plan_override", (double)g_active_plan_idx);
+            GVSetLogin("RC_plan_override", (double)g_active_plan_idx); // v2.13 C : per-login
             SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
             SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
         }
@@ -1408,7 +1456,7 @@ void HandleModalControl(const string act) {
         const int d = (act == "set_phase_next" ? 1 : -1);
         g_eff_phase = ((g_eff_phase + d) % 4 + 4) % 4; // ENUM_FN_PHASE 0..3
         SnapPhaseToPlan(EffectivePlan()); // V1.27 : don't let a non-Instant plan land on INSTANT
-        GlobalVariableSet("RC_phase", (double)g_eff_phase);
+        GVSetLogin("RC_phase", (double)g_eff_phase); // v2.13 C : per-login
         RefreshModalOnly();
     } else if (act == "set_size_prev" || act == "set_size_next") {
         // V1.27 CASCADE step 3 : step only the sizes legal for the current plan.
@@ -1421,23 +1469,23 @@ void HandleModalControl(const string act) {
         if (ns > 0) {
             sidx = ((sidx + d) % ns + ns) % ns;
             g_eff_size = sizes[sidx];
-            GlobalVariableSet("RC_size", g_eff_size);
+            GVSetLogin("RC_size", g_eff_size); // v2.13 C : per-login
         }
         RefreshModalOnly();
     } else if (act == "set_acct_type") {
         g_eff_acct_type = (g_eff_acct_type == 0 ? 1 : 0);
-        GlobalVariableSet("RC_acct_type", (double)g_eff_acct_type);
+        GVSetLogin("RC_acct_type", (double)g_eff_acct_type); // v2.13 C : per-login
         RefreshModalOnly();
     } else if (act == "set_perso_type") {
         // V1.29 I : toggle Personal Real <-> Demo (labeling only ; catalogue untouched).
         g_eff_personal_demo = (g_eff_personal_demo == 0 ? 1 : 0);
-        GlobalVariableSet("RC_perso_demo", (double)g_eff_personal_demo);
+        GVSetLogin("RC_perso_demo", (double)g_eff_personal_demo); // v2.13 C : per-login
         RefreshModalOnly();
     } else if (StringFind(act, "set_addon_") == 0) {
         const int flag = (int)StringToInteger(StringSubstr(act, StringLen("set_addon_")));
         if ((g_addons_mask & flag) != 0) g_addons_mask &= ~flag;
         else                             g_addons_mask |=  flag;
-        GlobalVariableSet("RC_addons", (double)g_addons_mask);
+        GVSetLogin("RC_addons", (double)g_addons_mask); // v2.13 C : per-login
         RefreshModalOnly();
     } else if (StringFind(act, "set_n_") == 0) {
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
@@ -1502,7 +1550,7 @@ void HandleModalControl(const string act) {
         for (int i = 0; i < 5; ++i) if ((int)MathRound(opts[i]) == (int)MathRound(g_eff_split)) { oi = i; break; }
         oi = ((oi + d) % 5 + 5) % 5;
         g_eff_split = opts[oi];
-        GlobalVariableSet("RC_split", g_eff_split);
+        GVSetLogin("RC_split", g_eff_split); // v2.13 C : per-login
         RefreshModalOnly();
     } else if (StringFind(act, "set_cyy_") == 0) {
         // V1.27 : cycle-start YEAR stepper (YYYYMMDD double).
@@ -1512,7 +1560,7 @@ void HandleModalControl(const string act) {
         y = (int)MathMax(2020, MathMin(2035, y + d));
         if (dd > DaysInMonth(y, m)) dd = DaysInMonth(y, m); // Feb 29 -> 28 in a non-leap year
         g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
-        GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
+        GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd); // v2.13 C : per-login
         RefreshModalOnly();
     } else if (StringFind(act, "set_cmm_") == 0) {
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
@@ -1521,7 +1569,7 @@ void HandleModalControl(const string act) {
         m = ((m - 1 + d) % 12 + 12) % 12 + 1;
         if (dd > DaysInMonth(y, m)) dd = DaysInMonth(y, m); // clamp to the new month's length
         g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
-        GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
+        GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd); // v2.13 C : per-login
         RefreshModalOnly();
     } else if (StringFind(act, "set_cdd_") == 0) {
         const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
@@ -1531,7 +1579,7 @@ void HandleModalControl(const string act) {
         if (dd > dim) dd = dim;
         dd = ((dd - 1 + d) % dim + dim) % dim + 1; // 1..days-in-month (calendar-aware)
         g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
-        GlobalVariableSet("RC_cycle_ymd", g_eff_cycle_ymd);
+        GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd); // v2.13 C : per-login
         RefreshModalOnly();
     } else if (StringFind(act, "set_mcv_") == 0) {
         // V1.27 : post-violation MARGIN cap (%) stepper.
@@ -1712,7 +1760,7 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
             string parts[];
             const int np = StringSplit(nm, '_', parts);          // RC,NEWS,FLAG,<lane>,<id>
             const int lane = (np >= 5 ? (int)StringToInteger(parts[3]) : 0);
-            ObjectSetDouble(0, nm, OBJPROP_PRICE, pmin + rng * (0.04 + 0.018 * lane)); // keep OBJPROP_TIME (x follows natively)
+            ObjectSetDouble(0, nm, OBJPROP_PRICE, pmin + rng * (0.02 + 0.018 * lane)); // keep OBJPROP_TIME (x follows natively) ; v2.03.05c FIX 4 : baseline synced with RefreshNewsZonesForChart (0.02)
         }
         ChartRedraw(0);
         return;
@@ -2765,6 +2813,50 @@ void DrawTiltBanner(void) {
     }
 }
 
+// v2.13 FEATURE B2 : RED SL-guard banner - the aggregate worst-case loss at the
+// CURRENT SLs would eat past 80% of the room to the nearest active limit. Shows
+// the recommended MINIMUM SL (the price that keeps the 20% survival margin) for
+// the biggest-risk position. Drawn one row BELOW the tilt banner slot so both
+// alerts can coexist. READ-ONLY advisor : displays the fix, never touches trades.
+void DrawSlGuardBanner(void) {
+    const string gid  = RC_PREFIX + "slguard";
+    const string gtxt = RC_PREFIX + "slguard_txt";
+    string reco_sym; double reco_sl;
+    if (!Live_SlGuardBreached(reco_sym, reco_sl)) {
+        ObjectDelete(0, gid);
+        ObjectDelete(0, gtxt);
+        return;
+    }
+    if (ObjectFind(0, gid) < 0) ObjectCreate(0, gid, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+    ObjectSetInteger(0, gid, OBJPROP_XDISTANCE, g_anchor_x);
+    ObjectSetInteger(0, gid, OBJPROP_YDISTANCE, g_anchor_y + RC_TITLE_HEIGHT + InpRowHeight);
+    ObjectSetInteger(0, gid, OBJPROP_XSIZE, InpPanelWidth);
+    ObjectSetInteger(0, gid, OBJPROP_YSIZE, InpRowHeight);
+    ObjectSetInteger(0, gid, OBJPROP_BGCOLOR, g_theme.red);
+    ObjectSetInteger(0, gid, OBJPROP_COLOR, g_theme.red);
+    ObjectSetInteger(0, gid, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+    ObjectSetInteger(0, gid, OBJPROP_BACK, false);
+    ObjectSetInteger(0, gid, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, gid, OBJPROP_HIDDEN, true);
+    ObjectSetInteger(0, gid, OBJPROP_ZORDER, 150);
+    string txt = Tr("slguard");
+    if (reco_sym != "" && reco_sl > 0.0)
+        txt += "  " + reco_sym + " " + ShortToString((ushort)0x2265) + " " + // >= glyph
+               DoubleToString(reco_sl, (int)SymbolInfoInteger(reco_sym, SYMBOL_DIGITS));
+    if (ObjectFind(0, gtxt) < 0) ObjectCreate(0, gtxt, OBJ_LABEL, 0, 0, 0);
+    ObjectSetInteger(0, gtxt, OBJPROP_XDISTANCE, g_anchor_x + InpPanelWidth / 2);
+    ObjectSetInteger(0, gtxt, OBJPROP_YDISTANCE, g_anchor_y + RC_TITLE_HEIGHT + InpRowHeight + InpRowHeight / 2);
+    ObjectSetString (0, gtxt, OBJPROP_TEXT, txt);
+    ObjectSetInteger(0, gtxt, OBJPROP_COLOR, g_theme.bg);
+    ObjectSetInteger(0, gtxt, OBJPROP_FONTSIZE, RC_FONT_SIZE);
+    ObjectSetString (0, gtxt, OBJPROP_FONT, RC_FONT_UI);
+    ObjectSetInteger(0, gtxt, OBJPROP_ANCHOR, ANCHOR_CENTER);
+    ObjectSetInteger(0, gtxt, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+    ObjectSetInteger(0, gtxt, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, gtxt, OBJPROP_HIDDEN, true);
+    ObjectSetInteger(0, gtxt, OBJPROP_ZORDER, 151);
+}
+
 //+------------------------------------------------------------------+
 //| Status chip                                                      |
 //+------------------------------------------------------------------+
@@ -3169,8 +3261,13 @@ void RefreshPanel(void) {
                             : ((news_active || news_pct > 0.0) ? RC_STATUS_WARN : RC_STATUS_OK),
               news_applies);
     // v2.02.05 FIX 2e : explain the rule vs the vigilance on hover.
-    ObjectSetString(0, RC_PREFIX + "rule_news_lbl", OBJPROP_TOOLTIP, Tr("news_rule_tip"));
-    ObjectSetString(0, RC_PREFIX + "rule_news_val", OBJPROP_TOOLTIP, Tr("news_rule_tip"));
+    // v2.03 F3 : honest SOURCE badge on the panel - [FF] = ForexFactory feed active
+    // (FN-aligned classification), [MT] = MT5-calendar fallback.
+    ObjectSetString(0, RC_PREFIX + "rule_news_lbl", OBJPROP_TEXT,
+                    Tr("rule_news") + (g_ff_active ? "  [FF]" : "  [MT]"));
+    const string news_tip = Tr(g_ff_active ? "news_src_ff" : "news_src_mt") + " | " + Tr("news_rule_tip");
+    ObjectSetString(0, RC_PREFIX + "rule_news_lbl", OBJPROP_TOOLTIP, news_tip);
+    ObjectSetString(0, RC_PREFIX + "rule_news_val", OBJPROP_TOOLTIP, news_tip);
 
     // 9: Server messages today (orders touched - placed/modified/cancelled/filled)
     const int orders_today = Live_OrdersToday();
@@ -3209,8 +3306,10 @@ void RefreshPanel(void) {
         SnapshotPositionList();
     // V1.24 : soft TILT banner LAST (after the strip is drawn) so it sits on top
     // of the account strip. Hard locks are handled at the TOP of RefreshPanel.
-    if (g_eff_risktools)
+    if (g_eff_risktools) {
         DrawTiltBanner();
+        DrawSlGuardBanner(); // v2.13 B2 : SL-vs-limit survival guard (advisor)
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -3429,6 +3528,24 @@ datetime Live_NextHighImpactTime(string &out_ccy, bool &out_high) {
     out_ccy = "";
     out_high = false;
     const datetime now = TimeCurrent();
+    // v2.03 : FF feed = primary here too (the footer strip must AGREE with row 8
+    // and the chart marks - three surfaces, one source). MT5 calendar = fallback.
+    if (g_ff_active) {
+        const int srv_off = (int)(TimeCurrent() - TimeGMT());
+        datetime fbest = 0;
+        for (int i = 0; i < ArraySize(g_ff_events); ++i) {
+            const datetime ts = g_ff_events[i].t_utc + srv_off;
+            if (ts <= now || ts > now + 24 * 60 * 60) continue;
+            if (g_ff_events[i].restricted  && !g_eff_news_high) continue; // level toggles
+            if (!g_ff_events[i].restricted && !g_eff_news_med)  continue;
+            if (fbest == 0 || ts < fbest) {
+                fbest = ts;
+                out_high = g_ff_events[i].restricted;
+                out_ccy  = g_ff_events[i].ccy;
+            }
+        }
+        return fbest;
+    }
     MqlCalendarValue values[];
     if (CalendarValueHistory(values, now, now + 24 * 60 * 60, NULL, NULL) <= 0)
         return 0;
@@ -3962,6 +4079,114 @@ double Live_OverallDdPct(void) {
     return 100.0 * dd / g_profile.initial_balance;
 }
 
+// v2.13 FEATURE B : smallest $ ROOM between the current EQUITY and the nearest
+// ACTIVE loss limit. Uses the same dd math the meters run on : room_i =
+// (limit_pct_i - dd_pct_i)% of initial - on the trailing (Instant) profile the
+// overall-dd formula makes this EXACTLY equity - floor. Applicable limits :
+// daily (daily_loss_pct > 0) and overall (max_loss_pct > 0) ; smallest positive
+// wins (a breached limit clamps to 0). Returns -1 when NO limit applies
+// (Personal without caps) so callers can skip the guard entirely.
+double Live_NearestLimitRoom(void) {
+    const double init = g_profile.initial_balance;
+    if (init <= 0.0)
+        return -1.0;
+    double room = -1.0;
+    if (g_profile.max_loss_pct > 0.0) {
+        const double r = MathMax(0.0, (g_profile.max_loss_pct - Live_OverallDdPct()) / 100.0 * init);
+        room = r;
+    }
+    if (g_profile.daily_loss_pct > 0.0) {
+        const double r = MathMax(0.0, (g_profile.daily_loss_pct - Live_DailyDdPct()) / 100.0 * init);
+        if (room < 0.0 || r < room) room = r;
+    }
+    return room;
+}
+
+// v2.13 FEATURE B2 : TRUE aggregate worst-case loss from the CURRENT equity if
+// every open position gets stopped at its CURRENT SL, vs 80% of the nearest-
+// limit room (20% must survive the hit). equity_at_SLs = balance - sum(from-open
+// risk at current SLs) -> loss-from-now = sum(risk) - floating P&L. A position
+// with NO SL = the guard fires unconditionally (unbounded risk). Fills the
+// recommended MINIMUM SL for the biggest-risk position (the SL that brings the
+// aggregate back to exactly 80% of the room). READ-ONLY advisor : displays the
+// fix, never touches a trade.
+bool Live_SlGuardBreached(string &reco_sym, double &reco_sl) {
+    reco_sym = "";
+    reco_sl  = 0.0;
+    if (PositionsTotal() == 0)
+        return false;
+    const double room = Live_NearestLimitRoom();
+    if (room < 0.0)
+        return false; // no active limit -> nothing to guard
+    const double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
+    const double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+    double total_open = 0.0, worst_risk = 0.0;
+    ulong  worst_ticket = 0;
+    bool   missing_sl = false;
+    string nosl_sym = "";
+    const int n = PositionsTotal();
+    for (int i = 0; i < n; ++i) {
+        const ulong ticket = PositionGetTicket(i);
+        if (ticket == 0 || !PositionSelectByTicket(ticket))
+            continue;
+        const double sl = PositionGetDouble(POSITION_SL);
+        if (sl <= 0.0) { // SL-less = unbounded worst case
+            missing_sl = true;
+            if (nosl_sym == "") nosl_sym = PositionGetString(POSITION_SYMBOL);
+            continue;
+        }
+        const string sym  = PositionGetString(POSITION_SYMBOL);
+        const double po   = PositionGetDouble(POSITION_PRICE_OPEN);
+        const double vol  = PositionGetDouble(POSITION_VOLUME);
+        const int    type = (int)PositionGetInteger(POSITION_TYPE);
+        const double swap = PositionGetDouble(POSITION_SWAP);
+        const double r = ComputePositionRiskMoney(sym, type, po, sl, vol, swap);
+        total_open += r;
+        if (r > worst_risk) { worst_risk = r; worst_ticket = ticket; }
+    }
+    // loss from the CURRENT equity if every SL gets swept :
+    //   equity_at_SLs = balance - total_open  ->  loss = equity - equity_at_SLs
+    //                                             = total_open + (equity - balance).
+    // SIGN MATTERS (verified against the oracle) : floating PROFIT makes the
+    // sweep loss BIGGER than the from-open risk (you lose the profit AND the
+    // from-open distance) ; floating LOSS makes it smaller (part already paid).
+    const double worst_case = (missing_sl ? room + 1.0 // always breached : no SL somewhere
+                                          : total_open + (equity - balance));
+    if (worst_case <= 0.80 * room)
+        return false;
+    if (missing_sl) {
+        reco_sym = nosl_sym; // no numeric reco : the SL-less position IS the problem
+        reco_sl  = 0.0;      // (tightening another SL can never clear the guard)
+        return true;
+    }
+    if (worst_ticket != 0 && PositionSelectByTicket(worst_ticket)) {
+        const string sym  = PositionGetString(POSITION_SYMBOL);
+        const double po   = PositionGetDouble(POSITION_PRICE_OPEN);
+        const double vol  = PositionGetDouble(POSITION_VOLUME);
+        const int    type = (int)PositionGetInteger(POSITION_TYPE);
+        const double swap = PositionGetDouble(POSITION_SWAP);
+        const double ts   = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+        const double tv   = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
+        if (ts > 0.0 && tv > 0.0 && vol > 0.0) {
+            const double others  = total_open - worst_risk;
+            // from-open budget left for the worst position so the aggregate sweep
+            // loss lands EXACTLY on 0.80*room :
+            //   others + allowed + (equity - balance) = 0.80*room
+            double allowed = 0.80 * room - (equity - balance) - others;
+            if (allowed < 0.0) allowed = 0.0;
+            // the risk figure includes the booked swap (ComputePositionRiskMoney
+            // adds costs) -> solve the PRICE term for allowed : dist_term = allowed + swap.
+            double allowed_price = allowed + swap;
+            if (allowed_price < 0.0) allowed_price = 0.0;
+            const double dist = allowed_price * ts / (tv * vol);
+            reco_sl  = (type == POSITION_TYPE_BUY ? po - dist : po + dist);
+            reco_sym = sym;
+            reco_sl  = NormalizeDouble(reco_sl, (int)SymbolInfoInteger(sym, SYMBOL_DIGITS));
+        }
+    }
+    return true;
+}
+
 double Live_ProfitTargetPct(void) {
     if (g_profile.profit_target_pct <= 0.0)
         return 0.0;
@@ -4071,6 +4296,8 @@ bool Live_InNewsWindow(void) {
         return false;
     if (g_profile.news_window_minutes <= 0)
         return false;
+    if (g_ff_active)              // v2.03 : FF feed = primary source (FN-aligned) ;
+        return FFInNewsWindow();  // the MT5 calendar below stays the fallback
 
     const int win_sec = g_profile.news_window_minutes * 60;
     const datetime t_from = TimeCurrent() - win_sec;
@@ -4108,6 +4335,8 @@ bool Live_InNewsWindow(void) {
 datetime Live_NextNewsEvt(void) {
     if (!g_profile.news_rule_applies)
         return 0;
+    if (g_ff_active)            // v2.03 : FF feed = primary source. restricted = FF High
+        return FFNextEvt(true); // OR FN override -> the RULE ; MT5 calendar = fallback.
     const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
     const datetime now = TimeCurrent();
     MqlCalendarValue values[];
@@ -4141,6 +4370,8 @@ datetime Live_NextNewsEvt(void) {
 datetime Live_NextMedNewsEvt(void) {
     if (!g_profile.news_rule_applies || !g_eff_news_med)
         return 0;
+    if (g_ff_active)             // v2.03 : FF non-restricted (Medium hors override) =
+        return FFNextEvt(false); // the amber vigilance class ; MT5 = fallback.
     const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
     const datetime now = TimeCurrent();
     MqlCalendarValue values[];
@@ -4615,6 +4846,24 @@ void UpdatePeakEquity(void) {
 // size on the 2K account seeded peak=25000) and the profile now yields a SMALLER
 // seed, re-seed. A peak that genuinely grew (real balance highs) is never touched.
 // Called from OnInit + after every profile re-Resolve (size/plan popup changes).
+// v2.13 FEATURE C : ACCOUNT-PROFILE settings are keyed PER LOGIN (same pattern
+// as the trailing-floor peak) so each account keeps ITS OWN plan/size/type/
+// phase/addons/split/cycle - switching accounts auto-restores the right config
+// instead of dragging the last-used one along. The legacy GLOBAL name stays as
+// a READ fallback (soft migration : the first load on a login adopts the old
+// global value, then saves under the login ; nothing currently configured is
+// lost). Preference/display settings (theme, palette, lang, news, alerts,
+// SL/TP/margin tunables...) stay global on purpose - they are user habits,
+// not account facts.
+string LoginKey(const string base) { return base + "_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)); }
+bool GVGetLogin(const string base, double &v) {
+    if (GlobalVariableCheck(LoginKey(base))) { v = GlobalVariableGet(LoginKey(base)); return true; }
+    if (GlobalVariableCheck(base))           { v = GlobalVariableGet(base);           return true; } // legacy fallback
+    return false;
+}
+void GVSetLogin(const string base, const double v) {
+    GlobalVariableSet(LoginKey(base), v); // per-login only : the global stays frozen as the migration seed
+}
 void LoadOrSeedPeakBalance(void) {
     const string k_pb = PeakBalGV(), k_sd = PeakSeedGV();
     const double seed = MathMax(g_profile.initial_balance, AccountInfoDouble(ACCOUNT_BALANCE));
@@ -4760,6 +5009,226 @@ bool SendTelegramMessage(const string text) {
         return false;
     }
     return (res >= 200 && res < 300);
+}
+
+//+------------------------------------------------------------------+
+//| v2.03 F1 : ForexFactory public calendar (FairEconomy JSON feed).  |
+//| Requires https://nfs.faireconomy.media whitelisted in Tools >     |
+//| Options > Expert Advisors > WebRequest (else err 4014).           |
+//| Fetch : first timer tick + 1 / 60 min, 3 s timeout (WebRequest    |
+//| blocks the UI thread -> short + rare + cached). On ANY failure    |
+//| the cache/state is kept and the MT5 calendar remains the honest   |
+//| fallback (F3) - never a silent empty screen.                      |
+//+------------------------------------------------------------------+
+// FN override list - maintained by Coordinator via MCP diff (events FN elevates
+// to restricted while ForexFactory classes them lower). Seed verified July 2026.
+// TODO : extend via Coordinator when the FN MCP is_restricted diff flags new ones.
+bool FFRestrictedOverride(const string ccy, const string title) {
+    if (ccy == "USD" && StringFind(title, "PPI m/m") >= 0)      return true; // also matches "Core PPI m/m"
+    if (ccy == "USD" && StringFind(title, "Core PPI m/m") >= 0) return true; // explicit seed entry
+    return false;
+}
+// "2026-07-14T08:30:00-04:00" -> epoch UTC (offset parsed out ; trailing 'Z' = UTC).
+datetime FFParseIso8601Utc(const string s) {
+    if (StringLen(s) < 19) return 0;
+    MqlDateTime dt;
+    dt.year = (int)StringToInteger(StringSubstr(s, 0, 4));
+    dt.mon  = (int)StringToInteger(StringSubstr(s, 5, 2));
+    dt.day  = (int)StringToInteger(StringSubstr(s, 8, 2));
+    dt.hour = (int)StringToInteger(StringSubstr(s, 11, 2));
+    dt.min  = (int)StringToInteger(StringSubstr(s, 14, 2));
+    dt.sec  = (int)StringToInteger(StringSubstr(s, 17, 2));
+    if (dt.year < 2000 || dt.mon < 1 || dt.mon > 12 || dt.day < 1 || dt.day > 31) return 0;
+    datetime t = StructToTime(dt); // naive stamp -> epoch as-if-UTC
+    if (StringLen(s) >= 25) {      // +HH:MM / -HH:MM -> local = UTC + off => UTC = local - off
+        const ushort sign = StringGetCharacter(s, 19);
+        const int off = (int)StringToInteger(StringSubstr(s, 20, 2)) * 3600 +
+                        (int)StringToInteger(StringSubstr(s, 23, 2)) * 60;
+        if      (sign == '+') t -= off;
+        else if (sign == '-') t += off;
+    }
+    return t;
+}
+// Minimal string-scan : the JSON string value of `key`, searched forward from `from`
+// but NEVER past `until` (the next object's start) - a missing key in one object can
+// therefore never grab the NEXT object's field (cross-object desync guard). Advances
+// `next_pos` past the value. Escape check counts consecutive backslashes (parity) so
+// `\"` (escaped quote) and `\\"` (escaped backslash + real quote) both parse right.
+string FFJsonStr(const string json, const string key, const int from, const int until, int &next_pos) {
+    next_pos = from;
+    const int k = StringFind(json, "\"" + key + "\"", from);
+    if (k < 0 || k >= until) return "";
+    const int c = StringFind(json, ":", k);
+    if (c < 0 || c >= until) return "";
+    const int q1 = StringFind(json, "\"", c);
+    if (q1 < 0 || q1 >= until) return "";
+    int q2 = q1 + 1;
+    while (true) {
+        q2 = StringFind(json, "\"", q2);
+        if (q2 < 0 || q2 >= until) return "";
+        int bs = 0;
+        while (q2 - 1 - bs >= 0 && StringGetCharacter(json, q2 - 1 - bs) == '\\') bs++;
+        if ((bs % 2) == 0) break; // even backslashes before it = a REAL closing quote
+        q2++;
+    }
+    next_pos = q2 + 1;
+    string v = StringSubstr(json, q1 + 1, q2 - q1 - 1);
+    StringReplace(v, "\\\"", "\"");
+    StringReplace(v, "\\/", "/");
+    return v;
+}
+// Parse the flat FF array. Field order in the feed : title, country, date, impact,
+// forecast, previous -> a forward sequential scan per object is safe. Keeps High +
+// Medium (+ any FN-override event) ; Low/Holiday dropped (display noise, no rule).
+int FFParseCalendar(const string json) {
+    FFEvent parsed[];
+    const int jlen = StringLen(json);
+    int n = 0, pos = 0;
+    while (true) {
+        int p1 = 0, p2 = 0, p3 = 0, p4 = 0;
+        const string title = FFJsonStr(json, "title", pos, jlen, p1);
+        if (p1 <= pos) break; // no more objects
+        // bound the remaining fields to THIS object : never past the next title key
+        const int next_obj = StringFind(json, "\"title\"", p1);
+        const int bound    = (next_obj > 0 ? next_obj : jlen);
+        const string ccy    = FFJsonStr(json, "country", p1, bound, p2);
+        const string dates  = FFJsonStr(json, "date",    p2, bound, p3);
+        const string impact = FFJsonStr(json, "impact",  p3, bound, p4);
+        pos = (p4 > p1 ? p4 : p1);
+        if (title == "" || ccy == "" || dates == "") continue;
+        const datetime t = FFParseIso8601Utc(dates);
+        if (t == 0) continue;
+        const bool high = (impact == "High");
+        const bool med  = (impact == "Medium");
+        const bool ovr  = FFRestrictedOverride(ccy, title);
+        if (!high && !med && !ovr) continue;
+        ArrayResize(parsed, n + 1);
+        parsed[n].t_utc      = t;
+        parsed[n].ccy        = ccy;
+        parsed[n].title      = title;
+        parsed[n].restricted = (high || ovr); // F2 : the 40% RULE class
+        n++;
+    }
+    if (n == 0) return 0; // empty/HTML error page -> caller keeps the old state
+    ArrayResize(g_ff_events, n);
+    for (int i = 0; i < n; ++i) g_ff_events[i] = parsed[i];
+    return n;
+}
+// FILE BRIDGE : MQL5\Files\ff_calendar_thisweek.json. Two jobs : (a) warm cache
+// across indicator re-inits (TF switch re-creates every global -> instant reload,
+// no network) ; (b) THE viable FF path when WebRequest is unavailable - MQL5
+// FORBIDS WebRequest in INDICATORS (returns -1 / err 4014 even whitelisted ;
+// EAs / scripts / services only), so a companion service/EA or any external
+// scheduler can drop/refresh this file and the indicator stays FN-aligned.
+// Stale guard : a file older than 8 days is ignored (feed = this week).
+bool FFLoadFromFile(void) {
+    const int h = FileOpen("ff_calendar_thisweek.json", FILE_READ | FILE_BIN | FILE_SHARE_READ | FILE_SHARE_WRITE);
+    if (h == INVALID_HANDLE) return false;
+    const datetime fmod = (datetime)FileGetInteger(h, FILE_MODIFY_DATE);
+    const int sz = (int)FileSize(h);
+    if (sz <= 2 || sz > 4 * 1024 * 1024 || (fmod > 0 && TimeCurrent() - fmod > 8 * 24 * 3600)) {
+        FileClose(h);
+        return false;
+    }
+    uchar bytes[];
+    ArrayResize(bytes, sz);
+    const uint rd = FileReadArray(h, bytes, 0, sz);
+    FileClose(h);
+    if ((int)rd != sz) return false;
+    const string json = CharArrayToString(bytes, 0, sz, CP_UTF8);
+    const int n = FFParseCalendar(json);
+    if (n > 0 && !g_ff_active) {
+        g_ff_active = true;
+        Print("RiskCockpit : ForexFactory feed ACTIVE via the file bridge (", n,
+              " events) - FN-aligned news classification.");
+    }
+    return (n > 0);
+}
+void FFSaveToFile(const string json) { // warm cache for the next re-init (best effort)
+    const int h = FileOpen("ff_calendar_thisweek.json", FILE_WRITE | FILE_BIN);
+    if (h == INVALID_HANDLE) return;
+    uchar bytes[];
+    const int n = StringToCharArray(json, bytes, 0, WHOLE_ARRAY, CP_UTF8);
+    if (n > 1) FileWriteArray(h, bytes, 0, n - 1); // n includes the terminal NUL
+    FileClose(h);
+}
+void FetchFFCalendar(void) {
+    // (a) instant, network-free : repopulate the cache from the file bridge after
+    // a re-init (TF switch / input change wipes the globals).
+    if (ArraySize(g_ff_events) == 0)
+        FFLoadFromFile();
+    // (b) throttled web attempt : 1 / 60 min, stamp PERSISTED so re-inits do not
+    // re-block the UI thread ; 3 s timeout bounds the worst case.
+    if (g_ff_last_try == 0 && GlobalVariableCheck("RC_ff_lasttry"))
+        g_ff_last_try = (datetime)GlobalVariableGet("RC_ff_lasttry");
+    if (g_ff_last_try != 0 && TimeCurrent() - g_ff_last_try < 3600) return;
+    g_ff_last_try = TimeCurrent();
+    GlobalVariableSet("RC_ff_lasttry", (double)g_ff_last_try);
+    const string url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json";
+    char post[]; char result[]; string rhdr;
+    ResetLastError();
+    const int code = WebRequest("GET", url, "", 3000, post, result, rhdr);
+    if (code != 200 || ArraySize(result) == 0) {
+        const int err = GetLastError();
+        static bool s_warned = false;
+        if (!s_warned) { // one-shot : keep the cache (if any), MT5 calendar otherwise
+            s_warned = true;
+            if (code == -1 && err == 4014)
+                Print("RiskCockpit : WebRequest unavailable (err 4014). In an INDICATOR, MQL5 forbids ",
+                      "WebRequest even when whitelisted (EAs/scripts/services only) - refresh ",
+                      "MQL5\\Files\\ff_calendar_thisweek.json via a companion service/EA or a scheduled ",
+                      "download instead. If this build ever runs as an EA, also whitelist ",
+                      "https://nfs.faireconomy.media. News source now: ",
+                      (g_ff_active ? "FF file bridge." : "MT5 calendar fallback."));
+            else
+                Print("RiskCockpit : FF calendar fetch failed (http=", code, " err=", err,
+                      ") - news source now: ", (g_ff_active ? "FF cache/file." : "MT5 calendar fallback."));
+        }
+        return;
+    }
+    const string json = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+    const int n = FFParseCalendar(json);
+    if (n > 0) {
+        FFSaveToFile(json); // warm cache for re-inits + offline
+        if (!g_ff_active) {
+            g_ff_active = true;
+            Print("RiskCockpit : ForexFactory feed ACTIVE (", n, " events this week) - FN-aligned news classification.");
+        }
+    }
+}
+// F2 rule helpers - all window math in UTC (TimeGMT), returns/contract in SERVER time.
+datetime FFNextEvt(const bool restricted_class) {
+    // toggle contract identical to the MT5 fallback bodies (v2.02.05) : the HIGH
+    // toggle silences the restricted class, the MEDIUM toggle is already checked
+    // by the Live_NextMedNewsEvt caller.
+    if (restricted_class && !g_eff_news_high) return 0;
+    const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
+    const datetime now_utc = TimeGMT();
+    const int srv_off = (int)(TimeCurrent() - TimeGMT());
+    datetime best = 0;
+    for (int i = 0; i < ArraySize(g_ff_events); ++i) {
+        if (g_ff_events[i].restricted != restricted_class) continue;
+        // the RULE binds the traded symbol -> official FN currency<->instrument table ;
+        // the vigilance class stays symbol-agnostic (informational, like v2.02.05).
+        if (restricted_class && !NewsCcyAffectsSymbol(_Symbol, g_ff_events[i].ccy)) continue;
+        const datetime te = g_ff_events[i].t_utc;
+        if (now_utc >= te - 3600 && now_utc <= te + win_sec) {
+            if (best == 0 || te < best) best = te;
+        }
+    }
+    return (best == 0 ? 0 : best + srv_off);
+}
+bool FFInNewsWindow(void) {
+    if (!g_eff_news_high) return false; // same toggle contract as the MT5 fallback body
+    const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
+    const datetime now_utc = TimeGMT();
+    for (int i = 0; i < ArraySize(g_ff_events); ++i) {
+        if (!g_ff_events[i].restricted) continue;
+        if (!NewsCcyAffectsSymbol(_Symbol, g_ff_events[i].ccy)) continue;
+        if (now_utc >= g_ff_events[i].t_utc - win_sec && now_utc <= g_ff_events[i].t_utc + win_sec)
+            return true;
+    }
+    return false;
 }
 
 //+------------------------------------------------------------------+
@@ -4989,6 +5458,7 @@ bool Live_ComputeSuggestedLot(SuggestedLot& out) {
     out.free_margin_pct = 0.0;
     out.margin_bound = false;
     out.margin_insufficient = false;
+    out.floor_capped = false; // v2.13 B1
 
     if (g_profile.initial_balance <= 0.0)
         return false;
@@ -5020,6 +5490,20 @@ bool Live_ComputeSuggestedLot(SuggestedLot& out) {
     // +0.5 % once today's P&L exceeds +1 % of initial balance).
     out.budget_pct = Live_NextTradeBudgetPct();
     out.risk_budget_money = g_profile.initial_balance * out.budget_pct / 100.0;
+    // v2.13 FEATURE B1 : SL-vs-LIMIT guard - the worst-case loss of THIS trade
+    // (at its SL) may never exceed 80% of the room to the nearest active limit :
+    // 20% stays in reserve so the account survives the hit. When the configured
+    // risk fits under the cap the proposal is unchanged ; otherwise the LOT is
+    // reduced so the loss at the recommended SL equals exactly 80% x room.
+    out.floor_capped = false;
+    {
+        const double room = Live_NearestLimitRoom();
+        if (room >= 0.0 && out.risk_budget_money > 0.80 * room) {
+            out.risk_budget_money = 0.80 * room;
+            out.budget_pct = 100.0 * out.risk_budget_money / g_profile.initial_balance;
+            out.floor_capped = true;
+        }
+    }
     const double lots_by_risk = out.risk_budget_money / out.money_per_lot_at_sl;
 
     // ====== Margin budget (M2) : native OrderCalcMargin (incl. leverage) ====
@@ -5173,146 +5657,172 @@ void RefreshNewsZonesForChart(const long chart_id) {
     int win_min = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 15);
     const int win_sec = win_min * 60;
 
-    // Query window : today_start -> +24 h ahead.
-    MqlDateTime mdt;
-    TimeToStruct(TimeCurrent(), mdt);
-    mdt.hour = 0;
-    mdt.min = 0;
-    mdt.sec = 0;
-    const datetime t_from = StructToTime(mdt);
-    const datetime t_to = TimeCurrent() + 24 * 60 * 60;
+    // v2.03 F4 + v2.03.05c : ONE unified event list (FF feed primary / MT5
+    // calendar fallback) feeding TWO surfaces with one colour code :
+    //   1. GROUPED icons time-anchored on the axis - one icon per (release time
+    //      x currency x level) group, glyph + visible ccy code, titles on the
+    //      tooltip ; past groups = dimmed, at their own hour ;
+    //   2. window VLINEs + band (upcoming only, unchanged look).
+    // NO corner list (JR) : the timeline IS the consolidated news display.
 
-    MqlCalendarValue values[];
-    if (CalendarValueHistory(values, t_from, t_to, NULL, NULL) <= 0)
-        return;
+    // v2.13 FEATURE A : hard time window - the timeline keeps 48 h of PAST events
+    // (dimmed icons at their own hour) and 24 h of FUTURE ones ; anything beyond
+    // either bound is dropped (anti-clutter). Bounds are relative to `now`, so
+    // the FF cache filter (server time = t_utc + srv_off) and the MT5 query use
+    // the SAME window ; upcoming markers stay <= 24 h by construction.
+    const datetime now    = TimeCurrent();
+    const datetime t_from = now - 48 * 60 * 60;
+    const datetime t_to   = now + 24 * 60 * 60;
 
-    const string chart_sym = ChartSymbol(chart_id);
-    if (chart_sym == "")
-        return;
+    // --- build the unified list ---
+    NewsDispItem disp[];
+    int nd = 0;
+    if (g_ff_active) {
+        const int srv_off = (int)(TimeCurrent() - TimeGMT()); // FF times = UTC ; chart axis = SERVER time
+        for (int i = 0; i < ArraySize(g_ff_events); ++i) {
+            const datetime ts = g_ff_events[i].t_utc + srv_off;
+            if (ts < t_from || ts > t_to) continue;
+            if (g_ff_events[i].restricted  && !g_eff_news_high) continue; // level toggles
+            if (!g_ff_events[i].restricted && !g_eff_news_med)  continue;
+            ArrayResize(disp, nd + 1);
+            disp[nd].t_srv      = ts;
+            disp[nd].ccy        = g_ff_events[i].ccy;
+            disp[nd].title      = g_ff_events[i].title;
+            disp[nd].restricted = g_ff_events[i].restricted;
+            nd++;
+        }
+    } else {
+        MqlCalendarValue values[];
+        if (CalendarValueHistory(values, t_from, t_to, NULL, NULL) > 0) {
+            for (int i = 0; i < ArraySize(values); ++i) {
+                MqlCalendarEvent ev;
+                if (!CalendarEventById(values[i].event_id, ev))
+                    continue;
+                const bool ev_high = (ev.importance == CALENDAR_IMPORTANCE_HIGH);
+                const bool ev_med  = (ev.importance == CALENDAR_IMPORTANCE_MODERATE);
+                if (!ev_high && !ev_med) continue;         // drop LOW
+                if (ev_high && !g_eff_news_high) continue; // V1.29 R : level toggles
+                if (ev_med  && !g_eff_news_med)  continue;
+                MqlCalendarCountry country;
+                if (!CalendarCountryById(ev.country_id, country))
+                    continue;
+                ArrayResize(disp, nd + 1);
+                disp[nd].t_srv      = values[i].time;
+                disp[nd].ccy        = country.currency;
+                disp[nd].title      = ev.name;
+                disp[nd].restricted = ev_high;
+                nd++;
+            }
+        }
+    }
+    if (nd == 0) { ChartRedraw(chart_id); return; }
 
+    // chart price range : needed for the band rectangle only (VLINEs/labels are
+    // time- or pixel-anchored) -> a bad range just skips the bands, never bails.
     const double price_hi = ChartGetDouble(chart_id, CHART_PRICE_MAX);
     const double price_lo = ChartGetDouble(chart_id, CHART_PRICE_MIN);
-    if (price_hi <= price_lo)
-        return;
-    const double range = price_hi - price_lo;
-    const double flag_price = price_lo + range * 0.04;
+    const bool   have_price = (price_hi > price_lo);
 
-    const datetime now = TimeCurrent();
-    // N2/N7 : anti-collision. Events whose time falls within collision_sec of
-    // the previous drawn one are pushed into stacked vertical "lanes" so the
-    // labels + bottom icons never overlap (scales with the chart timeframe).
-    // AUDIT 2026-06-07 fix #6 : LOT E1 added MEDIUM (~2x density). The old
-    // `PeriodSeconds*12` collision window = 12 h on H1 / 2 days on H4 and the
-    // lane++ counter had no cap -> flags spilled OFF-CHART on the most-used
-    // timeframes. Cap collision at 2 bars (still avoids label overlap) AND
-    // wrap lanes at 5 (5 lanes is the panel's vertical news budget).
+    // v2.03.05c (JR) : sort chronologically - the (time x ccy x level) grouping
+    // and the lane stagger both need time order (the FF feed is usually ordered,
+    // the MT5 calendar is ; this makes it a guarantee).
+    for (int i = 0; i < nd - 1; ++i)
+        for (int j = i + 1; j < nd; ++j)
+            if (disp[j].t_srv < disp[i].t_srv) {
+                const NewsDispItem tmp = disp[i]; disp[i] = disp[j]; disp[j] = tmp;
+            }
+
+    // v2.03.05c FIX 2 (JR) : GROUP the events by (release time x currency x level)
+    // - ONE icon per group on the timeline, never one per event. Example : a 04:00
+    // CNY drop of 1 high + 3 medium = exactly TWO icons at the 04:00 x (red
+    // high-CNY + amber medium-CNY) ; two countries at the same time = separate
+    // icons per (ccy x level). The icon shows a VISIBLE currency code ; the
+    // group's titles live in the tooltip (FIX 3). NO corner list of any kind
+    // (FIX 1) - the timeline IS the consolidated display.
+    datetime gr_t[]; string gr_ccy[]; bool gr_restr[]; string gr_titles[]; int gr_cnt[];
+    int ng = 0;
+    for (int i = 0; i < nd; ++i) {
+        int g = -1;
+        for (int k = ng - 1; k >= 0; --k) {      // sorted input : candidates sit at the tail
+            if (gr_t[k] != disp[i].t_srv) break; // earlier timestamp -> no more matches
+            if (gr_ccy[k] == disp[i].ccy && gr_restr[k] == disp[i].restricted) { g = k; break; }
+        }
+        if (g < 0) {
+            ArrayResize(gr_t, ng + 1);     ArrayResize(gr_ccy, ng + 1);
+            ArrayResize(gr_restr, ng + 1); ArrayResize(gr_titles, ng + 1);
+            ArrayResize(gr_cnt, ng + 1);
+            gr_t[ng] = disp[i].t_srv; gr_ccy[ng] = disp[i].ccy;
+            gr_restr[ng] = disp[i].restricted; gr_titles[ng] = ""; gr_cnt[ng] = 0;
+            g = ng;
+            ng++;
+        }
+        gr_cnt[g]++;
+        if (gr_cnt[g] <= 5) // MT5 truncates tooltips : 5 titles + "- +N" below (FIX 3 cap)
+            gr_titles[g] = gr_titles[g] + "\n- " + disp[i].title;
+    }
+
+    // one icon (+ upcoming window marks) per GROUP. FIX 4 : baseline LOWERED
+    // (0.04 -> 0.02 of the range) so the top lane stays clear of the candles -
+    // the CHART_CHANGE repin handler uses the SAME constants (kept in sync).
+    const double range      = (have_price ? price_hi - price_lo : 0.0);
+    const double flag_price = (have_price ? price_lo + range * 0.02 : 0.0);
     const int collision_sec = MathMax(15 * 60,
                                       (int)PeriodSeconds((ENUM_TIMEFRAMES)ChartPeriod(chart_id)) * 2);
     datetime last_t = 0;
     int lane = 0;
-
     int drawn = 0;
-    for (int i = 0; i < ArraySize(values); ++i) {
-        MqlCalendarEvent ev;
-        if (!CalendarEventById(values[i].event_id, ev))
-            continue;
-        // LOT E B-NEWS-MEDHIGH : show MEDIUM + HIGH impact (drop LOW only). The
-        // visual distinction (HIGH = red triangle, MEDIUM = amber diamond) is
-        // already wired below ; the bottom-line stats / countdown still gate
-        // on HIGH only.
-        const bool ev_high = (ev.importance == CALENDAR_IMPORTANCE_HIGH);
-        const bool ev_med  = (ev.importance == CALENDAR_IMPORTANCE_MODERATE);
-        if (!ev_high && !ev_med) continue;         // drop LOW
-        if (ev_high && !g_eff_news_high) continue; // V1.29 R : level toggles
-        if (ev_med  && !g_eff_news_med)  continue;
-        MqlCalendarCountry country;
-        if (!CalendarCountryById(ev.country_id, country))
-            continue;
+    for (int i = 0; i < ng; ++i) {
+        const datetime t_evt = gr_t[i];
+        const string id_suffix = IntegerToString(i);
+        const bool   ev_past   = (t_evt + win_sec < now);
+        // FIX 3 : tooltip = "<ccy> <heure>" header, then one "- <title>" per line.
+        string gr_tip = gr_ccy[i] + " " + TimeToString(t_evt, TIME_MINUTES) + gr_titles[i];
+        if (gr_cnt[i] > 5)
+            gr_tip += "\n- +" + IntegerToString(gr_cnt[i] - 5) + " " + Tr("news_more");
 
-        const datetime t_evt = values[i].time;
-        const string id_suffix = IntegerToString((int)values[i].id);
-        const bool upcoming = (t_evt + win_sec >= now);
-
-        // N2/N7 : lane assignment (events come time-sorted from the calendar).
-        // fix #6 : wrap lanes at 5 so news clusters can't push flags off-chart.
-        if (last_t != 0 && (t_evt - last_t) < collision_sec)
-            lane = (lane + 1) % 5;
-        else
-            lane = 0;
-        last_t = t_evt;
-
-        // Impact icon (HIGH = down triangle red, MEDIUM = diamond amber).
-        string flag_glyph;
-        color flag_color;
-        if (ev.importance == CALENDAR_IMPORTANCE_HIGH) {
-            flag_glyph = ShortToString((ushort)0x25BC);
-            flag_color = g_theme.red;
-        } else {
-            flag_glyph = ShortToString((ushort)0x25C6);
-            flag_color = g_theme.warn;
+        if (have_price) { // timeline icon : one per group, currency code VISIBLE
+            if (last_t != 0 && (t_evt - last_t) < collision_sec) lane = (lane + 1) % 5;
+            else lane = 0;
+            last_t = t_evt;
+            const double flag_y  = flag_price + range * 0.018 * lane; // compact stagger (same-time groups fan out)
+            const string flag_id = "RC_NEWS_FLAG_" + IntegerToString(lane) + "_" + id_suffix; // name feeds the CHART_CHANGE repin handler
+            ObjectCreate(chart_id, flag_id, OBJ_TEXT, 0, t_evt, flag_y);
+            ObjectSetInteger(chart_id, flag_id, OBJPROP_TIME, t_evt);
+            ObjectSetDouble (chart_id, flag_id, OBJPROP_PRICE, flag_y);
+            ObjectSetString (chart_id, flag_id, OBJPROP_TEXT, // FIX 2 : glyph + ccy code, no hover needed
+                             ShortToString((ushort)(gr_restr[i] ? 0x25BC : 0x25C6)) + " " + gr_ccy[i]);
+            ObjectSetInteger(chart_id, flag_id, OBJPROP_COLOR,
+                             ev_past ? g_theme.text_dim // past = dimmed, AT its own time (shape = level)
+                                     : (gr_restr[i] ? g_theme.red : g_theme.warn));
+            ObjectSetInteger(chart_id, flag_id, OBJPROP_FONTSIZE, 10);
+            ObjectSetString (chart_id, flag_id, OBJPROP_FONT, "Consolas");
+            ObjectSetInteger(chart_id, flag_id, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
+            ObjectSetInteger(chart_id, flag_id, OBJPROP_BACK, false);
+            ObjectSetInteger(chart_id, flag_id, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(chart_id, flag_id, OBJPROP_HIDDEN, true);
+            ObjectSetString (chart_id, flag_id, OBJPROP_TOOLTIP, gr_tip);
         }
 
-        // --- Bottom FLAG (icon + TIME + currency). N4 : time ONLY here.
-        //     N6 : bigger font. N7 : staggered up by lane to avoid overlap. ---
-        const double flag_y = flag_price + range * 0.018 * lane; // N9 : compact stacking
-        // V1.29 W : encode the lane in the name (RC_NEWS_FLAG_<lane>_<id>) so the
-        // CHARTEVENT_CHART_CHANGE reposition can re-apply the per-lane stagger.
-        const string flag_id = "RC_NEWS_FLAG_" + IntegerToString(lane) + "_" + id_suffix;
-        ObjectCreate(chart_id, flag_id, OBJ_TEXT, 0, t_evt, flag_y);
-        ObjectSetInteger(chart_id, flag_id, OBJPROP_TIME, t_evt);
-        ObjectSetDouble(chart_id, flag_id, OBJPROP_PRICE, flag_y);
-        ObjectSetString(chart_id, flag_id, OBJPROP_TEXT,
-                        flag_glyph + " " + TimeToString(t_evt, TIME_MINUTES) + " " +
-                        country.currency + " " + NewsAbbrev(ev.name));
-        ObjectSetInteger(chart_id, flag_id, OBJPROP_COLOR, flag_color);
-        ObjectSetInteger(chart_id, flag_id, OBJPROP_FONTSIZE, 10); // N6
-        ObjectSetString(chart_id, flag_id, OBJPROP_FONT, "Consolas");
-        ObjectSetInteger(chart_id, flag_id, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
-        ObjectSetInteger(chart_id, flag_id, OBJPROP_BACK, false);
-        ObjectSetInteger(chart_id, flag_id, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(chart_id, flag_id, OBJPROP_HIDDEN, true);
-        // Tooltip (2026-05-21) : FULL event text on mouse hover -> replaces the
-        // permanent top caption. country + full name + time.
-        ObjectSetString(chart_id, flag_id, OBJPROP_TOOLTIP,
-                        country.currency + " " + ev.name + "  @ " + TimeToString(t_evt, TIME_MINUTES));
-
-        // --- V1.29 U : TWO full-height VLINEs marking the START and END of the
-        //     news window (t_evt -/+ win_sec), for upcoming HIGH AND MEDIUM events.
-        //     The bottom icon (at t_evt) sits between the two lines. Visible at any
-        //     TF/zoom. HIGH = red solid w2 ; MEDIUM = amber dotted w1.
-        //     N5 : past events keep the icon only (no lines).
-        if (upcoming) {
-            const color  vl_clr   = (ev_high ? g_theme.red : g_theme.warn);
-            const int    vl_width = (ev_high ? 2 : 1);
-            const int    vl_style = (ev_high ? STYLE_SOLID : STYLE_DOT);
-            const string vl_tip   = country.currency + " " + ev.name + "  @ " + TimeToString(t_evt, TIME_MINUTES);
-            datetime vl_t[2];  vl_t[0] = t_evt - win_sec;                 vl_t[1] = t_evt + win_sec;
-            string   vl_id[2]; vl_id[0] = "RC_NEWS_VLN_S_" + id_suffix;   vl_id[1] = "RC_NEWS_VLN_E_" + id_suffix;
-            for (int v = 0; v < 2; ++v) {
-                ObjectCreate(chart_id, vl_id[v], OBJ_VLINE, 0, vl_t[v], 0);
-                ObjectSetInteger(chart_id, vl_id[v], OBJPROP_TIME, vl_t[v]);
-                ObjectSetInteger(chart_id, vl_id[v], OBJPROP_COLOR, vl_clr);
-                ObjectSetInteger(chart_id, vl_id[v], OBJPROP_WIDTH, vl_width);
-                ObjectSetInteger(chart_id, vl_id[v], OBJPROP_STYLE, vl_style);
-                ObjectSetInteger(chart_id, vl_id[v], OBJPROP_BACK, true);
-                ObjectSetInteger(chart_id, vl_id[v], OBJPROP_SELECTABLE, false);
-                ObjectSetInteger(chart_id, vl_id[v], OBJPROP_HIDDEN, true);
-                ObjectSetString(chart_id, vl_id[v], OBJPROP_TOOLTIP, vl_tip);
-            }
+        if (ev_past) continue; // past : icon only (no window lines)
+        const color  vl_clr   = (gr_restr[i] ? g_theme.red : g_theme.warn);
+        const int    vl_width = (gr_restr[i] ? 2 : 1);
+        const int    vl_style = (gr_restr[i] ? STYLE_SOLID : STYLE_DOT);
+        datetime vl_t[2];  vl_t[0] = t_evt - win_sec;                 vl_t[1] = t_evt + win_sec;
+        string   vl_id[2]; vl_id[0] = "RC_NEWS_VLN_S_" + id_suffix;   vl_id[1] = "RC_NEWS_VLN_E_" + id_suffix;
+        for (int v = 0; v < 2; ++v) {
+            ObjectCreate(chart_id, vl_id[v], OBJ_VLINE, 0, vl_t[v], 0);
+            ObjectSetInteger(chart_id, vl_id[v], OBJPROP_TIME, vl_t[v]);
+            ObjectSetInteger(chart_id, vl_id[v], OBJPROP_COLOR, vl_clr);
+            ObjectSetInteger(chart_id, vl_id[v], OBJPROP_WIDTH, vl_width);
+            ObjectSetInteger(chart_id, vl_id[v], OBJPROP_STYLE, vl_style);
+            ObjectSetInteger(chart_id, vl_id[v], OBJPROP_BACK, true);
+            ObjectSetInteger(chart_id, vl_id[v], OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(chart_id, vl_id[v], OBJPROP_HIDDEN, true);
+            ObjectSetString(chart_id, vl_id[v], OBJPROP_TOOLTIP, gr_tip);
         }
-
-        // --- Vertical BAND + top caption : ONLY upcoming HIGH-impact events.
-        //     N5 : PAST events keep ONLY the bottom icon (no band, no caption)
-        //     to avoid clutter. ---
-        if (upcoming && ev.importance == CALENDAR_IMPORTANCE_HIGH) {
-            const datetime t1 = t_evt - win_sec;
-            const datetime t2 = t_evt + win_sec;
-
+        if (gr_restr[i] && have_price) { // band = RULE groups only (N13 outline style kept)
             const string band_id = "RC_NEWS_BAND_" + id_suffix;
-            ObjectCreate(chart_id, band_id, OBJ_RECTANGLE, 0, t1, price_hi, t2, price_lo);
-            // N13 : attenuated band - OUTLINE ONLY (no opaque fill) in a muted
-            // amber. Marks the news window with soft vertical edges, far less
-            // aggressive on the eyes than a solid block.
+            ObjectCreate(chart_id, band_id, OBJ_RECTANGLE, 0, vl_t[0], price_hi, vl_t[1], price_lo);
             ObjectSetInteger(chart_id, band_id, OBJPROP_COLOR, (color)0x000088CC);
             ObjectSetInteger(chart_id, band_id, OBJPROP_BGCOLOR, (color)0x000088CC);
             ObjectSetInteger(chart_id, band_id, OBJPROP_FILL, false);
@@ -5321,16 +5831,14 @@ void RefreshNewsZonesForChart(const long chart_id) {
             ObjectSetInteger(chart_id, band_id, OBJPROP_WIDTH, 1);
             ObjectSetInteger(chart_id, band_id, OBJPROP_SELECTABLE, false);
             ObjectSetInteger(chart_id, band_id, OBJPROP_HIDDEN, true);
-
-            // 2026-05-21 : the top text caption is REMOVED. The full event text
-            // now lives in the bottom icon's tooltip (OBJPROP_TOOLTIP, on hover).
-            // The band rectangle above stays exactly as-is.
         }
-
         drawn++;
-        if (drawn >= 60) // cap (all-currency coverage)
+        if (drawn >= 60) // cap on UPCOMING window markers (all-currency coverage)
             break;
     }
+
+    // v2.03.05c FIX 1 (JR) : NO corner news list of any kind. The (time x ccy x
+    // level) grouping above IS the consolidated display, on the timeline itself.
     ChartRedraw(chart_id);
 }
 
@@ -5539,6 +6047,11 @@ void RefreshFooterMetrics(void) {
             if (s.margin_insufficient) {
                 l2_flag = Tr("f_insuf");
                 l2_clr = g_theme.red;
+            } else if (s.floor_capped) { // v2.13 B1 : survival cap binds -> amber + explain ;
+                // ZERO room (limit hit) -> RED : the below-min bump-up may still print a
+                // broker-min lot, but nothing is tradeable on a breached/at-floor account.
+                l2_flag = Tr("f_floorcap");
+                l2_clr = (s.risk_budget_money <= 0.005 ? g_theme.red : g_theme.warn);
             } else if (s.reduce_flag) {
                 l2_flag = Tr("f_reduce");
                 l2_clr = g_theme.warn;
@@ -5943,6 +6456,23 @@ void InitI18n(void) {
                              "- capital firme protégé",
                              "- capital protegido");
     AddTr("news_med_check",  "Medium - check FN",      "Medium - vérifier FN","Medium - verificar FN");
+    AddTr("news_more",       "more",                   "autres",              "más"); // v2.03.05c : grouped-icon tooltip cap suffix
+    // --- v2.13 FEATURE B : SL-vs-limit survival guard (20% margin) ---
+    AddTr("slguard",
+          "SL too low - breach risk : raise the SL to keep a 20% margin",
+          "SL trop bas - risque de brèche : remonte la SL pour garder 20% de marge",
+          "SL muy bajo - riesgo de brecha : sube el SL para mantener 20% de margen");
+    AddTr("f_floorcap",
+          "[lot capped : worst-case loss limited to 80% of the room to the nearest limit - 20% survival margin]",
+          "[lot plafonné : perte pire-cas limitée à 80% de la marge vers la limite la plus proche - 20% de réserve]",
+          "[lote limitado : pérdida máxima al 80% del margen hasta el límite más cercano - 20% de reserva]");
+    // --- v2.03 F3 : news source badge (ForexFactory feed vs MT5-calendar fallback) ---
+    AddTr("news_src_ff",     "news: FF (ForexFactory feed, FN-aligned)",
+                             "news: FF (flux ForexFactory, aligné FN)",
+                             "news: FF (feed ForexFactory, alineado FN)");
+    AddTr("news_src_mt",     "news: MT (MT5 calendar fallback)",
+                             "news: MT (calendrier MT5, secours)",
+                             "news: MT (calendario MT5, respaldo)");
     AddTr("news_rule_tip",
           "40% rule = HIGH-impact only (5min +/-, winning-trade profits). Medium = check the FN calendar/Clarity (MQL5 under-classes some central-bank speeches).",
           "Règle 40% = high-impact (5min +/-, profits gagnants). Medium = à vérifier sur le calendrier/Clarity FN (MQL5 sous-classe parfois les discours banques centrales).",
@@ -6625,7 +7155,7 @@ void SnapSizeToPlan(const ENUM_FN_PLAN p) {
     const int n = ValidSizesForPlan(p, s);
     for (int i = 0; i < n; ++i)
         if ((int)MathRound(s[i]) == (int)MathRound(g_eff_size)) return; // already valid
-    if (n > 0) { g_eff_size = s[0]; GlobalVariableSet("RC_size", g_eff_size); }
+    if (n > 0) { g_eff_size = s[0]; GVSetLogin("RC_size", g_eff_size); } // v2.13 C : per-login
 }
 // V1.27 fix : keep the phase legal for the plan. Only Stellar Instant uses the
 // INSTANT phase (3) ; every other plan (esp. FTMO, which has no Instant profile)
@@ -6634,7 +7164,7 @@ void SnapSizeToPlan(const ENUM_FN_PLAN p) {
 void SnapPhaseToPlan(const ENUM_FN_PLAN p) {
     if (p == FN_PLAN_STELLAR_INSTANT)  g_eff_phase = 3; // INSTANT (single-phase)
     else if (g_eff_phase == 3)         g_eff_phase = 2; // INSTANT -> FUNDED
-    GlobalVariableSet("RC_phase", (double)g_eff_phase);
+    GVSetLogin("RC_phase", (double)g_eff_phase); // v2.13 C : per-login
 }
 // V1.28 : size label, with the Personal "Auto" sentinel (g_eff_size <= 0).
 string SizeLabel(void) {
