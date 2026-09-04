@@ -84,6 +84,23 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 2. Log
 
+### v2.17.09 — 2026-09-04 — restore the UTF-8 BOM on the source
+
+`Indicators/RiskCockpit.mq5` lost its BOM during today's edits (it went out in v2.14.06). The file
+stayed valid UTF-8 and every compile passed, so nothing failed loudly — but MetaEditor treats a
+BOM-less file as ANSI, which would have turned every accented literal (`Éligibilité`, `Thème`,
+`PRECAUCIÓN`) into mojibake in the panel. Silent corruption, caught by the pre-commit ritual, not
+by the compiler.
+
+The pre-commit check is now: **single** BOM (a doubled one is `error 110: unknown symbol 0xFEFF`,
+which is how the first fix attempt failed), accented probes present, balanced braces/parens, and
+`.ex5` newer than `.mq5`.
+
+`Libraries/RC_ShellUI.mqh` holds zero non-ASCII bytes by design, so its lack of a BOM is
+harmless — its French fallbacks are written unaccented.
+
+Compiled `0 errors, 0 warnings`.
+
 ### v2.16.08 — 2026-09-04 — shell tooltips go through the product's i18n
 
 The 40-odd hover bubbles were the last block of hard-coded French in the shell. They now flow
