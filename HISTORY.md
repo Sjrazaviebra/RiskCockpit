@@ -121,8 +121,8 @@ décompilable, donc il fallait savoir ce qu'il embarque. Scan des sources **et**
 du binaire (ASCII + UTF-16), avec contrôle positif préalable — sans lui, un
 verdict « propre » ne vaut rien.
 
-- **Trouvé** : `// (login 11986032, Instant 2K) : peak 2003.28 -> floor
-  1883.28` — un **numéro de compte MT5 en clair**, avec la taille du compte et
+- **Trouvé** : un commentaire portait un **numéro de compte MT5 en clair**
+  (masqué ici : un changelog qui cite la valeur la republie), avec la taille et
   son equity, dans un commentaire du dépôt public. Le mandat l'interdit
   explicitement. Retiré ; l'information utile (l'oracle de calcul du plancher)
   reste, l'identifiant part.

@@ -185,8 +185,16 @@ def run(root):
             ("email perso", r"(?i)[\w.+-]+@(?:gmail|yahoo|hotmail|outlook)\.[a-z]{2,}"),
             ("login MT5", r"(?i)\blogin\s*:?\s*\d{6,10}\b|\bcompte\s+\d{7,10}\b")]
     leaks = []
-    for rel in (IND, SHELL, os.path.join("Libraries", "CChallengeProfileCatalog.mqh"),
-                os.path.join("Services", "RCNewsFeeder.mq5"), "README.md"):
+    # every text file, not a hand-picked list : the leak that got through was in
+    # HISTORY.md - the changelog that described its own removal.
+    scanned = []
+    for base, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d != '.git']
+        for f in files:
+            if not f.lower().endswith(('.mq5', '.mqh', '.md', '.txt', '.py', '.json')):
+                continue
+            scanned.append(os.path.relpath(os.path.join(base, f), root))
+    for rel in scanned:
         txt = read(root, rel)
         if txt is None:
             continue
@@ -208,7 +216,8 @@ def run(root):
                     if re.search(rx, txt):
                         leaks.append("RiskCockpit.ex5:" + label)
             report("fuite de donnees perso", not leaks,
-                   "sources + binaire scannes" if not leaks else " | ".join(sorted(set(leaks))))
+                   ("%d fichiers + binaire scannes" % len(scanned)) if not leaks
+                   else " | ".join(sorted(set(leaks))))
 
     # 10. the binary must CLAIM the same version as the source. Dates alone let
     #     a v2.02.03 binary sit next to a v3 source for two months : both files

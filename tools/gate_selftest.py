@@ -21,7 +21,11 @@ IND = os.path.join("Indicators", "RiskCockpit.mq5")
 
 def mut_bom(b):    return b'\xef\xbb\xbf' + b                      # double BOM
 def mut_input(b):  return b.replace(b'input bool ', b'input int InpDeadOne = 3;\r\ninput bool ', 1)
-def mut_leak(b):   return b.replace(b'#property version', b'// login 11986032\r\n#property version', 1)
+def mut_leak(b):
+    # built by concatenation on purpose : this FILE must not itself contain a
+    # string shaped like a leak, or the gate would flag its own test harness.
+    fake = b'// log' + b'in ' + b'12345678'
+    return b.replace(b'#property version', fake + b'\r\n#property version', 1)
 def mut_label(b):  return b.replace(b'g_shell.SetLabel(RCL_PAYOUT,', b'//g_shell.SetLabel(RCL_PAYOUT,', 1)
 def mut_key(b):    return re.sub(rb'    AddTr\("shl_pyramid",.*?\);\r\n', b'', b, count=1, flags=re.S)
 def mut_brace(b):  return b.replace(b'int OnInit(void) {', b'int OnInit(void) { if (true) {', 1)
