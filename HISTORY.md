@@ -86,6 +86,33 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.06.17 - parite : ce que la bascule v3 avait rendu MUET
+
+Audit demande par JR ("verifie que tu as bien ajoute tous les outils de
+l'ancien shell"). Trois fonctions vivaient DANS le corps legacy que la garde
+`if (InpShellV2) return;` court-circuite : elles ne bugguaient pas, elles ne
+tournaient plus du tout.
+
+- **Alertes son + Telegram MUETTES depuis la bascule** : elles etaient portees
+  par `UpdateRow()`, appele uniquement par l'ancien `RefreshPanel()`. Nouveau
+  `ShellRuleAlerts()` : memes seuils (80 % / 100 %), meme registre `g_rows`,
+  meme cooldown Telegram par regle, mais alimente par le modele du shell.
+- **Conseiller PYRAMIDE / panier perdu** : `RefreshPyramidLine()` ecrivait dans
+  `footer_l4`, un label qui n'existe plus. Refactorise en
+  `BuildPyramidLine(line, stat)` ; le shell l'affiche dans la section
+  POSITIONS (ou ajouter, ou remonter TOUS les SL, ce que ca verrouille).
+- **Risque de report week-end invisible** : l'horloge legacy clignotait
+  "WEEKEND HOLD / FLATTEN" et declenchait l'alerte. Le shell n'avait ni l'un
+  ni l'autre -> le bandeau de securite porte desormais l'avertissement, et
+  `FireWeekendAlert()` est appele depuis le chemin du shell.
+- **Lignes de break-even figees** : redessinees a chaque refresh du shell.
+- **Horloge de la navbar teintee** rouge/ambre quand un evenement contraignant
+  tombe dans l'heure (le compte a rebours, lui, reste dans la cellule NEWS).
+- Compilation : `Result: 0 errors, 0 warnings`.
+
+> Travail desormais sur la branche **dev** (regle JR du 04/09) ; `main` ne
+> recoit que les versions X.YZ abouties.
+
 ### v3.05.16 - le tableau flottant devient permanent (retour JR, 5 defauts)
 
 - **Le flottant disparaissait** : sa geometrie (`m_fltOn`, `m_fltH`) n'etait

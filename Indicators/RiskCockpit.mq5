@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.05"
+#property version "3.06"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -808,7 +808,7 @@ string EscapeJson(const string s);
 bool SendTelegramMessage(const string text);
 
 // Safe Pyramiding advisor (D, art. 22187)
-void RefreshPyramidLine(void);
+bool BuildPyramidLine(string &line, int &stat);
 
 // Post-violation tightening (B7)
 double EffectiveMarginCap(void);
@@ -3137,6 +3137,11 @@ void BuildDeckData(RCDeckData &d) {
     d.tradesToday = Live_TradesToday();
     d.tradesCap   = g_profile.hyperactivity_trades_per_day;
     d.posWorst    = (d.posCount <= 0 ? 3 : (d.posNoSl ? 2 : (d.slGuard ? 1 : 0)));
+    d.pyrOn       = BuildPyramidLine(d.pyrText, d.pyrStat);
+    // v3.06 : week-end hold. The legacy clock blinked it AND fired the alert ;
+    // the shell had neither. The alert keeps its own once-per-window latch.
+    d.weekendHold = IsWeekendHoldRisk();
+    if (d.weekendHold) FireWeekendAlert(); else g_weekend_warned = false;
     // --- lot advisor (cell LOT) -------------------------------------------
     SuggestedLot s;
     if (Live_ComputeSuggestedLot(s)) {
@@ -3691,6 +3696,39 @@ void ShellSyncMaxEdit(const double lot, const int digits) {
     ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_shell.EditLineColor());
     ObjectSetString (0, id, OBJPROP_TEXT, DoubleToString(lot, digits));
 }
+// v3.06 PARITY : status-change alerts (sound + Telegram) used to ride inside
+// UpdateRow, in the legacy refresh the shell short-circuits - so they had gone
+// SILENT since the switch to v3, with nothing on screen to say so. They now run
+// on the shell's own model, through the SAME registry (g_rows), the same
+// thresholds and the same per-rule Telegram cooldown.
+void ShellRuleAlerts(const RCDeckData &d) {
+    if (!g_eff_risktools) return;
+    for (int i = 0; i < RC_RULE_COUNT; ++i) {
+        double used = -1.0, cap = 0.0;
+        string txt = "";
+        const string k = g_rows[i].key;
+        if (k == "rule_margin_cum")      { used = d.marginPct; cap = d.marginCap; }
+        else if (k == "rule_margin_pt")  { used = Live_PerTradeMarginPct();
+                                           cap  = g_profile.margin_recommended_per_trade_max_pct; }
+        else if (k == "rule_risk_cum")   { used = d.riskPct;   cap = d.riskCap; }
+        else if (k == "rule_daily_dd")   { if (!d.dailyApplies) { g_last_status[i] = RC_STATUS_NA; continue; }
+                                           used = d.dailyPct;  cap = d.dailyCap; }
+        else if (k == "rule_overall_dd") { if (!d.overallApplies) { g_last_status[i] = RC_STATUS_NA; continue; }
+                                           used = d.overallPct; cap = d.overallCap; }
+        else if (k == "rule_qs")         { used = d.qsPct;     cap = d.qsCap; }
+        else if (k == "rule_hyper")      { used = (double)d.tradesToday; cap = (double)d.tradesCap; }
+        else if (k == "rule_msgs")       { used = (double)d.msgsToday;   cap = (double)d.msgsCap; }
+        else continue;                   // target / news rows : informational, never alert
+        if (used < 0.0 || cap <= 0.0) { g_last_status[i] = RC_STATUS_NA; continue; }
+        txt = FormatPct(used) + " / " + FormatPct(cap);
+        g_rows[i].value_pct  = used;     // the registry stays the ONE source the
+        g_rows[i].max_pct    = cap;      // Telegram message is built from
+        g_rows[i].value_text = txt;
+        g_rows[i].status     = ComputeRangeStatus(used, cap, 0.80, 1.00);
+        TryFireSoundAlert(i, g_rows[i].status);
+    }
+}
+
 void ShellRefresh(void) {
     if (!InpShellV2) return;
     ShellApplyCfg(g_shell.PendCfgTake());  // consume a toggle click before rendering
@@ -3706,6 +3744,8 @@ void ShellRefresh(void) {
     BuildDeckData(d);
     g_shell.SetData(d);
     RefreshSlLines();                    // chart-side advisory lines stay live under the shell
+    if (g_be_visible) DrawBreakevenLines();   // v3.06 : BE lines follow the basket again
+    ShellRuleAlerts(d);                  // v3.06 : sound + Telegram were silent under v3
     if (g_shell.Created()) g_shell.Tick();
     ShellSyncLotEdit(d.sugLot, d.lotDigits);   // AFTER the render : the rect is known
     ShellSyncMaxEdit(d.maxLot, d.maxLotDigits);
@@ -6782,7 +6822,15 @@ void RefreshFooterMetrics(void) {
 
     // Pyramid advisor (D, art. 22187) - footer row 4, only when enabled.
     if (InpEnablePyramidSafe)
-        RefreshPyramidLine();
+        {   string pline = ""; int pstat = 2;
+            BuildPyramidLine(pline, pstat);
+            const string plid = RC_PREFIX + "footer_l4";
+            if (ObjectFind(0, plid) >= 0) {
+                ObjectSetString(0, plid, OBJPROP_TEXT, "Pyramid: " + pline);
+                ObjectSetInteger(0, plid, OBJPROP_COLOR,
+                    (pstat == 0 ? g_theme.ok : (pstat == 1 ? g_theme.warn : g_theme.text_dim)));
+            }
+        }
 
     // Row 2 : suggested-lot (P1, minimal). "Lot 0.18 | N6 0.50%/tr". Risk
     // cumulative lives in the top bars; margin detail in the "Max lot allowed"
@@ -8683,10 +8731,11 @@ void DrawMaxParallelControl(int x, int y) {
 //|   - Anchor SL    = the WORST (most-distant) SL among the basket  |
 //|                    (= the maximal R, most conservative).         |
 //+------------------------------------------------------------------+
-void RefreshPyramidLine(void) {
-    const string label_id = RC_PREFIX + "footer_l4";
-    if (ObjectFind(0, label_id) < 0)
-        return; // panel was built with pyramid disabled - nothing to update
+// v3.06 : the advisor is now BUILT (text + status) instead of writing a
+// legacy label. Both the shell (POSITIONS section) and the old footer line
+// consume the same string : one computation, no drift.
+bool BuildPyramidLine(string &line, int &stat) {
+    line = ""; stat = 2;
 
     const string sym = _Symbol;
     const int n = PositionsTotal();
@@ -8739,30 +8788,27 @@ void RefreshPyramidLine(void) {
     }
 
     if (basket_n == 0) {
-        ObjectSetString(0, label_id, OBJPROP_TEXT,
-                        "Pyramid : no position on " + sym);
-        ObjectSetInteger(0, label_id, OBJPROP_COLOR, g_theme.text_dim);
-        return;
+        line = "Pas de position sur " + sym;
+        stat = 2;
+        return false;
     }
     if (mixed) {
-        ObjectSetString(0, label_id, OBJPROP_TEXT,
-                        "Pyramid : hedged basket (BUY+SELL) -- not supported");
-        ObjectSetInteger(0, label_id, OBJPROP_COLOR, g_theme.warn);
-        return;
+        line = "Panier couvert (BUY+SELL) : non gere";
+        stat = 1;
+        return true;
     }
     if (any_missing_sl || worst_sl_dist <= 0.0) {
         // Phase 3.5 : worst_sl_dist==0 with all SLs present = every leg's SL locks profit
         // (risk-free basket) ; only truly-missing SLs warrant the "place SL" warning.
-        ObjectSetString(0, label_id, OBJPROP_TEXT,
-                        any_missing_sl ? "Pyramid : place SL on all positions before planning"
-                                       : "Pyramid : basket risk-free (SL locks profit)");
-        ObjectSetInteger(0, label_id, OBJPROP_COLOR, any_missing_sl ? g_theme.warn : g_theme.ok);
-        return;
+        line = any_missing_sl ? "Place un SL sur toutes les positions avant de planifier"
+                   : "Panier sans risque : les SL verrouillent du profit";
+        stat = (any_missing_sl ? 1 : 0);
+        return true;
     }
     if (sum_vol <= 0.0) {
-        ObjectSetString(0, label_id, OBJPROP_TEXT, "Pyramid : basket vol = 0");
-        ObjectSetInteger(0, label_id, OBJPROP_COLOR, g_theme.text_dim);
-        return;
+        line = "Volume du panier = 0";
+        stat = 2;
+        return false;
     }
 
     const double anchor_entry = sum_entry_x_vol / sum_vol;
@@ -8777,27 +8823,24 @@ void RefreshPyramidLine(void) {
     if (!g_pyramid_engine.ComputeNextStep(sym, anchor_entry, sum_vol, anchor_sl,
                                           is_buy, basket_n, step) ||
         !step.ok) {
-        ObjectSetString(0, label_id, OBJPROP_TEXT,
-                        "Pyramid : " + step.info);
-        ObjectSetInteger(0, label_id, OBJPROP_COLOR, g_theme.warn);
-        return;
+        line = step.info;
+        stat = 1;
+        return true;
     }
 
     const int pld = LotDigits(sym);  // B-LOTPRECISION
-    string line;
     StringConcatenate(line,
-                      "Pyramid: if px ", (is_buy ? ">=" : "<="), " ",
+                      "Si px ", (is_buy ? ">=" : "<="), " ",
                       DoubleToString(step.trigger_price, _Digits),
                       " add ", DoubleToString(step.add_lot, pld),
-                      " lot & move ALL SL -> ", DoubleToString(step.new_unified_stop, _Digits),
-                      " = locks ",
-                      (step.worst_case_money >= 0.0 ? "risk-free min +$" : "loss -$"),
+                      " lot et deplace TOUS les SL -> ", DoubleToString(step.new_unified_stop, _Digits),
+                      " = verrouille ",
+                      (step.worst_case_money >= 0.0 ? "min +$" : "perte -$"),
                       DoubleToString(MathAbs(step.worst_case_money), 2),
-                      "  [basket ", DoubleToString(sum_vol, pld),
+                      "  [panier ", DoubleToString(sum_vol, pld),
                       " @", DoubleToString(anchor_entry, _Digits), "]");
-    ObjectSetString(0, label_id, OBJPROP_TEXT, line);
-    ObjectSetInteger(0, label_id, OBJPROP_COLOR,
-                     (step.worst_case_money >= 0.0 ? g_theme.ok : g_theme.warn));
+    stat = (step.worst_case_money >= 0.0 ? 0 : 1);
+    return true;
 }
 
 //+------------------------------------------------------------------+

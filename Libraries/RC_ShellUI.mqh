@@ -96,6 +96,13 @@ struct RCDeckData {
    double posVol[8], posRowPnl[8];
    int    posAge[8], posStat[8];        // age in seconds ; status 0..3
    bool   posHasSl[8];
+   // v3.06 parity : the basket / pyramid advisor (legacy footer line 4) and the
+   // week-end hold warning (legacy blinking clock) - both were LOST when the
+   // shell short-circuited the legacy refresh, and neither had a home here.
+   bool   pyrOn;                        // a basket exists on this symbol
+   string pyrText;                      // the advisor line, already formatted
+   int    pyrStat;                      // 0 ok, 1 warn, 2 neutral
+   bool   weekendHold;                  // open positions into the week-end close
    // lot advisor detail
    int    nPlanned;
    double budgetMoney, spreadPts, commPerLot;
@@ -402,7 +409,7 @@ private:
       if(m_navX < 0) m_navX = 0;
       // SAFETY : a hard lock / SL breach owns a full-width band at the very top ;
       // the navbar slides UNDER it (the alert is never the thing that gets hidden).
-      m_bandOn = (m_d.discLocked || m_d.slGuard || m_d.discTilt);
+      m_bandOn = (m_d.discLocked || m_d.slGuard || m_d.discTilt || m_d.weekendHold);
       m_navY   = (m_bandOn ? RCS_BAND_H + 2 : 0);
       // floating positions table : always on (v3.05), sized on the rows it holds
       m_fltOn = !m_fltHidden;                            // v3.05 : always there, even flat
@@ -457,7 +464,12 @@ private:
       const int killX = W - 28, clkX = W - 96, modeX = W - 130, palX = W - 172;
       m_nav.Text(killX + 9, 9, ShortToString((ushort)0x00D7), A(m_t.dim), RCS_F_BTN, "Segoe UI", TA_CENTER | TA_TOP);
       ZAdd(m_navX + killX, m_navY + 4, 22, 26, RZ_NAV_KILL);
-      m_nav.Text(clkX + 30, 11, m_d.clockSrv, A(m_t.dim), RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP);
+      // v3.06 : the legacy title clock switched to the news countdown ; here the
+      // countdown lives in the NEWS cell, so the clock only TINTS - same warning,
+      // no text that would overflow a 62 px slot.
+      const color clkC = ((m_d.newsHasEvt && m_d.newsMins <= 60)
+                          ? (m_d.newsHigh ? m_t.red : m_t.warn) : m_t.dim);
+      m_nav.Text(clkX + 30, 11, m_d.clockSrv, A(clkC), RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP);
       ZAdd(m_navX + clkX, m_navY + 4, 62, 26, RZ_NAV_CLOCK);
       m_nav.CapsuleStroke(modeX, 7, 30, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.10));
       m_nav.Text(modeX + 15, 11, (m_themeIdx % 2 == 1 ? "L" : "D"), A(m_t.text), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
@@ -682,7 +694,31 @@ private:
       m_side.Text(18, y, L(RCL_POS_PNL, "P&L flottant total"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       m_side.Text(RCS_SIDE_W - 18, y - 2, (m_d.posPnl >= 0.0 ? "+" : "") + DoubleToString(m_d.posPnl, 2) + " $",
                   A(m_d.posPnl >= 0.0 ? m_t.ok : m_t.red), RCS_F_TITLE, "Consolas", TA_RIGHT | TA_TOP, FW_BOLD);
-      return y + 22;
+      y += 26;
+      // BASKET / PYRAMID advisor : where to add, where ALL the stops then go,
+      // and what that locks. It answers "et maintenant ?" - the legacy panel had
+      // it in a footer line the shell never carried over.
+      if(m_d.pyrOn) {
+         m_side.Hairline(18, y - 4, RCS_SIDE_W - 18, LineC());
+         m_side.Text(18, y, "PYRAMIDE", A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
+         y += 14;
+         const color pc2 = (m_d.pyrStat == 0 ? m_t.ok : (m_d.pyrStat == 1 ? m_t.warn : m_t.dim));
+         string rest = m_d.pyrText;
+         for(int ln = 0; ln < 4 && StringLen(rest) > 0; ln++) {
+            string cut = rest;
+            if(StringLen(cut) > 40) {                      // wrap on a space, never mid-number
+               int sp = -1;
+               for(int k = 40; k > 20; k--) if(StringGetCharacter(rest, k) == ' ') { sp = k; break; }
+               if(sp < 0) sp = 40;
+               cut  = StringSubstr(rest, 0, sp);
+               rest = StringSubstr(rest, sp + 1);
+            } else rest = "";
+            m_side.Text(18, y, cut, A(pc2), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+            y += 13;
+         }
+         y += 4;
+      }
+      return y + 4;
    }
    //--- LOT ADVISOR : the number JR copies, and WHY it is that number --------
    int SecLot(int y) {
@@ -1391,6 +1427,7 @@ private:
       m_band.Begin();
       if(!m_bandOn) { m_band.Commit(); return; }          // empty = transparent
       const bool hard = (m_d.discLocked || m_d.slGuard);
+      const bool wknd = (!hard && !m_d.discTilt && m_d.weekendHold);
       const color bc  = (hard ? m_t.red : m_t.warn);
       const int   W   = m_chW;
       m_band.CapsuleGradient(0, 0, W, RCS_BAND_H, A(bc), Mix(bc, clrBlack, 0.35));
@@ -1402,6 +1439,8 @@ private:
          msg = "SL TROP BAS - risque de breche" + (m_d.slGuardSym != "" && m_d.slGuardPrice > 0.0
                ? "  -  remonte " + m_d.slGuardSym + " a >= " +
                  DoubleToString(m_d.slGuardPrice, (m_d.slGuardPrice >= 100.0 ? 2 : 5)) : "");
+      else if(wknd)                                       // v3.06 : week-end hold
+         msg = "POSITIONS OUVERTES AVANT LA CLOTURE HEBDO - envisage de solder";
       else
          msg = "TILT - " + IntegerToString(m_d.tiltTrades) + " trades en " +
                IntegerToString(m_d.tiltWinMin) + " min : ralentis";
@@ -1604,7 +1643,7 @@ public:
       if(!m_created) return;
       // the safety band changes the navbar anchor : re-layout when it appears
       // or disappears, otherwise the navbar would sit under it.
-      const bool wantBand = (m_d.discLocked || m_d.slGuard || m_d.discTilt);
+      const bool wantBand = (m_d.discLocked || m_d.slGuard || m_d.discTilt || m_d.weekendHold);
       if(wantBand != m_bandOn) { OnChartChange(); return; }
       // a position opened or closed : the floating table changes SIZE, and a
       // bitmap cannot grow in place - re-create the surfaces before drawing.
