@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "2.18"
+#property version "3.00"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -174,7 +174,7 @@ input bool          InpShowNews              = true;                // Show econ
 input ENUM_RC_THEME InpTheme                 = RC_THEME_GLASS_DARK; // Panel mode (Glass Dark / Glass Light)
 input ENUM_RC_PALETTE InpPalette             = RC_PAL_EMERALD;      // Brand palette (Emeraude / Indigo / Ardoise) - v2.02
 input ENUM_RC_LANG  InpLang                  = RC_LANG_EN;          // UI language (EN / FR / ES)
-input bool          InpShellV2               = false;               // v3 SHELL : 36px right rail + on-demand panel (replaces the big panel)
+input bool          InpShellV2               = true;                // v3 SHELL : 36px right rail + on-demand panel (replaces the big panel)
 input int           InpShellTipMs            = 600;                 // v3 SHELL : hover delay before a tooltip shows (ms)
 input int           InpAnchorX               = 20;                  // Panel X offset from chart top-left (px)
 input int           InpAnchorY               = 100;                 // Panel Y offset (px ; clears MT5 one-click panel)
@@ -1252,6 +1252,12 @@ int OnInit(void) {
         g_shell.SetThemeIdx((int)InpPalette * 2 + (EffectiveTheme() == RC_THEME_GLASS_DARK ? 0 : 1));
         g_shell.SetTipDelay(InpShellTipMs);
         g_shell.Create(RC_PREFIX + "V3_");
+        {   // restore where the floating positions table was left, per login
+            double fx = 0.0, fy = 0.0;
+            GVGetLogin("RC_v3_fltx", fx);
+            GVGetLogin("RC_v3_flty", fy);
+            g_shell.SetFloatPos((int)fx, (int)fy);
+        }
         ShellPushLabels();   // the shell's chrome speaks the product's language
         ShellRefresh();
     }
@@ -1781,7 +1787,22 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
             }
             return;
         }
-        if (id == CHARTEVENT_MOUSE_MOVE) { g_shell.OnMouseMove((int)lparam, (int)dparam); return; }
+        if (id == CHARTEVENT_MOUSE_MOVE) {
+            // the floating table is dragged by its header ; sparam == "1" while the
+            // left button is held. Drag first : it must win over tooltip intent.
+            const bool ldown = (sparam == "1");
+            const bool was   = g_shell.Dragging();
+            g_shell.OnMouseDrag((int)lparam, (int)dparam, ldown);
+            if (g_shell.Dragging()) return;                  // dragging : nothing else to do
+            if (was) {                                       // just dropped : remember where
+                int fx, fy;
+                g_shell.FloatPos(fx, fy);
+                GVSetLogin("RC_v3_fltx", (double)fx);
+                GVSetLogin("RC_v3_flty", (double)fy);
+            }
+            g_shell.OnMouseMove((int)lparam, (int)dparam);
+            return;
+        }
     }
     // V1.29 V : on any chart change (resize / TF switch / scroll / zoom), re-pin the
     // bottom news icons to the CURRENT visible price floor IMMEDIATELY - no calendar
@@ -3037,11 +3058,13 @@ string ShellPlanTag(void) {
 void BuildDeckData(RCDeckData &d) {
     const double init = g_profile.initial_balance;
     // --- session / account ---------------------------------------------
-    VerdictResult v;
-    ComputeVerdict(v);
-    d.score       = v.score;
-    d.verdict     = (v.clr == g_theme.red ? 2 : (v.clr == g_theme.warn ? 1 : 0));
-    d.verdictWord = Tr(d.verdict == 2 ? "v_violation" : (d.verdict == 1 ? "v_atrisk" : "v_ontrack"));
+    // v3.00 FIX : the health badge used to come from ComputeVerdict(), which
+    // reads g_rows[] — and g_rows is filled by RefreshPanel, which the shell
+    // SHORT-CIRCUITS. The badge therefore froze on the startup value (a red
+    // rail next to a green "SAIN 100/100", seen on JR's capture). It is now
+    // computed from the SAME live ratios the rail draws : one source, no stale
+    // read. Thresholds unchanged (>=100% breach, >=80% watch), profit target
+    // still excluded — it is a goal, not a risk.
     d.equity      = AccountInfoDouble(ACCOUNT_EQUITY);
     d.balance     = AccountInfoDouble(ACCOUNT_BALANCE);
     d.sym         = _Symbol;
@@ -3065,6 +3088,10 @@ void BuildDeckData(RCDeckData &d) {
     if (d.dailyApplies)                 worst = MathMax(worst, d.dailyPct   / d.dailyCap);
     if (d.overallApplies)               worst = MathMax(worst, d.overallPct / d.overallCap);
     d.limRatio  = worst;
+    // verdict + health score, derived from the ratios just computed
+    d.score       = (int)MathRound(100.0 * (1.0 - MathMin(1.0, MathMax(0.0, worst))));
+    d.verdict     = (worst >= 1.0 ? 2 : (worst >= 0.80 ? 1 : 0));
+    d.verdictWord = Tr(d.verdict == 2 ? "v_violation" : (d.verdict == 1 ? "v_atrisk" : "v_ontrack"));
     d.roomMoney = Live_NearestLimitRoom();                 // -1 = no active limit
     d.floorMoney = 0.0;
     if (d.trailing && init > 0.0) {
@@ -3261,10 +3288,10 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_LOT_FROM,  Tr("shl_lotfrom"));
     g_shell.SetLabel(RCL_LOT_BUDGET,Tr("shl_lotbudget"));
     g_shell.SetLabel(RCL_LOT_N,     Tr("shl_lotn"));
-    g_shell.SetLabel(RCL_LOT_FREE,  Tr("f_free"));
+    g_shell.SetLabel(RCL_LOT_FREE,  Tr("shl_free"));
     g_shell.SetLabel(RCL_LOT_COST,  Tr("shl_lotcost"));
-    g_shell.SetLabel(RCL_SPREAD,    Tr("spread"));
-    g_shell.SetLabel(RCL_COMM,      Tr("comm"));
+    g_shell.SetLabel(RCL_SPREAD,    Tr("shl_spread"));
+    g_shell.SetLabel(RCL_COMM,      Tr("shl_comm"));
     g_shell.SetLabel(RCL_NEWS_SRC,  Tr("shl_newssrc"));
     g_shell.SetLabel(RCL_NEWS_STATE,Tr("shl_newsstate"));
     g_shell.SetLabel(RCL_NEWS_WIN,  Tr("shl_newswin"));
@@ -6904,6 +6931,9 @@ void InitI18n(void) {
     AddTr("shl_newsnext",  "UPCOMING",           "A VENIR",              "PROXIMOS");
     AddTr("shl_discstate", "STATE",              "ETAT",                 "ESTADO");
     AddTr("shl_discday",   "TODAY",              "ACTIVITE DU JOUR",     "ACTIVIDAD DE HOY");
+    AddTr("shl_free",      "Free margin",        "Marge libre",          "Margen libre");
+    AddTr("shl_spread",    "Spread",             "Spread",               "Spread");
+    AddTr("shl_comm",      "Commission / lot",   "Commission / lot",     "Comision / lote");
     AddTr("shl_split",     "Split",              "Split",                "Reparto");
     AddTr("shl_mindays",   "Min days",           "Jours mini",           "Dias min");
     // --- v3 SHELL tooltips : ONE entry per bubble, "title|description" -------

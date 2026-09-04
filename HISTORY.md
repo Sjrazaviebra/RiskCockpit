@@ -84,6 +84,27 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 2. Log
 
+## 3.x — the v3 shell becomes the interface
+
+### v3.00.11 — 2026-09-04 — shell on by default, floating positions table, health badge fixed
+
+`InpShellV2` now defaults to **true**: the rail *is* the interface. The legacy panel is kept in the
+code (not purged) and is one input away.
+
+- **Health badge bug (visible on a capture, fixed).** The navbar read `SAIN 100/100` while the rail
+  showed a red `100%` and `DD total 59.34 / 8.0%`. The badge came from `ComputeVerdict()`, which
+  reads `g_rows[]` — and `g_rows` is filled by `RefreshPanel()`, which the shell short-circuits. So
+  the badge was frozen on its startup value. It is now derived from the **same live ratios the rail
+  draws**: one source, no stale read (same thresholds, profit target still excluded).
+- **Floating positions table** (StrategyDeck-style): appears by itself as soon as a trade is open,
+  disappears when the last one closes. Per row: status dot, symbol, side, volume, P&L, age and a
+  red `SANS SL` flag; header carries the count and the total floating P&L. Draggable by its header,
+  clamped inside the chart, position persisted per login, and hideable for the session.
+- Labels the capture showed truncated (`Spr`, `Com`, `libre`) now read `Spread`,
+  `Commission / lot`, `Marge libre` — they were reusing the legacy footer's abbreviations.
+
+Compiled `0 errors, 0 warnings`.
+
 ### v2.18.10 — 2026-09-04 — copy-lot: the shell's one native control
 
 The suggested lot is the number that gets pasted into the order ticket, and a canvas cannot be
