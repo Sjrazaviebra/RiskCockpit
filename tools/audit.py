@@ -210,6 +210,22 @@ def run(root):
             report("fuite de donnees perso", not leaks,
                    "sources + binaire scannes" if not leaks else " | ".join(sorted(set(leaks))))
 
+    # 10. the binary must CLAIM the same version as the source. Dates alone let
+    #     a v2.02.03 binary sit next to a v3 source for two months : both files
+    #     looked plausible, and nothing said otherwise.
+    ver_src = re.search(r'#property version "([\d.]+)"', host)
+    if ex5 is None or ver_src is None:
+        report("version du binaire", None, "pas de .ex5 ou pas de #property version")
+    else:
+        control = ex5.find("javadrazavi.fr".encode('utf-16-le')) >= 0
+        found = ex5.find(ver_src.group(1).encode('utf-16-le')) >= 0
+        if not control:
+            report("version du binaire", None, "en-tete illisible - aucun verdict")
+        else:
+            report("version du binaire", found,
+                   "source %s %s le binaire" % (ver_src.group(1),
+                                                "presente dans" if found else "ABSENTE de"))
+
     # 10. the shipped binary must not be older than the sources it claims to be
     def mtime(rel):
         p = os.path.join(root, rel)

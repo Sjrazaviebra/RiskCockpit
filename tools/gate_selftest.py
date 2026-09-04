@@ -25,6 +25,8 @@ def mut_leak(b):   return b.replace(b'#property version', b'// login 11986032\r\
 def mut_label(b):  return b.replace(b'g_shell.SetLabel(RCL_PAYOUT,', b'//g_shell.SetLabel(RCL_PAYOUT,', 1)
 def mut_key(b):    return re.sub(rb'    AddTr\("shl_pyramid",.*?\);\r\n', b'', b, count=1, flags=re.S)
 def mut_brace(b):  return b.replace(b'int OnInit(void) {', b'int OnInit(void) { if (true) {', 1)
+def mut_ver(b):    return re.sub(rb'#property version "[\d.]+"',
+                                 b'#property version "9.99"', b, count=1)  # source ahead of the binary
 
 
 CASES = [
@@ -34,6 +36,7 @@ CASES = [
     ("libelles traduits", mut_label),
     ("cles i18n resolues", mut_key),
     ("accolades equilibrees", mut_brace),
+    ("version du binaire", mut_ver),
 ]
 
 
