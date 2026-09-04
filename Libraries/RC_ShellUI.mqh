@@ -329,7 +329,7 @@ private:
       m_bandOn = (m_d.discLocked || m_d.slGuard || m_d.discTilt);
       m_navY   = (m_bandOn ? RCS_BAND_H + 2 : 0);
       // dropdown : under the chip that opened it, clamped inside the chart
-      m_menuH = 8 + MathMax(1, m_menuN) * 22 + 8;
+      m_menuH = 8 + MathMax(1, m_menuN) * 26 + 8;   // 26 px pitch (menu theme)
       m_menuX = m_navX + (m_menuMode == 0 ? 122 : 40);
       if(m_menuX + RCS_MENU_W > m_chW) m_menuX = m_chW - RCS_MENU_W;
       if(m_menuX < 0) m_menuX = 0;
@@ -978,21 +978,29 @@ private:
       }
       return (ENUM_TIMEFRAMES)ChartPeriod(0);
    }
+   //--- Menu THEME (aligned on the StrategyDeck v2 dropdown) : 1px-inset card
+   //--- + soft shadow, 26px item pitch, and the SELECTED item as a full
+   //--- accent->accent2 GRADIENT capsule carrying DARK text - the exact same
+   //--- language as the rail chevron and the active segment. A flat tinted
+   //--- highlight (what the first pass drew) reads as a different control.
    void RenderMenu(void) {
       if(!m_menu.Ready()) return;
       m_menu.Begin();
       if(!m_menuOpen) { m_menu.Commit(); return; }         // closed = transparent
       const int W = RCS_MENU_W, H = m_menuH;
-      m_menu.SoftShadow(3, 3, W - 6, H - 6, 10, clrBlack, 6, 70);
-      m_menu.Card(0, 0, W, H, 10, MixC(m_t.surface, clrWhite, 0.05), m_t.surface, LineC());
+      m_menu.SoftShadow(4, 4, W - 8, H - 8, 10, clrBlack, 4, 60);
+      m_menu.Card(1, 1, W - 2, H - 2, 10, MixC(m_t.surface, clrWhite, 0.04), m_t.surface, LineC());
       const string cur = (m_menuMode == 0 ? m_d.tf : m_d.sym);
       for(int i = 0; i < m_menuN && i < 12; i++) {
-         const int iy = 8 + i * 22;
+         const int iy = 8 + i * 26;
          const bool on = (m_menuItem[i] == cur);
-         if(on) m_menu.Capsule(6, iy - 2, W - 12, 20, Mix(m_t.surface, m_t.accent, 0.22));
-         m_menu.Text(14, iy + 2, m_menuItem[i], A(on ? m_t.accent : m_t.text),
-                     RCS_F_BODY, "Consolas", TA_LEFT | TA_TOP, (on ? FW_BOLD : 0));
-         ZAdd(m_menuX + 6, m_menuY + iy - 2, W - 12, 20, RZ_MENU_0 + i);
+         if(on) m_menu.CapsuleGradient(8, iy, W - 16, 22, A(m_t.accent), A(m_t.accent2));
+         string lbl = m_menuItem[i];
+         if(StringLen(lbl) > 12) lbl = StringSubstr(lbl, 0, 11) + "..";   // long symbols never overflow
+         m_menu.Text(W / 2, iy + 4, lbl, (on ? Mix(m_t.bg, clrBlack, 0.5) : A(m_t.text)),
+                     (m_menuMode == 0 ? RCS_F_BODY : RCS_F_LABEL),
+                     (m_menuMode == 0 ? "Segoe UI" : "Consolas"), TA_CENTER | TA_TOP, FW_BOLD);
+         ZAdd(m_menuX + 8, m_menuY + iy, W - 16, 22, RZ_MENU_0 + i);
       }
       m_menu.Commit();
    }

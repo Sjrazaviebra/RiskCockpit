@@ -84,6 +84,24 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 2. Log
 
+### v2.15.07 — 2026-09-04 — menu theme aligned on StrategyDeck v2
+
+The dropdown built in the previous lot drew its selected item as a flat tinted highlight, which
+reads as a *different* control from the rest of the shell. The reference (StrategyDeck's
+`SDDeckUI.mqh`) paints the selected item as a full **accent → accent2 gradient capsule carrying
+dark text** — the same language as the rail chevron and the active segment.
+
+- Selected item: gradient capsule + dark text (was: flat tint + accent text).
+- 26 px item pitch, items centred, card inset 1 px, softer shadow (4/60 instead of 6/70).
+- Per-mode typography: Segoe UI for timeframes, Consolas for symbols.
+- Symbols longer than 12 characters are truncated to `11..` so an item can never overflow.
+
+Checked first, as the mandate asks: the two copies of `JR_CanvasUI.mqh` differ by **one comment
+line** — the kit carries no menu style and nothing had to be ported from it. The theme lives at
+panel level, and only there.
+
+Compiled `0 errors, 0 warnings`.
+
 ### v2.14.06 — 2026-09-04 — v3 shell: rail + on-demand panel (lots 1 → 2b)
 
 New space architecture, ported from the StrategyDeck v2 shell, **behind `InpShellV2` (default
