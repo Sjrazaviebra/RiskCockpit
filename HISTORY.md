@@ -86,6 +86,29 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.10.22 - le panneau se dimensionne sur ce qu'il affiche
+
+Même mécanisme que le bug du tableau flottant signalé par JR, resté en place
+ailleurs : en mode **section unique**, `RenderSide` dessinait le corps sans
+jamais vérifier qu'il tenait. Tout ce qui dépassait `m_sideH` était peint
+**hors du bitmap** — invisible, sans un mot. Le mode sidebar, lui, tronquait
+déjà honnêtement ; c'est ce qui a masqué le trou.
+
+- Chaque section **se mesure** à son premier rendu (`m_secH[8]`), et cette
+  mesure dimensionne la surface pour toutes les frames suivantes. La boucle
+  converge en une frame : la hauteur mesurée devient la hauteur créée, qui
+  redonne la même mesure.
+- Si la section reste plus haute que le graphique ne le permet, elle **le
+  dit** (`▼ agrandis la fenêtre`) au lieu de perdre sa fin.
+- Les clics fantômes sont déjà couverts : le filtre de confinement borne les
+  zones à la hauteur peinte, donc une zone tronquée n'est pas cliquable.
+
+La section POSITIONS venait justement de grossir (conseiller pyramide), et
+c'est elle qui aurait débordé la première sur un petit graphique.
+
+Compilation `0 errors, 0 warnings` ; audits i18n inchangés (157/192 libellés,
+149/192 zones, 0 identifiant sans traduction).
+
 ### v3.09.21 - les accents sont PROUVÉS, sans allumer le terminal
 
 La v3.08 laissait un doute assumé : impossible de vérifier que les accents

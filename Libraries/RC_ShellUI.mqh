@@ -297,6 +297,11 @@ private:
    int        m_fltX, m_fltY, m_fltW, m_fltH;
    bool       m_fltOn, m_fltHidden, m_drag;
    bool       m_closeNotice;     // a disabled CLOSE was clicked : highlight the EA line
+   // v3.09 : measured height of each section (0 = never drawn yet). The panel
+   // surface is sized from it, so a body can no longer be painted outside its
+   // own bitmap - the defect that made the floating table vanish.
+   int        m_secH[8];
+   bool       m_relayout;        // a measurement moved : re-create the surfaces
    int        m_dragOffX, m_dragOffY;
    int        m_sideX, m_sideY, m_sideH;
    RCZone     m_z[96];
@@ -442,9 +447,12 @@ private:
       // deployed panel : anchored IN FRONT of its cell, clamped inside the chart
       // the settings and account sections carry steppers / cyclers : they need
       // more room than a reading section, exactly like StrategyDeck's copilot.
-      m_sideH = (m_state == 2 ? RCS_SIDE_FULLH
+      const int msec = (m_state == 1 ? SecIdx(m_sec) : -1);
+      const int meas = (msec >= 0 ? m_secH[msec] : 0);
+      m_sideH = (meas > 0 ? meas
+               : (m_state == 2 ? RCS_SIDE_FULLH
                  : ((m_state == 1 && (m_sec == RZ_RAIL_CFG || m_sec == RZ_RAIL_CPT))
-                    ? RCS_SIDE_TALLH : RCS_SIDE_SECH));
+                    ? RCS_SIDE_TALLH : RCS_SIDE_SECH)));
       if(m_sideH > m_chH - 24) m_sideH = m_chH - 24;
       if(m_state == 2) m_sideY = (m_chH - m_sideH) / 2;
       else {
@@ -609,6 +617,10 @@ private:
    }
 
    //================= DEPLOYED PANEL =======================================
+   int SecIdx(const int sec) const {
+      const int i = sec - RZ_RAIL_LIM;
+      return (i >= 0 && i < 8 ? i : -1);
+   }
    string SectionTitle(const int sec) const {
       switch(sec) {
          case RZ_RAIL_LIM:  return L(RCL_SEC_LIM,  "LIMITS");
@@ -1162,6 +1174,18 @@ private:
          }
       } else {
          y = SecBody(m_sec, y);
+         // MEASURE : the first frame of a section may be drawn at the default
+         // height ; the measurement re-sizes the surface for every frame after.
+         const int idx = SecIdx(m_sec);
+         if(idx >= 0) {
+            const int want = y + 14;
+            if(want != m_secH[idx]) { m_secH[idx] = want; m_relayout = true; }
+            // still taller than the chart allows : SAY it, do not lose the tail
+            if(want > H + 2)
+               m_side.Text(W / 2, H - 15, ShortToString((ushort)0x25BC) + " " +
+                           L(RCL_SECS_RESIZE, "sections : enlarge the window"),
+                           A(m_t.warn), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
+         }
       }
       if(!m_d.riskTools) {
          m_side.Text(18, H - 26, L(RCL_RTOOLS_OFF, "Risk toolkit OFF (personal account)."), A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
@@ -1512,6 +1536,8 @@ public:
       m_fltX = 0; m_fltY = 0; m_fltW = RCS_FLT_W; m_fltH = RCS_FLT_HEAD + 40;
       m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
       m_closeNotice = false;
+      for(int si = 0; si < 8; si++) m_secH[si] = 0;
+      m_relayout = false;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
       m_maxEditOn = false; m_maxEditX = 0; m_maxEditY = 0;
@@ -1662,6 +1688,8 @@ public:
       // a position opened or closed : the floating table changes SIZE, and a
       // bitmap cannot grow in place - re-create the surfaces before drawing.
       if(m_fltOn && FloatWantH() != m_fltH) { OnChartChange(); return; }
+      // a section measured a new height : re-create the panel at that size
+      if(m_relayout) { m_relayout = false; OnChartChange(); return; }
       ZReset();
       RenderNavbar(); RenderRail(); RenderSide(); RenderFloat(); RenderMenu(); RenderBand(); RenderTip();
       TipPendCheck();                                      // idle cursor : the 1 Hz tick promotes it
