@@ -103,6 +103,10 @@ struct RCDeckData {
    string pyrText;                      // the advisor line, already formatted
    int    pyrStat;                      // 0 ok, 1 warn, 2 neutral
    bool   weekendHold;                  // open positions into the week-end close
+   // v3.11 : controls the host CANNOT act on in the current state. They stay
+   // visible (the setting exists) but are drawn disabled, with the reason.
+   bool   rtoolsLocked;                 // prop plan : the toolkit is always on
+   bool   violLocked;                   // this profile cannot be restricted
    // lot advisor detail
    int    nPlanned;
    double budgetMoney, spreadPts, commPerLot;
@@ -239,7 +243,7 @@ enum ERCLabel {
    RCL_NEWS_SOURCE, RCL_HELP_RO1, RCL_HELP_RO2, RCL_SECS_RESIZE, RCL_RTOOLS_OFF,
    RCL_BAND_WKND, RCL_MINS_LEFT, RCL_BAND_RAISE, RCL_BAND_SLLOW, RCL_BAND_LOCKED,
    RCL_BAND_TRADES, RCL_BAND_SLOW,
-   RCL_NEWS_HI, RCL_NEWS_MED
+   RCL_NEWS_HI, RCL_NEWS_MED, RCL_LOCK_RTOOLS, RCL_LOCK_VIOL
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -906,8 +910,10 @@ private:
       // limits - they belong next to the discipline state, not in a settings tab.
       y += 4;
       SecHead(L(RCL_DISC_VIOL, "AFTER A VIOLATION"), y);
-      y = Toggle(y, L(RCL_VIOL_M, "Margin violation"), m_d.violMargin, RZ_CFG_MVIOL);
-      y = Toggle(y, L(RCL_VIOL_R, "Risk violation"), m_d.violRisk,  RZ_CFG_RVIOL);
+      y = Toggle(y, L(RCL_VIOL_M, "Margin violation"), m_d.violMargin, RZ_CFG_MVIOL,
+                 m_d.violLocked, L(RCL_LOCK_VIOL, "This profile cannot be restricted."));
+      y = Toggle(y, L(RCL_VIOL_R, "Risk violation"), m_d.violRisk,  RZ_CFG_RVIOL,
+                 m_d.violLocked, L(RCL_LOCK_VIOL, "This profile cannot be restricted."));
       y += 4;
       // ARMING a lock is irreversible for its duration : it takes two clicks.
       {
@@ -947,14 +953,27 @@ private:
       return y + 18;
    }
    //--- a clickable ON/OFF row : the pill IS the control --------------------
-   int Toggle(int y, const string k, const bool on, const int zid) {
-      m_side.Text(18, y, k, A(m_t.text), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+   //--- a locked toggle keeps its place (the setting exists) but is drawn
+   //--- INERT and carries the reason : a control that cannot act must never
+   //--- look like one that can.
+   int Toggle(int y, const string k, const bool on, const int zid,
+              const bool locked = false, const string why = "") {
+      m_side.Text(18, y, (locked ? ShortToString((ushort)0x1F512) + " " + k : k),
+                  A(locked ? m_t.dim : m_t.text), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       const int px = RCS_SIDE_W - 18 - 34;
-      if(on) m_side.CapsuleGradient(px, y, 34, 16, A(m_t.accent), A(m_t.accent2));
-      else   m_side.CapsuleStroke(px, y, 34, 16, Mix(m_t.surface, m_t.dim, 0.45), Mix(m_t.surface, clrBlack, 0.10));
-      m_side.Capsule(on ? px + 20 : px + 3, y + 3, 10, 10, A(on ? m_t.bg : m_t.dim));
+      if(locked)  m_side.CapsuleStroke(px, y, 34, 16, Mix(m_t.surface, m_t.dim, 0.25),
+                                       Mix(m_t.surface, clrBlack, 0.08));
+      else if(on) m_side.CapsuleGradient(px, y, 34, 16, A(m_t.accent), A(m_t.accent2));
+      else        m_side.CapsuleStroke(px, y, 34, 16, Mix(m_t.surface, m_t.dim, 0.45), Mix(m_t.surface, clrBlack, 0.10));
+      m_side.Capsule(on ? px + 20 : px + 3, y + 3, 10, 10,
+                     A(locked ? Mix(m_t.surface, m_t.dim, 0.55) : (on ? m_t.bg : m_t.dim)));
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 20, zid);
-      return y + 22;
+      y += 22;
+      if(locked && StringLen(why) > 0) {
+         m_side.Text(30, y - 4, why, A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+         y += 13;
+      }
+      return y;
    }
    //--- [-] value [+] : the shell only ASKS, the host owns every setting -----
    int Stepper(int y, const string k, const string v, const int row) {
@@ -1092,7 +1111,8 @@ private:
       SecHead(L(RCL_COMFORT_H, "COMFORT"), y);
       y = Toggle(y, L(RCL_COMFORT_S, "Comfort scale"), m_d.cfgComfort, RZ_CFG_COMFORT);
       y = Toggle(y, L(RCL_DISC_LOCK_T, "Discipline lock"), m_d.cfgDiscipline, RZ_CFG_DISC);
-      y = Toggle(y, L(RCL_RTOOLS, "Risk toolkit"), m_d.riskTools, RZ_CFG_RTOOLS);
+      y = Toggle(y, L(RCL_RTOOLS, "Risk toolkit"), m_d.riskTools, RZ_CFG_RTOOLS,
+                 m_d.rtoolsLocked, L(RCL_LOCK_RTOOLS, "Always on for a prop plan."));
       y = Toggle(y, L(RCL_BE, "Break-even lines"), m_d.beLines, RZ_CFG_BE);
       return y + 6;
    }

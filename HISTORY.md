@@ -86,6 +86,31 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.11.23 - deux boutons FANTÔMES : cliquables, sans effet, sans un mot
+
+Audit demandé par JR (« être sûr que tous les boutons marchent »), poussé au
+delà du câblage : non pas « la zone a-t-elle un handler » mais **« l'hôte
+agit-il vraiment, dans TOUS les états ? »**. Deux contrôles échouaient :
+
+- **« Outils de risque »** : `ShellApplyCfg` ne l'applique que
+  `if (PlanIsPersonal())`. Sur un plan prop — le cas de JR — le clic ne faisait
+  **rien**, et rien ne le disait.
+- **« Violation marge » / « Violation risque »** : sur un profil que
+  `ProfileCanBeRestricted()` refuse, la résolution suivante remet les deux
+  drapeaux à `false` : la bascule s'inversait puis revenait aussitôt.
+
+Correctif : `Toggle()` accepte un état **verrouillé** — cadenas, teinte éteinte,
+et la **raison écrite sous la ligne** (traduite EN/FR/ES). Le réglage garde sa
+place (il existe), mais il ne ressemble plus à un bouton qui agit. Même règle
+que le bouton CLOSE désactivé du tableau flottant.
+
+Le reste de l'audit ne trouve rien : steppers **6/6 · 5/5 · 4/4** lignes
+affichées ↔ appliquées, cascade **5/5**, cycle **3/3**, et les add-ons
+parcourent les 7 drapeaux dans le **même ordre** des deux côtés (un décalage
+aurait basculé un add-on à la place d'un autre, sans erreur visible).
+
+`Result: 0 errors, 0 warnings` · 129 libellés utilisés, **0 sans traduction**.
+
 ### v3.10.22 - le panneau se dimensionne sur ce qu'il affiche
 
 Même mécanisme que le bug du tableau flottant signalé par JR, resté en place

@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.10"
+#property version "3.11"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1457,6 +1457,9 @@ void BuildDeckData(RCDeckData &d) {
     // v3.06 : week-end hold. The legacy clock blinked it AND fired the alert ;
     // the shell had neither. The alert keeps its own once-per-window latch.
     d.weekendHold = IsWeekendHoldRisk();
+    // v3.11 : say which controls the host will refuse to act on
+    d.rtoolsLocked = !PlanIsPersonal();          // prop plan : toolkit forced ON
+    d.violLocked   = !ProfileCanBeRestricted();  // the flags would be reset at once
     if (d.weekendHold) FireWeekendAlert(); else g_weekend_warned = false;
     // --- lot advisor (cell LOT) -------------------------------------------
     SuggestedLot s;
@@ -1695,6 +1698,8 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_CPT_SPLIT, Tr("shl_split"));
     g_shell.SetLabel(RCL_CPT_DAYS,  Tr("shl_mindays"));
     g_shell.SetLabel(RCL_CLOSE_EA,  Tr("shl_closeea"));
+    g_shell.SetLabel(RCL_LOCK_RTOOLS, Tr("shl_lockrtools"));
+    g_shell.SetLabel(RCL_LOCK_VIOL,   Tr("shl_lockviol"));
     g_shell.SetLabel(RCL_LIM_QS,        Tr("shl_qs"));
     g_shell.SetLabel(RCL_LOT_COPY,      Tr("shl_copy"));
     g_shell.SetLabel(RCL_TAG_MARG,      Tr("shl_tag_marg"));
@@ -4760,6 +4765,14 @@ void InitI18n(void) {
     AddTr("shl_comm",      "Commission / lot",   "Commission / lot",     "Comisión / lote");
     AddTr("shl_split",     "Split",              "Split",                "Reparto");
     AddTr("shl_mindays",   "Min days",           "Jours mini",           "Días min");
+    AddTr("shl_lockrtools",
+        "Always on for a prop plan.",
+        "Toujours actif sur un plan prop.",
+        "Siempre activo en un plan prop.");
+    AddTr("shl_lockviol",
+        "This profile cannot be restricted.",
+        "Ce profil ne peut pas être restreint.",
+        "Este perfil no puede restringirse.");
     AddTr("shl_closeea",   "Closing : EA version",
                            "Fermeture : version EA",
                            "Cierre : versión EA");
