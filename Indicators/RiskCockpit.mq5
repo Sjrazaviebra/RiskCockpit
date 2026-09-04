@@ -174,11 +174,7 @@ input bool          InpShowNews              = true;                // Show econ
 input ENUM_RC_THEME InpTheme                 = RC_THEME_GLASS_DARK; // Panel mode (Glass Dark / Glass Light)
 input ENUM_RC_PALETTE InpPalette             = RC_PAL_EMERALD;      // Brand palette (Emeraude / Indigo / Ardoise) - v2.02
 input ENUM_RC_LANG  InpLang                  = RC_LANG_EN;          // UI language (EN / FR / ES)
-input bool          InpShellV2               = true;                // v3 SHELL : 36px right rail + on-demand panel (replaces the big panel)
 input int           InpShellTipMs            = 600;                 // v3 SHELL : hover delay before a tooltip shows (ms)
-input int           InpAnchorX               = 20;                  // Panel X offset from chart top-left (px)
-input int           InpAnchorY               = 100;                 // Panel Y offset (px ; clears MT5 one-click panel)
-input int           InpPanelWidth            = 620;                 // Panel width (px)
 input int           InpRowHeight             = 22;                  // Panel row height (px)
 input int           InpRefreshMs             = 500;                 // Panel refresh interval (ms)
 input bool          InpComfortScale          = true;                // Keep padding above/below candles (never glued)
@@ -240,8 +236,6 @@ ThemeColors g_theme;
 // its opaque glow lives in a margin band around the panel edge (over the chart).
 // Named "RC_fx" -> dragged by MovePanelBy, cleared by DestroyAllObjects, and the
 // GPU resource is freed in OnDeinit / before every re-create.
-CCanvas g_fx;
-bool    g_fx_on = false;
 bool    g_fx_was_breach = false;   // gate idle GPU updates (only redraw while breaching / on clear)
 int     g_fx_w  = 0;
 int     g_fx_h  = 0;
@@ -251,20 +245,18 @@ int     g_fx_h  = 0;
 // soft gradient, drop shadow, hairline dividers, rounded-end meters + pills).
 // It sits UNDER the text (OBJ_LABEL) and controls, and under g_fx (the glow).
 // v3 SHELL (lot 1) : the new space architecture lives in RC_ShellUI.mqh and is
-// gated on InpShellV2 - OFF = the legacy panel is untouched (additive only).
+// v3.06 : the legacy panel is GONE (JR) - this is the only UI there is.
 // The shell is a VIEW : BuildDeckData fills its snapshot from the SAME Live_*
 // functions the legacy rows use, so there is exactly one risk model.
 RCShellUI g_shell;
 void BuildDeckData(RCDeckData &d);
 void ShellRefresh(void);
 
-CCanvasKit g_kit;
 // LOT D : the settings modal draws on its OWN canvas - shell (rounded card + shadow +
 // glow) AND, since D-FULL step 2, every control face (buttons / pills / steppers).
 // DrawSettingsOverlay holds ONE Begin..Commit around the whole build ; the helpers
 // (DrawSetButton / SetToggleBtn / SetStepper) paint into the open canvas and register
 // hit-zones on the same rects. 100% hit-testing : no native modal OBJ_BUTTON remains.
-CCanvasKit g_modal_kit;
 #define RC_KIT_MARGIN 16   // shadow / rounding room around the panel
 #define RC_R_PANEL    15   // panel corner radius (LOT B : mockup .rc radius 15)
 #define RC_R_CARD     10   // inner card corner radius
@@ -697,66 +689,30 @@ void BuildAddonsMask(void) {
 //| Forward declarations                                             |
 //+------------------------------------------------------------------+
 void DestroyAllObjects(void);
-void BuildPanel(void);
 void RefreshPanel(void);
-void DrawTitleBar(int x, int y, int w);
-bool RiskIsBreaching(void);                        // v1.4 FX overlay
-void RenderFx(void);                               // v1.4 FX overlay
-void CreateFxCanvas(int x, int y, int w, int h);   // v1.4 FX overlay
-void RepaintCanvas(int x, int y, int w);           // v1.4 modern body canvas
-void RiskFillColors(const ENUM_RC_STATUS s, color &a, color &b); // v1.4 modern body canvas
-void DrawAccountStrip(int x, int y, int w);
-void DrawSectionHeader(const string id, int x, int y, int w, const string title, color accent);
-void   DrawTimeframeBar(int x, int y, int w);   // LOT 4 : M1/M5/M15/M30/H1/H4/D1 quick-switch
 void   InitI18n(void);                          // LOT 4 : populate g_i18n_* tables once
 string Tr(const string key);                    // LOT 4 : translate by key + g_lang
 void   DrawBreakevenLines(void);                // LOT 5 : BE lines on open positions
-void   DrawSetButton(const string id, int x, int y, int w, int h, const string text); // G3
-void   HighlightSetButton(const string id, bool active);                              // G3
-void   DrawSettingsOverlay(int panel_x, int panel_y, int panel_w);                    // G3
 void   ApplySettingsChange(void);                                                     // G3
 void   ClearBreakevenLines(void);               // LOT 5 : remove all BE lines
 // LOT 6 : single-glance verdict badge + safety score (replaces the LIVE blinker
 // in the title bar's clock zone when no weekend / news countdown is active).
 struct VerdictResult { string text; color clr; int score; };
-void   ComputeVerdict(VerdictResult &out);
 void   PersistBE(void);
 void   PersistLang(void);
-int DrawRulesSection(int x, int y, int w);
-int DrawPositionsSection(int x, int y, int w);
-void DrawFooter(int x, int y, int w);
-void DrawRuleRow(const string key_prefix, int idx,
-                 int x, int y, int w, int h,
-                 const string label, const string value_text,
-                 double pct, double max_pct,
-                 ENUM_RC_STATUS status, bool applies);
-void DrawStatusChip(const string id, int x, int y, int w, int h, ENUM_RC_STATUS status);
-void DrawProgressBar(const string id, int x, int y, int w, int h,
-                     double pct, double max_pct, ENUM_RC_STATUS status);
 void DrawRect(const string id, int x, int y, int w, int h, color bg, color border, int width = 1);
 void DrawLabel(const string id, int x, int y, const string text, color clr,
                int font_size = RC_FONT_SIZE, const string font = RC_FONT);
-string StatusLabel(ENUM_RC_STATUS s);
-color StatusColor(ENUM_RC_STATUS s);
-color GradientColor(double r);                                        // LOT E color-graded bars
-bool  UpdateDisciplineOverlay(double daily_dd_pct, double daily_cap); // V1.24 : true if hard-locked
-void  DrawTiltBanner(void);                                           // V1.24 : soft tilt banner
 string FormatMoney(double v);
 string FormatPct(double v);
 int DaysBetweenIso(const string iso_a, const string iso_b);
-void UpdateClockBlinker(void);
 void ApplyComfortScale(bool force); // FIX 6
 void ApplyComfortScaleToChart(long chart_id, const string sym);     // LOT D B-RESIZE-ALL
 void ApplyComfortScaleAllCharts(void);                              // LOT D B-RESIZE-ALL
 bool ComputeBasketBreakeven(const string symbol, double &out_be_price,
                             bool &out_is_hedged_flat, double &out_flat_pnl,
                             string &out_reason); // LOT D B-BE-UNIFIED
-void UpdateRow(int idx, double pct, double max_pct, const string value_text,
-               ENUM_RC_STATUS status, bool applies);
 ENUM_RC_STATUS ComputeRangeStatus(double v, double max_v, double warn_ratio, double red_ratio);
-ENUM_RC_STATUS ComputeBandStatus(double v, double lo, double hi);
-void RefreshPositionsList(void);
-void RefreshAccountStrip(void);
 
 // Live computation helpers (T7)
 double Live_CumulativeMarginPct(void);
@@ -784,7 +740,6 @@ void GVSetLogin(const string base, const double v);
 // v2.13 FEATURE B : SL-vs-limit guard (20% survival margin)
 double Live_NearestLimitRoom(void);
 bool Live_SlGuardBreached(string &reco_sym, double &reco_sl);
-void DrawSlGuardBanner(void);
 double ComputePositionRiskMoney(const string sym, const int type,
                                 const double price_open, const double sl,
                                 const double vol, const double costs = 0.0); // Phase 3.5 : net-of-costs, direction-aware
@@ -815,7 +770,6 @@ double EffectiveMarginCap(void);
 double EffectiveRiskCap(void);
 bool   ProfileCanBeRestricted(void);
 void PersistViolationFlags(void);
-void DrawViolationToggle(const string key, int x, int y, int h, bool active);
 
 // V2 (this revision) - profit metrics + suggested lot + editable max parallel
 double SumClosedDealsPnL(const datetime from, const datetime to);
@@ -831,8 +785,6 @@ double Live_PerTradeBudgetPct(int n_for_share);
 double Live_NextTradeBudgetPct(void);
 double Live_DailyRiskBonus(void);
 double Live_PerTradeCap(void);
-void RefreshFooterMetrics(void);
-void DrawMaxParallelControl(int x, int y);
 void PersistMaxParallel(void);
 void RefreshSlLinesForChart(const long chart_id);
 void RefreshNewsZonesForChart(const long chart_id);
@@ -843,8 +795,6 @@ int g_max_parallel = 5; // runtime-mutable; init from InpMaxParallelPositions
 // Rebuilt from open positions + recent deals (history persists -> no need to
 // store strings in GlobalVariable, which only holds doubles anyway).
 #define RC_MAX_RECENT_SYMS 4
-string g_recent_syms[];   // up to 4 symbols, most-recent first
-string g_pos_sym[RC_MAX_POSITIONS]; // V1.27 : per-row symbol so a position row is click-to-switch
 // LOT A : per-row LIVE status mirror. RefreshPositionsList (and the SL>REC override in
 // RefreshSlLinesForChart) write it ; RepaintCanvas reads it to tint the row's status
 // pill on the canvas. OnTimer order (RefreshPanel THEN RepaintCanvas) keeps it fresh.
@@ -854,16 +804,11 @@ ENUM_RC_STATUS g_pos_status[RC_MAX_POSITIONS];
 // RepaintCanvas paints the tinted pill faces from the SAME offsets -> drag-proof,
 // label/face can never desync (the BE lesson). w == 0 -> chips not drawn.
 int g_chip_swap_dx = 0, g_chip_swap_w = 0, g_chip_split_dx = 0, g_chip_split_w = 0;
-int    g_recbar_y = 0;    // y-coordinate of the bar (set in BuildPanel)
 int    g_tfbar_y  = 0;    // P4 : y of the TF/control bar (copy-lot fields live here)
 int    g_footer_y = 0;    // P1 : y of the footer block (coloured info segments)
-void UpdateRecentSymbols(void);
-void DrawRecentSymbolsBar(int x, int y, int w);
 
 // B2 : drag-to-move panel. g_anchor_x/y = live panel origin (init from
 // InpAnchorX/Y, restored from GlobalVariable, persisted on drop).
-int  g_anchor_x = 20;
-int  g_anchor_y = 100;
 
 // v1.4.1 R3 : HIT-TESTING for canvas-drawn ROUNDED controls (an OBJ_BUTTON is
 // opaque + square). Each drawn control registers a zone + action string ; the
@@ -883,107 +828,23 @@ int  g_anchor_y = 100;
 #define RCF_BTN_GHOST 6   // E5 : outline-only (ghost) button - 1px ring on the panel bg
 
 struct RCHit { int x1, y1, x2, y2; string act; int idx; int style; };
-RCHit g_hits[]; int g_nhits = 0;
 // D-FULL step 1 : the modal's hit-zones are always registered LAST (DrawSettingsOverlay
 // runs after the panel sections). This base index lets DestroySettingsOverlay TRUNCATE
 // them cleanly on close/tab-switch without touching the panel zones. -1 = modal closed.
 int g_modal_hit_base = -1;
-void HitReset(void) { g_nhits = 0; }
-void HitAdd(const int x1, const int y1, const int x2, const int y2, const string act,
-            const int idx = -1, const int style = RCF_NONE) {
-    // Idempotent by (act, idx) : a standalone redraw (e.g. DrawRecentSymbolsBar from
-    // OnTradeTransaction, which fires per trade) UPDATES the matching zone in place
-    // instead of appending a duplicate, so g_hits can't leak between HitReset cycles.
-    int slot = -1;
-    for (int i = 0; i < g_nhits; ++i)
-        if (g_hits[i].act == act && g_hits[i].idx == idx) { slot = i; break; }
-    if (slot < 0) {
-        if (g_nhits >= ArraySize(g_hits)) ArrayResize(g_hits, g_nhits + 32);
-        slot = g_nhits++;
-    }
-    g_hits[slot].x1 = x1 - g_anchor_x; g_hits[slot].y1 = y1 - g_anchor_y; // store RELATIVE
-    g_hits[slot].x2 = x2 - g_anchor_x; g_hits[slot].y2 = y2 - g_anchor_y;
-    g_hits[slot].act = act; g_hits[slot].idx = idx; g_hits[slot].style = style;
-}
 // Drop the (act, idx) zone so PaintFaces paints no ghost face for a control that just
 // disappeared on a standalone redraw (e.g. a recent-symbol slot that emptied). Zones
 // never overlap, so a swap-with-last removal keeps HitTest correct.
-void HitRemove(const string act, const int idx) {
-    for (int i = 0; i < g_nhits; ++i)
-        if (g_hits[i].act == act && g_hits[i].idx == idx) {
-            g_hits[i] = g_hits[g_nhits - 1];
-            g_nhits--;
-            return;
-        }
-}
-bool HitTest(const int mx, const int my, string &act, int &idx) {
-    const int rx = mx - g_anchor_x, ry = my - g_anchor_y; // click -> panel-relative (drag-proof)
-    for (int i = g_nhits - 1; i >= 0; --i)  // last-registered (top-most) wins
-        if (rx >= g_hits[i].x1 && rx <= g_hits[i].x2 && ry >= g_hits[i].y1 && ry <= g_hits[i].y2) {
-            act = g_hits[i].act; idx = g_hits[i].idx; return true;
-        }
-    return false;
-}
 // Paint one control face at LOCAL canvas coords (relative rect + RC_KIT_MARGIN).
-void DrawFace(const int lx, const int ly, const int w, const int h, const int style) {
-    // LOT C : mockup fidelity - buttons = raise->surface vertical gradient + FAINT border
-    // (.bt) ; ON states = accent->accent_deep gradient (.bt.primary / .sw.on / .seg .act) ;
-    // pill OFF track = faint light film (.sw white-9%) with a soft outline. All tints are
-    // PRE-BLENDED via TintOver (CCanvas overwrite semantics - see TintOver).
-    // v2.01.03 : ONE shape family - the last rounded-rect Button faces (Re-center /
-    // Auto-SL / recent-symbols / X / gear) become capsules too : ring + relief
-    // gradient, the exact construction of the modal buttons. (The old local radius
-    // `r` is retired with Button - capsules derive their radius from h.)
-    const color pill_off  = FilmOver(g_theme.bg, 0.09); // .sw track
-    const color soft_line = TintOver(g_theme.bg, C'148,163,184', 0.25); // pill outline
-    switch (style) {
-        case RCF_BTN:
-            g_kit.Capsule(lx, ly, w, h, ColorToARGB(g_theme.border, 255)); // faint ring
-            g_kit.CapsuleGradient(lx + 1, ly + 1, w - 2, h - 2,
-                                  ColorToARGB(g_theme.raise, 255), ColorToARGB(g_theme.surface, 255));
-            break;
-        case RCF_BTN_ON:
-            g_kit.Capsule(lx, ly, w, h, ColorToARGB(g_theme.accent, 255)); // accent ring
-            g_kit.CapsuleGradient(lx + 1, ly + 1, w - 2, h - 2,
-                                  ColorToARGB(g_theme.accent, 255), ColorToARGB(g_theme.accent_deep, 255));
-            break;
-        case RCF_BTN_RED:
-            g_kit.Capsule(lx, ly, w, h, ColorToARGB(g_theme.red, 255)); // red ring (danger affordance)
-            g_kit.CapsuleGradient(lx + 1, ly + 1, w - 2, h - 2,
-                                  ColorToARGB(g_theme.raise, 255), ColorToARGB(g_theme.surface, 255));
-            break;
-        case RCF_BTN_GHOST: // E5 : outline-only (mockup ghost button) - capsule ring + bg interior
-            g_kit.CapsuleStroke(lx - 1, ly - 1, w + 2, h + 2,
-                                ColorToARGB(g_theme.border, 255), ColorToARGB(g_theme.bg, 255), 1);
-            break;
-        case RCF_PILL_OFF:
-            g_kit.Capsule(lx - 1, ly - 1, w + 2, h + 2, ColorToARGB(soft_line)); // soft 1px outline (capsule : track covers interior)
-            g_kit.PillToggle(lx, ly, w, h, false, pill_off, g_theme.accent_deep, g_theme.accent, C'203,213,225');
-            break;
-        case RCF_PILL_ON:
-            g_kit.Capsule(lx - 1, ly - 1, w + 2, h + 2, ColorToARGB(soft_line)); // soft 1px outline (capsule : track covers interior)
-            g_kit.PillToggle(lx, ly, w, h, true,  pill_off, g_theme.accent_deep, g_theme.accent, C'255,255,255');
-            break;
-    }
-}
 // Paint every registered face into g_kit (called from RepaintCanvas, in-frame).
-void PaintFaces(void) {
-    for (int i = 0; i < g_nhits; ++i) {
-        if (g_hits[i].style == RCF_NONE) continue;
-        DrawFace(g_hits[i].x1 + RC_KIT_MARGIN, g_hits[i].y1 + RC_KIT_MARGIN,
-                 g_hits[i].x2 - g_hits[i].x1, g_hits[i].y2 - g_hits[i].y1, g_hits[i].style);
-    }
-}
 // AUDIT 2026-06-07 fix #5 : hoisted from BuildPanel so the discipline-lock
 // overlay can cover the FULL panel (was ~title+1 row = ~8 % of the panel).
-int  g_panel_height = 0;
 // V1.20 G3 settings popup : runtime overrides (persisted in GV) so the user
 // can change language / theme / prop preset without re-opening MT5's Inputs
 // dialog. -1 = use the Input as-is.
 int  g_active_plan_idx  = -1;   // -1 = InpPlan, else cast to ENUM_FN_PLAN
 int  g_active_theme_idx = -1;   // -1 = InpTheme, else 0 = DARK, 1 = LIGHT
 int  g_active_palette_idx = -1; // v2.02 : -1 = InpPalette, else 0..2 (Emeraude / Indigo / Ardoise)
-bool g_settings_open    = false;
 int  g_settings_tab     = 0;    // 0=Account 1=Risk 2=Display 3=Alerts
 // D-FULL step 3 : g_swallow_click REMOVED. It existed because native modal OBJ_BUTTONs
 // emitted an OBJECT_CLICK paired with a trailing CHARTEVENT_CLICK that could leak to a
@@ -1025,12 +886,6 @@ double g_eff_cycle_ymd       = 0.0;   // cycle start as YYYYMMDD double ; 0 = us
 double g_eff_margin_cap_viol = 30.0;  // tightened cumulative margin cap (post-violation)
 double g_eff_risk_cap_viol   = 1.0;   // tightened cumulative risk cap (post-violation)
 int    g_eff_refresh_ms      = 500;   // panel refresh period (ms) ; re-arms the timer on change
-bool g_dragging = false;
-int  g_drag_last_x = 0;
-int  g_drag_last_y = 0;
-void MovePanelBy(int dx, int dy);
-void PersistAnchor(void);
-void ClampAnchor(int &ax, int &ay); // B2 : keep panel title bar on-screen
 
 // SuggestedLot breakdown so the panel can show why a lot was/wasn't suggested
 struct SuggestedLot {
@@ -1127,13 +982,8 @@ int OnInit(void) {
     if (GlobalVariableCheck("RC_risk_violation"))
         g_risk_violation_active = (GlobalVariableGet("RC_risk_violation") != 0.0);
 
-    // B2 : restore panel anchor (drag position) ; default to inputs. Enable
-    // mouse-move events so the title bar can be dragged.
-    g_anchor_x = (int)InpAnchorX;
-    g_anchor_y = (int)InpAnchorY;
-    if (GlobalVariableCheck("RC_anchor_x")) g_anchor_x = (int)GlobalVariableGet("RC_anchor_x");
-    if (GlobalVariableCheck("RC_anchor_y")) g_anchor_y = (int)GlobalVariableGet("RC_anchor_y");
-    ClampAnchor(g_anchor_x, g_anchor_y); // B2 : never load off-screen
+    // v3 : mouse-move events feed the shell (drag of the floating table +
+    // hover-intent tooltips). The legacy panel anchor died with the panel.
     ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
 
     // Free-account detection note (Server 3 / demo = free/competition heuristic).
@@ -1247,7 +1097,7 @@ int OnInit(void) {
     // v3 SHELL : either the legacy panel OR the shell - never both (one UI owns
     // the chart). The shell reads its theme index from the palette/mode inputs so
     // a fresh attach already matches the product's brand language.
-    if (InpShellV2) {
+    {
         g_shell.Init();
         g_shell.SetThemeIdx((int)InpPalette * 2 + (EffectiveTheme() == RC_THEME_GLASS_DARK ? 0 : 1));
         g_shell.SetTipDelay(InpShellTipMs);
@@ -1261,11 +1111,6 @@ int OnInit(void) {
         ShellPushLabels();   // the shell's chrome speaks the product's language
         ShellRefresh();
     }
-    BuildPanel();
-    MovePanelBy(0, 0); // v2.01 : re-clamp with the REAL height (BuildPanel just set
-                       // g_panel_height ; the pre-build clamp above only had the 52px
-                       // fallback) - a bottom-persisted anchor self-heals at load
-                       // instead of teleporting on the first drag. No-op when legal.
 
     // First refresh silently - we don't want a sound burst on init or
     // timeframe switch. Alerts arm only after the panel reflects current state.
@@ -1291,9 +1136,6 @@ int OnInit(void) {
 void OnDeinit(const int reason) {
     EventKillTimer();
     g_shell.Destroy();                                 // v3 SHELL : frees its 6 canvases + restores chart flags
-    if (g_fx_on) { g_fx.Destroy(); g_fx_on = false; } // v1.4 : free the FX bitmap resource
-    g_kit.Destroy();                                   // v1.4 : free the modern body canvas
-    g_modal_kit.Destroy();                             // LOT D STEP 0 : free the modal shell canvas
     // FIX 6 : restore native auto-scale on removal, but only if the comfort scale we
     // applied is still the active one (don't clobber the user's manual zoom).
     if (g_eff_comfort && g_cs_max > g_cs_min) {
@@ -1321,34 +1163,15 @@ void OnDeinit(const int reason) {
 //| OnTimer - refresh panel                                          |
 //+------------------------------------------------------------------+
 void OnTimer(void) {
-    // R1 (V1.23) : while the settings modal is open, do NOT refresh the panel.
-    // RefreshPanel -> UpdateRow does ObjectsDeleteAll + DrawProgressBar/Chip every
-    // tick, RE-CREATING the bar/chip objects. MT5 draws foreground objects in
-    // CREATION order (OBJPROP_ZORDER governs CLICK priority only, NOT draw order),
-    // so freshly-recreated bars re-stack ON TOP of the opaque modal -> that was
-    // the %-bar bleed-through. The overlay is static between clicks (a click
-    // rebuilds it via ApplySettingsChange), so we just skip the refresh.
-    if (g_settings_open) { ChartRedraw(0); return; }
-    // 7a GLOW FLUIDE : while a breach is LIVE the timer runs at 40 ms (~25 fps) so the
-    // glow breath is a real animation ; the FULL panel refresh below keeps its
-    // configured cadence through a GetTickCount accumulator (fast ticks pulse the FX
-    // canvas ONLY - ~1 bitmap update, none of the heavy panel work). No breach =
-    // plain g_eff_refresh_ms timer, exactly the old behaviour. Re-arming every tick
-    // also self-heals the period after the modal's refresh stepper re-arms it slow.
-    const bool fx_fast = RiskIsBreaching();
-    EventKillTimer();
-    EventSetMillisecondTimer(fx_fast ? 40 : g_eff_refresh_ms);
-    if (fx_fast) {
-        RenderFx();                                    // fluid pulse every 40 ms
-        static uint s_last_full = 0;
-        const uint  now = GetTickCount();
-        if (now - s_last_full < (uint)g_eff_refresh_ms) { ChartRedraw(0); return; }
-        s_last_full = now;                             // fall through : full refresh
+    // v3.06 : the FX canvas and the legacy repaint are gone with the old panel.
+    // The cadence still self-heals when the refresh stepper changes it.
+    static int s_timer_ms = 0;
+    if (s_timer_ms != g_eff_refresh_ms) {
+        EventKillTimer();
+        EventSetMillisecondTimer(g_eff_refresh_ms);
+        s_timer_ms = g_eff_refresh_ms;
     }
     RefreshPanel();
-    RepaintCanvas(g_anchor_x, g_anchor_y, InpPanelWidth); // v1.4 : redraw modern body with fresh values
-    RenderFx();            // v1.4 : refresh the breach-glow pulse
-    UpdateClockBlinker();
     // FIX (LOT 1) : calendar scan is HEAVY (CalendarValueHistory + per-chart loop) ;
     // news change hourly at most, so throttle the chart-side refresh to every 30 s.
     // Was the n#1 freeze cause - the panel kept updating but the event queue
@@ -1384,397 +1207,12 @@ int OnCalculate(const int rates_total,
     return (rates_total);
 }
 
-//+------------------------------------------------------------------+
-//| OnChartEvent - reserved for future drag-to-move                  |
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| FIX sursaut modal : light MODAL-ONLY re-render for in-modal       |
-//| control clicks. The panel is fully COVERED while the modal is     |
-//| open (and OnTimer skips its refresh), so rebuilding ~190 panel    |
-//| objects + Erase/repainting the body canvas on EVERY click - what  |
-//| ApplySettingsChange does - was pure waste and, with canvas faces, |
-//| a visible JOLT. This keeps the STATE part of ApplySettingsChange  |
-//| (theme + profile resolve, so the modal rebinds to fresh data :    |
-//| cascade vendor->plan->size, Personal/FN layouts, live theme) and  |
-//| re-renders the MODAL ALONE - the proven zero-flicker set_tab      |
-//| path. The FULL rebuild happens ONCE, at close (set_close).        |
-//+------------------------------------------------------------------+
-void RefreshModalOnly(void) {
-    InitTheme();
-    g_profile_ok = g_catalog.Resolve(EffectivePlan(), (ENUM_FN_PHASE)g_eff_phase, g_eff_size,
-                                     (ENUM_FN_ACCOUNT_TYPE)g_eff_acct_type, g_addons_mask, g_profile);
-    if (g_eff_split >= 0.0) g_profile.profit_split_pct = g_eff_split; // V1.27 : manual split override
-    if (EffectivePlan() == FN_PLAN_PERSONAL && g_eff_size <= 0.0)
-        g_profile.initial_balance = DetectStartingBalance(); // V1.28 : Personal "Auto" -> real balance
-    if (!ProfileCanBeRestricted()) {
-        g_margin_violation_active = false;
-        g_risk_violation_active   = false;
-    }
-    LoadOrSeedPeakBalance(); // v2.02.05 : self-heal a poisoned first seed after a size/plan change
-    // The on-chart SL/TP recommendation lines are VISIBLE around the modal and feed on
-    // values steppers change live (N / sl / tp / max-risk / violation caps) - refresh
-    // them here so they always track the fresh state. Chart objects only (self-guarded
-    // on g_eff_risktools) : no panel rebuild, no canvas repaint, no jolt.
-    RefreshSlLines();
-    DestroySettingsOverlay(); // shell + labels + zones dropped...
-    DrawSettingsOverlay(g_anchor_x, g_anchor_y, InpPanelWidth); // ...and rebuilt on fresh state
-    ChartRedraw(0);
-}
-
-//+------------------------------------------------------------------+
-//| D-FULL step 2 : the settings-control logic, MOVED VERBATIM from   |
-//| the CHARTEVENT_OBJECT_CLICK ladder (the modal is 100% hit-testing |
-//| now - no native OBJ_BUTTON left, so no sparam ; the OBJPROP_STATE |
-//| resets died with the buttons). act = the object id minus "RC_"    |
-//| (e.g. "set_lang_fr", "set_sl_up"). Same effects : persist          |
-//| (GlobalVariableSet) + ApplySettingsChange.                        |
-//+------------------------------------------------------------------+
-void HandleModalControl(const string act) {
-    if (act == "set_lang_en" || act == "set_lang_fr" || act == "set_lang_es") {
-        if      (act == "set_lang_en") g_lang = 0;
-        else if (act == "set_lang_fr") g_lang = 1;
-        else                           g_lang = 2;
-        GlobalVariableSet("RC_lang", (double)g_lang);
-        RefreshModalOnly();
-    } else if (act == "set_theme_dark" || act == "set_theme_light") {
-        g_active_theme_idx = (act == "set_theme_dark" ? 0 : 1);
-        GlobalVariableSet("RC_theme_override", (double)g_active_theme_idx);
-        RefreshModalOnly();
-    } else if (act == "set_pal_prev" || act == "set_pal_next") {
-        // v2.02 MULTI-THEMES : cycle the brand palette (0..2), persist, FULL rebuild -
-        // EVERY surface (panel canvas + chart lines + modal) re-tints at once ; the
-        // proven exception path (BuildPanel redraws the open overlay itself).
-        const int d = (act == "set_pal_next" ? 1 : -1);
-        g_active_palette_idx = (((int)EffectivePalette() + d) % 3 + 3) % 3;
-        GlobalVariableSet("RC_palette_override", (double)g_active_palette_idx);
-        ApplySettingsChange(); // EXCEPTION : re-tints beyond the modal -> full rebuild
-    } else if (act == "set_vendor_prev" || act == "set_vendor_next") {
-        // V1.27 CASCADE step 1 : pick the BROKER. Snap the type to that
-        // vendor's first plan and the size to that plan's first legal size.
-        const int delta = (act == "set_vendor_next" ? 1 : -1);
-        int v = VendorOfPlan(EffectivePlan());
-        v = ((v + delta) % 6 + 6) % 6; // 6 vendors
-        ENUM_FN_PLAN vplans[];
-        const int vn = PlansForVendor(v, vplans);
-        if (vn > 0) {
-            g_active_plan_idx = (int)vplans[0];
-            GVSetLogin("RC_plan_override", (double)g_active_plan_idx); // v2.13 C : per-login
-            SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
-            SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
-        }
-        RefreshModalOnly();
-    } else if (act == "set_plan_prev" || act == "set_plan_next") {
-        // V1.27 CASCADE step 2 : pick the TYPE, constrained to the current
-        // vendor's plans only (so e.g. FTMO never offers Stellar types).
-        const int delta = (act == "set_plan_next" ? 1 : -1);
-        const int v = VendorOfPlan(EffectivePlan());
-        ENUM_FN_PLAN plans[];
-        const int np = PlansForVendor(v, plans);
-        const int cur = (int)EffectivePlan();
-        int pidx = 0;
-        for (int i = 0; i < np; ++i) if ((int)plans[i] == cur) { pidx = i; break; }
-        if (np > 0) {
-            pidx = ((pidx + delta) % np + np) % np;
-            g_active_plan_idx = (int)plans[pidx];
-            GVSetLogin("RC_plan_override", (double)g_active_plan_idx); // v2.13 C : per-login
-            SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
-            SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
-        }
-        RefreshModalOnly();
-    } else if (act == "set_phase_prev" || act == "set_phase_next") {
-        const int d = (act == "set_phase_next" ? 1 : -1);
-        g_eff_phase = ((g_eff_phase + d) % 4 + 4) % 4; // ENUM_FN_PHASE 0..3
-        SnapPhaseToPlan(EffectivePlan()); // V1.27 : don't let a non-Instant plan land on INSTANT
-        GVSetLogin("RC_phase", (double)g_eff_phase); // v2.13 C : per-login
-        RefreshModalOnly();
-    } else if (act == "set_size_prev" || act == "set_size_next") {
-        // V1.27 CASCADE step 3 : step only the sizes legal for the current plan.
-        double sizes[];
-        const int ns = ValidSizesForPlan(EffectivePlan(), sizes);
-        int sidx = 0;
-        for (int si = 0; si < ns; ++si)
-            if ((int)MathRound(g_eff_size) == (int)MathRound(sizes[si])) { sidx = si; break; }
-        const int d = (act == "set_size_next" ? 1 : -1);
-        if (ns > 0) {
-            sidx = ((sidx + d) % ns + ns) % ns;
-            g_eff_size = sizes[sidx];
-            GVSetLogin("RC_size", g_eff_size); // v2.13 C : per-login
-        }
-        RefreshModalOnly();
-    } else if (act == "set_acct_type") {
-        g_eff_acct_type = (g_eff_acct_type == 0 ? 1 : 0);
-        GVSetLogin("RC_acct_type", (double)g_eff_acct_type); // v2.13 C : per-login
-        RefreshModalOnly();
-    } else if (act == "set_perso_type") {
-        // V1.29 I : toggle Personal Real <-> Demo (labeling only ; catalogue untouched).
-        g_eff_personal_demo = (g_eff_personal_demo == 0 ? 1 : 0);
-        GVSetLogin("RC_perso_demo", (double)g_eff_personal_demo); // v2.13 C : per-login
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_addon_") == 0) {
-        const int flag = (int)StringToInteger(StringSubstr(act, StringLen("set_addon_")));
-        if ((g_addons_mask & flag) != 0) g_addons_mask &= ~flag;
-        else                             g_addons_mask |=  flag;
-        GVSetLogin("RC_addons", (double)g_addons_mask); // v2.13 C : per-login
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_n_") == 0) {
-        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
-        g_max_parallel = (int)MathMax(1.0, MathMin(50.0, (double)g_max_parallel + d));
-        PersistMaxParallel();
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_sl_") == 0) {
-        const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
-        g_eff_sl_pct = MathMax(0.1, MathMin(10.0, MathRound((g_eff_sl_pct + d) * 100.0) / 100.0));
-        GlobalVariableSet("RC_sl_pct", g_eff_sl_pct);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_tp_") == 0) {
-        const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
-        g_eff_tp_pct = MathMax(0.05, MathMin(10.0, MathRound((g_eff_tp_pct + d) * 100.0) / 100.0));
-        GlobalVariableSet("RC_tp_pct", g_eff_tp_pct);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_mm_") == 0) {
-        const double d = (StringFind(act, "_up") >= 0 ? 1.0 : -1.0);
-        g_eff_max_margin_pt = MathMax(1.0, MathMin(100.0, MathRound(g_eff_max_margin_pt + d)));
-        GlobalVariableSet("RC_mm_pt", g_eff_max_margin_pt);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_mr_") == 0) {
-        const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
-        g_eff_max_risk_pt = MathMax(0.1, MathMin(5.0, MathRound((g_eff_max_risk_pt + d) * 100.0) / 100.0));
-        GlobalVariableSet("RC_mr_pt", g_eff_max_risk_pt);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_tn_") == 0) { // V1.26 Advanced steppers
-        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
-        g_eff_tilt_n = (int)MathMax(0.0, MathMin(50.0, (double)g_eff_tilt_n + d));
-        GlobalVariableSet("RC_tilt_n", (double)g_eff_tilt_n);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_tw_") == 0) {
-        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
-        g_eff_tilt_win = (int)MathMax(1.0, MathMin(240.0, (double)g_eff_tilt_win + d));
-        GlobalVariableSet("RC_tilt_win", (double)g_eff_tilt_win);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_cn_") == 0) {
-        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
-        g_eff_cooldown_n = (int)MathMax(0.0, MathMin(20.0, (double)g_eff_cooldown_n + d));
-        GlobalVariableSet("RC_cool_n", (double)g_eff_cooldown_n);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_cm_") == 0) {
-        const int d = (StringFind(act, "_up") >= 0 ? 5 : -5);
-        g_eff_cooldown_m = (int)MathMax(0.0, MathMin(480.0, (double)g_eff_cooldown_m + d));
-        GlobalVariableSet("RC_cool_m", (double)g_eff_cooldown_m);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_sh_") == 0) {
-        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
-        g_eff_selflock_h = (int)MathMax(1.0, MathMin(72.0, (double)g_eff_selflock_h + d));
-        GlobalVariableSet("RC_selflock_h", (double)g_eff_selflock_h);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_cp_") == 0) {
-        const double d = (StringFind(act, "_up") >= 0 ? 1.0 : -1.0);
-        g_eff_comfort_pct = MathMax(1.0, MathMin(50.0, MathRound(g_eff_comfort_pct + d)));
-        GlobalVariableSet("RC_comfort_pct", g_eff_comfort_pct);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_split_") == 0) {
-        // V1.27 : profit-split override. Cycles Auto(-1) -> 70 -> 80 -> 90 -> 95 -> Auto.
-        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
-        double opts[5]; opts[0]=-1.0; opts[1]=70.0; opts[2]=80.0; opts[3]=90.0; opts[4]=95.0;
-        int oi = 0;
-        for (int i = 0; i < 5; ++i) if ((int)MathRound(opts[i]) == (int)MathRound(g_eff_split)) { oi = i; break; }
-        oi = ((oi + d) % 5 + 5) % 5;
-        g_eff_split = opts[oi];
-        GVSetLogin("RC_split", g_eff_split); // v2.13 C : per-login
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_cyy_") == 0) {
-        // V1.27 : cycle-start YEAR stepper (YYYYMMDD double).
-        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
-        if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
-        int y = (int)g_eff_cycle_ymd / 10000, m = ((int)g_eff_cycle_ymd / 100) % 100, dd = (int)g_eff_cycle_ymd % 100;
-        y = (int)MathMax(2020, MathMin(2035, y + d));
-        if (dd > DaysInMonth(y, m)) dd = DaysInMonth(y, m); // Feb 29 -> 28 in a non-leap year
-        g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
-        GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd); // v2.13 C : per-login
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_cmm_") == 0) {
-        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
-        if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
-        int y = (int)g_eff_cycle_ymd / 10000, m = ((int)g_eff_cycle_ymd / 100) % 100, dd = (int)g_eff_cycle_ymd % 100;
-        m = ((m - 1 + d) % 12 + 12) % 12 + 1;
-        if (dd > DaysInMonth(y, m)) dd = DaysInMonth(y, m); // clamp to the new month's length
-        g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
-        GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd); // v2.13 C : per-login
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_cdd_") == 0) {
-        const int d = (StringFind(act, "_up") >= 0 ? 1 : -1);
-        if (g_eff_cycle_ymd <= 0) g_eff_cycle_ymd = IsoToYmd(InpCycleStartIso);
-        int y = (int)g_eff_cycle_ymd / 10000, m = ((int)g_eff_cycle_ymd / 100) % 100, dd = (int)g_eff_cycle_ymd % 100;
-        const int dim = DaysInMonth(y, m);
-        if (dd > dim) dd = dim;
-        dd = ((dd - 1 + d) % dim + dim) % dim + 1; // 1..days-in-month (calendar-aware)
-        g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
-        GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd); // v2.13 C : per-login
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_mcv_") == 0) {
-        // V1.27 : post-violation MARGIN cap (%) stepper.
-        const double d = (StringFind(act, "_up") >= 0 ? 5.0 : -5.0);
-        g_eff_margin_cap_viol = MathMax(5.0, MathMin(100.0, MathRound(g_eff_margin_cap_viol + d)));
-        GlobalVariableSet("RC_mcap_viol", g_eff_margin_cap_viol);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_rcv_") == 0) {
-        // V1.27 : post-violation RISK cap (%) stepper.
-        const double d = (StringFind(act, "_up") >= 0 ? 0.1 : -0.1);
-        g_eff_risk_cap_viol = MathMax(0.1, MathMin(5.0, MathRound((g_eff_risk_cap_viol + d) * 100.0) / 100.0));
-        GlobalVariableSet("RC_rcap_viol", g_eff_risk_cap_viol);
-        RefreshModalOnly();
-    } else if (StringFind(act, "set_rm_") == 0) {
-        // V1.27 : refresh period (ms) stepper ; re-arm the timer immediately.
-        const int d = (StringFind(act, "_up") >= 0 ? 100 : -100);
-        g_eff_refresh_ms = (int)MathMax(100.0, MathMin(2000.0, (double)g_eff_refresh_ms + d));
-        GlobalVariableSet("RC_refresh_ms", (double)g_eff_refresh_ms);
-        EventKillTimer();
-        EventSetMillisecondTimer(g_eff_refresh_ms);
-        RefreshModalOnly();
-    } else if (act == "set_mviol") {
-        // V1.27 : mirror of the on-chart margin-violation toggle (same shadow + GV).
-        g_margin_violation_active = !g_margin_violation_active;
-        GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
-        RefreshModalOnly();
-    } else if (act == "set_rviol") {
-        g_risk_violation_active = !g_risk_violation_active;
-        GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0);
-        RefreshModalOnly();
-    } else if (act == "set_news") {
-        g_eff_show_news = !g_eff_show_news;
-        GlobalVariableSet("RC_show_news", g_eff_show_news ? 1.0 : 0.0);
-        ApplySettingsChange(); // EXCEPTION : news bands live on the CHART (visible around the modal) -> apply live
-    } else if (act == "set_news_high") {
-        g_eff_news_high = !g_eff_news_high; // V1.29 R
-        GlobalVariableSet("RC_news_high", g_eff_news_high ? 1.0 : 0.0);
-        ApplySettingsChange(); // EXCEPTION : chart-side news bands -> apply live
-    } else if (act == "set_news_med") {
-        g_eff_news_med = !g_eff_news_med; // V1.29 R
-        GlobalVariableSet("RC_news_med", g_eff_news_med ? 1.0 : 0.0);
-        ApplySettingsChange(); // EXCEPTION : chart-side news bands -> apply live
-    } else if (act == "set_comfort") {
-        g_eff_comfort = !g_eff_comfort;
-        GlobalVariableSet("RC_comfort", g_eff_comfort ? 1.0 : 0.0);
-        ApplySettingsChange(); // EXCEPTION : comfort scale = chart zoom -> apply live
-    } else if (act == "set_discipline") {
-        g_eff_discipline = !g_eff_discipline;
-        GlobalVariableSet("RC_discipline", g_eff_discipline ? 1.0 : 0.0);
-        RefreshModalOnly();
-    } else if (act == "set_risktools") {
-        // V1.29 J : master risk-tools ON/OFF (explicit choice persists, beats the Personal default).
-        g_eff_risktools = !g_eff_risktools;
-        GlobalVariableSet("RC_risktools", g_eff_risktools ? 1.0 : 0.0);
-        ApplySettingsChange(); // EXCEPTION : clears/redraws chart SL lines + changes panel GEOMETRY (g_panel_height feeds the modal height) -> full rebuild
-    } else if (act == "set_sound") {
-        g_eff_sound = !g_eff_sound;
-        GlobalVariableSet("RC_sound", g_eff_sound ? 1.0 : 0.0);
-        RefreshModalOnly();
-    } else if (act == "set_telegram") {
-        g_eff_telegram = !g_eff_telegram;
-        GlobalVariableSet("RC_telegram", g_eff_telegram ? 1.0 : 0.0);
-        RefreshModalOnly();
-    } else if (act == "set_selflock") {
-        // V1.24 G1 : arm the self-lock for the configured hours, persist, close the
-        // popup so the full-panel STOP shows immediately.
-        g_selflock_until = TimeCurrent() + (datetime)MathMax(1, g_eff_selflock_h) * 3600;
-        GlobalVariableSet("RC_selflock_until", (double)g_selflock_until);
-        g_unlock_arm = 0;
-        g_settings_open = false;
-        ApplySettingsChange(); // EXCEPTION : this CLOSES the modal + must show the STOP overlay immediately -> full rebuild
-    }
-}
-
-//+------------------------------------------------------------------+
-//| D-FULL step 1 : modal-side dispatcher. While the settings modal   |
-//| is OPEN, every coordinate click routes HERE (DispatchHit hands    |
-//| over before any panel act can run). Converted controls (tabs, X)  |
-//| act ; "set_noop" (the full-modal swallow zone) and any not-yet-   |
-//| converted act are ignored - the remaining NATIVE modal buttons    |
-//| keep their CHARTEVENT_OBJECT_CLICK ladder, and the trailing       |
-//| CHARTEVENT_CLICK MT5 pairs with them dies on the noop zone        |
-//| instead of leaking to a panel zone underneath.                    |
-//+------------------------------------------------------------------+
-void DispatchModalHit(const string act, const int idx) {
-    if (act == "set_close") {
-        // X : CLOSING must restore the FULL panel - opening the modal HID the panel
-        // controls (SetPanelControlsHidden(true,"set") : buttons/edits/logo AND the
-        // g_kit canvas bitmap). A light close left them hidden = half-rendered panel
-        // (same class as the lock->clear bug). Full rebuild = the proven native-close
-        // path ; a one-off click action, so the rebuild cost is invisible.
-        g_settings_open = false;
-        DestroySettingsOverlay();   // free the shell bitmap + truncate the modal zones
-        ApplySettingsChange();      // DestroyAllObjects + BuildPanel + refresh + ChartRedraw
-    } else if (act == "set_tab") {         // tab switch : re-render ONLY the modal (zero flicker)
-        if (idx >= 0 && idx < 5 && idx != g_settings_tab) {
-            g_settings_tab = idx;
-            DestroySettingsOverlay();
-            DrawSettingsOverlay(g_anchor_x, g_anchor_y, InpPanelWidth);
-        }
-        ChartRedraw(0);
-    } else if (act != "set_noop") {
-        // D-FULL step 2 : every converted body control routes here - the exact logic
-        // its native OBJECT_CLICK branch ran (moved into HandleModalControl).
-        HandleModalControl(act);
-    }
-    // "set_noop" : swallowed on purpose (modal captures input).
-}
-
-//+------------------------------------------------------------------+
-//| v1.4.1 R3 : route a hit-tested (canvas-drawn) control to the same |
-//| logic its OBJ_BUTTON used. Extended per phase (tf now ; toggles,  |
-//| buttons, positions, settings modal next).                        |
-//+------------------------------------------------------------------+
-void DispatchHit(const string act, const int idx) {
-    // Discipline HARD-LOCK integrity : while the full-panel STOP overlay is up, the
-    // native code hid the OBJ_BUTTONs so the lock can't be bypassed. Hit-zones have
-    // no such hiding, so refuse every control click while the overlay exists (the
-    // native "disc_unlock" button keeps its own OBJECT_CLICK path).
-    if (ObjectFind(0, RC_PREFIX + "discipline_overlay") >= 0) return;
-    // D-FULL step 1 : while the modal is open, ALL coordinate clicks belong to the
-    // modal dispatcher - its zones sit on TOP of the registry and "set_noop" swallows
-    // whatever misses a control. Panel acts stay unreachable (same capture semantics
-    // the plain `return` used to provide).
-    if (g_settings_open) { DispatchModalHit(act, idx); return; }
-    if (act == "tf") {
-        ENUM_TIMEFRAMES tfv[9] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
-                                  PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
-        if (idx >= 0 && idx < 9) ChartSetSymbolPeriod(0, _Symbol, tfv[idx]);
-    } else if (act == "set") {                 // gear : open/close settings modal
-        g_settings_open = !g_settings_open; ApplySettingsChange();
-    } else if (act == "kill") {                // X : remove the indicator
-        int kwin = ChartWindowFind(); if (kwin < 0) kwin = 0;
-        ObjectsDeleteAll(0, RC_PREFIX); ChartIndicatorDelete(0, kwin, "RiskCockpit"); ChartRedraw(0);
-    } else if (act == "be") {                  // BE : toggle breakeven lines
-        // Phase 3 (a) : can't ARM BE with no open positions (nothing to break-even) ;
-        // turning it OFF is always allowed (clears any stale line).
-        if (!g_be_visible && PositionsTotal() == 0) return;
-        g_be_visible = !g_be_visible; PersistBE(); DrawBreakevenLines(); ApplySettingsChange();
-    } else if (act == "recenter") {            // re-apply comfort scale on all charts
-        ApplyComfortScaleAllCharts(); ChartRedraw(0);
-    } else if (act == "recsym") {              // quick-switch to a recent symbol
-        if (idx >= 0 && idx < ArraySize(g_recent_syms))
-            ChartSetSymbolPeriod(0, g_recent_syms[idx], (ENUM_TIMEFRAMES)ChartPeriod(0));
-    } else if (act == "possym") {              // click a position row -> its symbol
-        if (idx >= 0 && idx < RC_MAX_POSITIONS && StringLen(g_pos_sym[idx]) > 0)
-            ChartSetSymbolPeriod(0, g_pos_sym[idx], (ENUM_TIMEFRAMES)ChartPeriod(0));
-    } else if (act == "mp_dn") {               // max-parallel stepper -
-        if (g_max_parallel > 1)  { g_max_parallel--; PersistMaxParallel(); ApplySettingsChange(); }
-    } else if (act == "mp_up") {               // max-parallel stepper +
-        if (g_max_parallel < 50) { g_max_parallel++; PersistMaxParallel(); ApplySettingsChange(); }
-    } else if (act == "viol_m") {              // margin-violation pill
-        g_margin_violation_active = !g_margin_violation_active;
-        GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0); ApplySettingsChange();
-    } else if (act == "viol_r") {              // risk-violation pill
-        g_risk_violation_active = !g_risk_violation_active;
-        GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0); ApplySettingsChange();
-    }
-}
-
 void OnChartEvent(const int id, const long& lparam, const double& dparam, const string& sparam) {
     // v3 SHELL : ONE dispatcher. When the shell is on it owns clicks + hover ; the
     // legacy hit registry never sees them (two registries must never consume the
     // same click). CHART_CHANGE still falls through : the chart-side news markers
     // keep their re-pin, and the shell rebuilds its surfaces at the end of it.
-    if (InpShellV2 && g_shell.Created()) {
+    if (g_shell.Created()) {
         if (id == CHARTEVENT_CLICK) {
             g_shell.OnClick((int)lparam, (int)dparam);
             if (g_shell.PendKillTake()) {          // navbar X : remove this instance
@@ -1827,174 +1265,13 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
         }
         // v3 SHELL : surfaces are destroyed + recreated (the zones moved) and the
         // hover state is reset - the playbook's OnChartChange rule.
-        if (InpShellV2 && g_shell.Created()) g_shell.OnChartChange();
+        if (g_shell.Created()) g_shell.OnChartChange();
         ChartRedraw(0);
         return;
     }
-    // B2 : drag-to-move via the title bar (CHARTEVENT_MOUSE_MOVE).
-    // lparam = mouse X (px), dparam = mouse Y (px), sparam = "1" if left button down.
-    if (id == CHARTEVENT_MOUSE_MOVE) {
-        const int mx = (int)lparam;
-        const int my = (int)dparam;
-        const bool ldown = (sparam == "1");
-        if (ldown && !g_dragging) {
-            // start a drag only if the press lands on the title bar
-            if (mx >= g_anchor_x && mx <= g_anchor_x + InpPanelWidth &&
-                my >= g_anchor_y && my <= g_anchor_y + RC_TITLE_HEIGHT) {
-                g_dragging = true;
-                g_drag_last_x = mx;
-                g_drag_last_y = my;
-                ChartSetInteger(0, CHART_MOUSE_SCROLL, false); // freeze chart scroll while dragging
-            }
-        } else if (ldown && g_dragging) {
-            MovePanelBy(mx - g_drag_last_x, my - g_drag_last_y);
-            g_drag_last_x = mx;
-            g_drag_last_y = my;
-            ChartRedraw(0);
-        } else if (!ldown && g_dragging) {
-            g_dragging = false;
-            ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
-            PersistAnchor();
-            ChartRedraw(0);
-        }
-        return;
-    }
-    // v1.4.1 R3 : canvas-drawn (rounded) controls are routed by CLICK coordinates.
-    // (An OBJ_BUTTON is opaque + square ; rounded controls are painted, not buttons.)
-    if (id == CHARTEVENT_CLICK) {
-        string act; int hidx;
-        if (HitTest((int)lparam, (int)dparam, act, hidx)) { DispatchHit(act, hidx); return; }
-    }
 
-    // CHARTEVENT_OBJECT_CLICK : +/- on max-parallel control (now OBJ_BUTTON)
-    if (id == CHARTEVENT_OBJECT_CLICK) {
-        if (sparam == RC_PREFIX + "mp_minus") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false); // un-press
-            if (g_max_parallel > 1) {
-                g_max_parallel--;
-                PersistMaxParallel();
-                ObjectSetString(0, RC_PREFIX + "mp_value", OBJPROP_TEXT,
-                                IntegerToString(g_max_parallel));
-                RefreshFooterMetrics();
-                RefreshSlLines();
-                ChartRedraw(0);
-            }
-        } else if (sparam == RC_PREFIX + "mp_plus") {
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false); // un-press
-            if (g_max_parallel < 50) {
-                g_max_parallel++;
-                PersistMaxParallel();
-                ObjectSetString(0, RC_PREFIX + "mp_value", OBJPROP_TEXT,
-                                IntegerToString(g_max_parallel));
-                RefreshFooterMetrics();
-                RefreshSlLines();
-                ChartRedraw(0);
-            }
-        } else if (sparam == RC_PREFIX + "set") {
-            // G3 : open/close the settings overlay.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            g_settings_open = !g_settings_open;
-            ApplySettingsChange();
-        } else if (sparam == RC_PREFIX + "kill") {
-            // V1.28 : remove THIS indicator instance from the chart. Clean up our
-            // objects first, then ChartIndicatorDelete by the fixed short name.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            int kwin = ChartWindowFind();
-            if (kwin < 0) kwin = 0; // main chart
-            ObjectsDeleteAll(0, RC_PREFIX);
-            ChartIndicatorDelete(0, kwin, "RiskCockpit");
-            ChartRedraw(0);
-            return;
-            // D-FULL step 2 : ALL modal set_* branches (lang / theme / vendor / plan /
-            // phase / size / steppers / toggles / selflock) moved to HandleModalControl -
-            // the modal is 100% hit-testing, no native OBJ_BUTTON left to OBJECT_CLICK.
-        } else if (sparam == RC_PREFIX + "disc_unlock") {
-            // V1.24 G1 : Ulysses-pact unlock = double-confirm within 5 s.
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            const datetime nowu = TimeCurrent();
-            if (g_unlock_arm > 0 && nowu - g_unlock_arm <= 5) {
-                g_selflock_until = 0;
-                g_unlock_arm = 0;
-                GlobalVariableSet("RC_selflock_until", 0.0);
-            } else {
-                g_unlock_arm = nowu; // arm ; a 2nd click within 5 s confirms
-            }
-            RefreshPanel();
-            ChartRedraw(0);
-        } else if (sparam == RC_PREFIX + "rule_margin_cum_viol") {
-            // B7 : toggle margin violation -> tighten cumulative margin cap.
-            g_margin_violation_active = !g_margin_violation_active;
-            PersistViolationFlags();
-            ObjectSetString(0, sparam, OBJPROP_TEXT, (g_margin_violation_active ? "X" : " "));
-            ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR,
-                             (g_margin_violation_active ? g_theme.red : g_theme.bg_section));
-            ObjectSetInteger(0, sparam, OBJPROP_COLOR,
-                             (g_margin_violation_active ? g_theme.bg : g_theme.text_dim));
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            RefreshPanel();
-            ChartRedraw(0);
-        } else if (sparam == RC_PREFIX + "rule_risk_cum_viol") {
-            // B7 : toggle risk violation -> tighten cumulative risk cap.
-            g_risk_violation_active = !g_risk_violation_active;
-            PersistViolationFlags();
-            ObjectSetString(0, sparam, OBJPROP_TEXT, (g_risk_violation_active ? "X" : " "));
-            ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR,
-                             (g_risk_violation_active ? g_theme.red : g_theme.bg_section));
-            ObjectSetInteger(0, sparam, OBJPROP_COLOR,
-                             (g_risk_violation_active ? g_theme.bg : g_theme.text_dim));
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            RefreshPanel();
-            ChartRedraw(0);
-        } else if (StringFind(sparam, RC_PREFIX + "recsym_") == 0) {
-            // B8 : quick-switch the Helper chart to the clicked recent symbol.
-            const int ridx = (int)StringToInteger(StringSubstr(sparam, StringLen(RC_PREFIX + "recsym_")));
-            if (ridx >= 0 && ridx < ArraySize(g_recent_syms))
-                ChartSetSymbolPeriod(0, g_recent_syms[ridx], (ENUM_TIMEFRAMES)ChartPeriod(0));
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-        } else if (StringFind(sparam, RC_PREFIX + "pos_row_") == 0) {
-            // V1.27 : click an open-position row -> switch the chart to its symbol.
-            const int pidx = (int)StringToInteger(StringSubstr(sparam, StringLen(RC_PREFIX + "pos_row_")));
-            if (pidx >= 0 && pidx < RC_MAX_POSITIONS && StringLen(g_pos_sym[pidx]) > 0)
-                ChartSetSymbolPeriod(0, g_pos_sym[pidx], (ENUM_TIMEFRAMES)ChartPeriod(0));
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-        } else if (sparam == RC_PREFIX + "autosl") {
-            // B10 : disabled toggle - indicator can't place SL. No-op (reset state).
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-        } else if (sparam == RC_PREFIX + "recenter") {
-            // FIX 6 + LOT D B-RESIZE-ALL : re-apply the comfort padded scale on
-            // EVERY open chart (not just the active one). User-explicit gesture
-            // -> overriding any in-progress zoom is intended.
-            ApplyComfortScaleAllCharts();
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            ChartRedraw(0);
-        } else if (sparam == RC_PREFIX + "be") {
-            // LOT 5 : toggle breakeven lines on the active chart.
-            g_be_visible = !g_be_visible;
-            PersistBE(); // LOT 6 : survive re-attach
-            DrawBreakevenLines();
-            // re-tint the BE button in-place (no full panel rebuild).
-            ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR, g_be_visible ? g_theme.accent2 : g_theme.surface_hi);
-            ObjectSetInteger(0, sparam, OBJPROP_COLOR,   g_be_visible ? g_theme.bg      : g_theme.text);
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-            ChartRedraw(0);
-        } else if (StringFind(sparam, RC_PREFIX + "tf_") == 0) {
-            // LOT 4 : timeframe quick-switch on the active chart.
-            const string tf_code = StringSubstr(sparam, StringLen(RC_PREFIX + "tf_"));
-            ENUM_TIMEFRAMES new_tf = PERIOD_CURRENT;
-            if      (tf_code == "M1")  new_tf = PERIOD_M1;
-            else if (tf_code == "M5")  new_tf = PERIOD_M5;
-            else if (tf_code == "M15") new_tf = PERIOD_M15;
-            else if (tf_code == "M30") new_tf = PERIOD_M30;
-            else if (tf_code == "H1")  new_tf = PERIOD_H1;
-            else if (tf_code == "H4")  new_tf = PERIOD_H4;
-            else if (tf_code == "D1")  new_tf = PERIOD_D1;
-            else if (tf_code == "W1")  new_tf = PERIOD_W1;
-            else if (tf_code == "MN1") new_tf = PERIOD_MN1;
-            if (new_tf != PERIOD_CURRENT)
-                ChartSetSymbolPeriod(0, _Symbol, new_tf);
-            ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
-        }
-    }
+    // v3.06 : no native control is left on the chart (the shell is 100 %
+    // hit-testing) - CHARTEVENT_OBJECT_CLICK has nothing to route.
 }
 
 //+------------------------------------------------------------------+
@@ -2003,23 +1280,17 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
 void OnTradeTransaction(const MqlTradeTransaction& trans,
                         const MqlTradeRequest& request,
                         const MqlTradeResult& result) {
-    // R1 (V1.23) : don't redraw panel objects while the settings modal is open -
-    // they would re-stack over it. The next OnTimer RefreshPanel (which also
-    // refreshes the positions list) catches up the instant the popup closes.
-    if (g_settings_open) return;
     if (trans.type == TRADE_TRANSACTION_POSITION || trans.type == TRADE_TRANSACTION_DEAL_ADD || trans.type == TRADE_TRANSACTION_DEAL_UPDATE || trans.type == TRADE_TRANSACTION_DEAL_DELETE || trans.type == TRADE_TRANSACTION_HISTORY_ADD) {
-        RefreshPositionsList(); // sets chip status first
-        RefreshSlLines();       // may override chip to "SL>REC" if user SL too wide
+        RefreshSlLines();       // SL / TP advisory lines follow the position set
         SnapshotPositionList();
-        UpdateRecentSymbols();                                       // B8 : refresh recent list
-        DrawRecentSymbolsBar(g_anchor_x, g_recbar_y, InpPanelWidth); // B8 : redraw quick-switch bar
-        // Phase 3 (b) : all positions closed -> auto-disarm BE (clear flag + lines +
-        // reflect OFF on the face) so it never lingers "on" with nothing to break-even.
+        // all positions closed -> auto-disarm BE so it never lingers "on" with
+        // nothing to break-even ; otherwise re-sync the basket line.
         if (g_be_visible && PositionsTotal() == 0) {
-            g_be_visible = false; PersistBE(); ClearBreakevenLines(); SetBeFaceOff();
+            g_be_visible = false; PersistBE(); ClearBreakevenLines();
         } else if (g_be_visible) {
-            DrawBreakevenLines();                                     // LOT 5 : sync BE lines after position change
+            DrawBreakevenLines();
         }
+        RefreshPanel();         // v3.06 : the shell redraws with the new basket
         ChartRedraw(0);
     }
 }
@@ -2033,642 +1304,9 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
 // regardless of ZORDER or creation order. So while an overlay is up we HIDE
 // those controls via OBJPROP_TIMEFRAMES = OBJ_NO_PERIODS, keeping only the ones
 // whose name starts with `keep`. Guarded on transition (no per-tick enumeration).
-int    g_ctrl_hidden = -1;  // -1 unknown, 0 shown, 1 hidden
-string g_ctrl_keep   = "";
-void SetPanelControlsHidden(bool hide, const string keep) {
-    if (g_ctrl_hidden == (hide ? 1 : 0) && g_ctrl_keep == keep) return;
-    g_ctrl_hidden = hide ? 1 : 0; g_ctrl_keep = keep;
-    const int total = ObjectsTotal(0);
-    for (int i = 0; i < total; ++i) {
-        const string nm = ObjectName(0, i);
-        if (StringFind(nm, RC_PREFIX) != 0) continue;
-        const long t = ObjectGetInteger(0, nm, OBJPROP_TYPE);
-        if (t != OBJ_BUTTON && t != OBJ_EDIT && t != OBJ_BITMAP_LABEL) continue;
-        const bool keep_this = (keep != "" && StringFind(nm, RC_PREFIX + keep) == 0);
-        ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES,
-                         (hide && !keep_this) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
-    }
-}
 
 void DestroyAllObjects(void) {
     ObjectsDeleteAll(0, RC_PREFIX);
-    g_ctrl_hidden = -1; // controls recreated visible on next build -> force re-apply
-}
-
-//+------------------------------------------------------------------+
-//| v1.4 FX overlay : is any breach-critical rule at RED right now ?  |
-//| (cumulative margin / cumulative risk / daily DD / overall DD)     |
-//+------------------------------------------------------------------+
-bool RiskIsBreaching(void) {
-    for (int i = 0; i < RC_RULE_COUNT; ++i) {
-        if (!g_rows[i].applies) continue;
-        if (g_rows[i].status != RC_STATUS_RED) continue;
-        const string k = g_rows[i].key;
-        if (k == "rule_margin_cum" || k == "rule_risk_cum" ||
-            k == "rule_daily_dd"   || k == "rule_overall_dd")
-            return true;
-    }
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| v1.4 FX overlay : redraw the glow into the RC_fx bitmap. Clear    |
-//| everywhere except a fading RED halo in the outer margin band that |
-//| breathes via GetTickCount. No breach -> the bitmap stays empty.   |
-//+------------------------------------------------------------------+
-// FIX SQUARES : rounded fill on the RAW g_fx canvas (the kit's RoundFill is private to
-// g_kit). Same 2-rects + 4-discs construction as JR_CanvasUI ; used by the rounded
-// breach glow below. Additive file-local helper - the kit itself is untouched.
-void FxRoundFill(const int x, const int y, const int w, const int h, int r, const uint argb) {
-    if (r > w / 2) r = w / 2;
-    if (r > h / 2) r = h / 2;
-    if (r < 0) r = 0;
-    g_fx.FillRectangle(x + r, y, x + w - 1 - r, y + h - 1, argb);
-    g_fx.FillRectangle(x, y + r, x + w - 1, y + h - 1 - r, argb);
-    g_fx.FillCircle(x + r,         y + r,         r, argb);
-    g_fx.FillCircle(x + w - 1 - r, y + r,         r, argb);
-    g_fx.FillCircle(x + r,         y + h - 1 - r, r, argb);
-    g_fx.FillCircle(x + w - 1 - r, y + h - 1 - r, r, argb);
-}
-
-void RenderFx(void) {
-    if (!g_fx_on) return;
-    const bool breach = RiskIsBreaching();
-    if (!breach && !g_fx_was_breach) return; // already clear -> skip the GPU update
-    g_fx_was_breach = breach;
-    g_fx.Erase(ColorToARGB(clrBlack, 0)); // fully transparent
-    if (breach) {
-        const uint   ms   = GetTickCount();
-        // POLISH F1 : the ease was ALREADY sinusoidal - the perceived jerk came from
-        // too few timer frames per cycle (1.6s / ~500ms refresh = ~3 steps). Slower
-        // cycle (2x the frames) + gentler amplitude = far smaller alpha delta per
-        // frame -> visually fluid breath, with NO change to the repaint cadence.
-        const double ph   = (double)(ms % 3200) / 3200.0;          // 3.2 s cycle
-        const double s    = 0.5 - 0.5 * MathCos(ph * 2.0 * M_PI);  // 0..1 smooth breath
-        const int    peak = (int)(120.0 + 90.0 * s);               // 120..210 alpha near the edge
-        const int    m    = RC_FX_MARGIN;
-        // FIX SQUARES : ROUNDED concentric rings (the old 1px Rectangle outlines were
-        // square-cornered). Overwrite trick, same as EdgeGlow : filled ROUNDED rects
-        // drawn outside-in - each inner fill overwrites the previous interior, leaving
-        // 1px rounded fringes - then the centre is cleared back to transparent so the
-        // panel content is never covered. Ring at inset i sits (m-i)px outside the
-        // panel edge -> radius RC_R_PANEL + (m-i) follows the panel corners.
-        for (int i = 0; i < m; ++i) {
-            const int a = (int)(peak * (double)(i + 1) / (double)m);
-            FxRoundFill(i, i, g_fx_w - 2 * i, g_fx_h - 2 * i, RC_R_PANEL + (m - i),
-                        ColorToARGB(g_theme.red, (uchar)a));
-        }
-        FxRoundFill(m, m, g_fx_w - 2 * m, g_fx_h - 2 * m, RC_R_PANEL,
-                    ColorToARGB(clrBlack, 0)); // re-clear the centre (panel stays uncovered)
-    }
-    g_fx.Update(true);
-}
-
-//+------------------------------------------------------------------+
-//| v1.4 FX overlay : (re)create the RC_fx bitmap around the panel.   |
-//| Freed + recreated on every BuildPanel so it tracks size + anchor. |
-//+------------------------------------------------------------------+
-void CreateFxCanvas(int x, int y, int w, int h) {
-    const int m = RC_FX_MARGIN;
-    if (g_fx_on) g_fx.Destroy();   // free the previous GPU resource before re-creating
-    g_fx_w = w + 2 * m;
-    g_fx_h = h + 2 * m;
-    if (!g_fx.CreateBitmapLabel(0, 0, RC_PREFIX + "fx", x - m, y - m, g_fx_w, g_fx_h,
-                                COLOR_FORMAT_ARGB_NORMALIZE)) {
-        g_fx_on = false;           // canvas unavailable -> silently skip the FX
-        return;
-    }
-    ObjectSetInteger(0, RC_PREFIX + "fx", OBJPROP_BACK, false);
-    ObjectSetInteger(0, RC_PREFIX + "fx", OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, RC_PREFIX + "fx", OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, RC_PREFIX + "fx", OBJPROP_ZORDER, 0); // clicks pass to the controls
-    g_fx_on = true;
-    RenderFx();
-}
-
-//+------------------------------------------------------------------+
-//| v1.4 MODERN : per-status meter fill (2-stop gradient, safe->red). |
-//+------------------------------------------------------------------+
-void RiskFillColors(const ENUM_RC_STATUS s, color &a, color &b) {
-    // FINESSE 3b : theme-aware ADDITIVELY - the LIGHT branch uses the -600 tones so
-    // fills/rings match the darker light-theme text tokens ; the DARK path below is
-    // byte-identical (frozen look).
-    if (EffectiveTheme() != RC_THEME_GLASS_DARK) {
-        // v2.01 : light ramps re-anchored on the darkened light tokens (b == g_theme.*,
-        // a = one step LIGHTER) - the meter darkens toward its end = more salient on a
-        // light bg, mirroring the dark theme where it BRIGHTENS toward the end.
-        switch (s) {
-            case RC_STATUS_RED:  a = C'239,68,68';  b = C'220,38,38';  break; // red-500 -> red-600 (token)
-            case RC_STATUS_WARN: a = C'202,138,4';  b = C'161,98,7';   break; // amber-600 -> amber-700 (token)
-            case RC_STATUS_OK:   a = C'22,163,74';  b = C'21,128,61';  break; // green-600 -> green-700 (token)
-            default:             a = g_theme.text_dim; b = g_theme.text_dim; break;
-        }
-        return;
-    }
-    switch (s) {
-        // 7c VIVID : dark ramps re-anchored on the -500 tokens (b == g_theme.* token,
-        // a = the matching -600 start) so meters end EXACTLY on the pill/text hue.
-        case RC_STATUS_RED:  a = C'220,38,38';  b = C'239,68,68';  break; // red-600 -> red-500
-        case RC_STATUS_WARN: a = C'217,119,6';  b = C'245,158,11'; break; // amber-600 -> amber-500
-        case RC_STATUS_OK:   a = C'22,163,74';  b = C'34,197,94';  break; // green-600 -> green-500
-        default:             a = g_theme.text_dim;   b = g_theme.text_dim; break;
-    }
-}
-
-// E2 : ONE painter for every status pill (rules + positions) so they can never drift.
-// Saturated RING (hue from RiskFillColors -> automatically follows the SAFE green above ;
-// na = slate ring) + tinted interior inset 1px. Standard geometry : w=60, h=row-6, full
-// radius. Paints into the OPEN g_kit canvas (called from RepaintCanvas only).
-void PaintStatusPill(const int x, const int y, const ENUM_RC_STATUS s, const bool na) {
-    const int w = 60, h = InpRowHeight - 6;
-    color ring;
-    if (na) {
-        ring = TintOver(g_theme.bg, C'148,163,184', 0.20);
-    } else {
-        color fa, fb; RiskFillColors(s, fa, fb);
-        ring = fa;
-    }
-    g_kit.Capsule(x, y, w, h, ColorToARGB(ring, 255)); // saturated ring (1px, interior overdraws inset)
-    g_kit.CapsuleGradient(x + 1, y + 1, w - 2, h - 2,  // v2.01 RELIEF : tinted interior, light top -> dark bottom
-                          ColorToARGB(TintOver(g_theme.bg, StatusColor(s), na ? 0.16 : 0.34), 255),
-                          ColorToARGB(TintOver(g_theme.bg, StatusColor(s), na ? 0.10 : 0.24), 255));
-}
-
-//+------------------------------------------------------------------+
-//| v1.4 MODERN : repaint the whole panel BODY into g_kit. Mirrors    |
-//| BuildPanel's section walk so the canvas meters / pills line up    |
-//| with the OBJ_LABEL rows drawn on top. Called on build + refresh.  |
-//| Text + controls live ON TOP (created after g_kit) ; the old       |
-//| rectangle-label backgrounds sit UNDER it (hidden) - R2 removes.   |
-//+------------------------------------------------------------------+
-void RepaintCanvas(const int x, const int y, const int w) {
-    if (InpShellV2) return;   // v3 SHELL : legacy body canvas is dark
-    if (!g_kit.Ready()) return;
-    const int M = RC_KIT_MARGIN;
-    const int rules_h     = (g_eff_risktools ? RC_RULE_COUNT * InpRowHeight : 0);
-    const int positions_h = RC_MAX_POSITIONS * InpRowHeight;
-    const int footer_rows = (InpEnablePyramidSafe ? 4 : 3);
-    const int total_h = RC_TITLE_HEIGHT + InpRowHeight
-                        + (g_eff_risktools ? RC_SECTION_HEIGHT : 0) + rules_h
-                        + RC_SECTION_HEIGHT + positions_h
-                        + InpRowHeight * footer_rows + InpRowHeight + InpRowHeight;
-
-    g_kit.Begin();
-    const int px = M, py = M;                     // panel top-left inside the bitmap
-    // LOT A/B : shared pre-blended tones (see TintOver - CCanvas overwrites pixels, so
-    // the mockup's rgba() tints are baked against the panel tone, drawn at alpha 255).
-    const color hl = TintOver(g_theme.bg, C'148,163,184', 0.14); // --line rgba(148,163,184,.14)
-    g_kit.SoftShadow(px, py, w, total_h, RC_R_PANEL, g_theme.bg_deep, 9, 95);
-    // LOT B : idle CYAN edge glow (mockup .rc::after) - in the margin band, over the
-    // chart, so real alpha is correct here ; the red breach glow (g_fx) overlays it.
-    g_kit.EdgeGlow(px, py, w, total_h, RC_R_PANEL, g_theme.accent, 6, 56); // FINAL : a touch more presence (~11% inner ring)
-    // LOT B : near-invisible light border (mockup white-5%) - the visible edge is the glow.
-    g_kit.Card(px, py, w, total_h, RC_R_PANEL, g_theme.bg_lift, g_theme.bg,
-               FilmOver(g_theme.bg_lift, 0.08));
-
-    int cy = py;
-    // LOT B : title band = vertical gradient (mockup .title raise.85 -> card-a.70)
-    g_kit.GradientVFill(px + 1, py + 1, w - 2, RC_TITLE_HEIGHT - 1, RC_R_PANEL - 1,
-                        ColorToARGB(TintOver(g_theme.bg_lift, g_theme.raise, 0.85), 255),
-                        ColorToARGB(TintOver(g_theme.bg_lift, g_theme.surface, 0.70), 255));
-    cy += RC_TITLE_HEIGHT;
-    g_kit.Hairline(px + 1, cy, px + w - 2, hl);
-    // LOT B : account strip = barely-there light film (mockup .strip white-1.2%),
-    // NOT an opaque slab - the panel gradient reads through.
-    g_kit.RoundFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0,
-                    ColorToARGB(FilmOver(g_theme.bg_lift, 0.02), 255));
-    // FINAL (mockup .chip) : SWAP (cyan-tint) + Split (green-tint) pill chips - faces
-    // painted from the SAME panel-relative rects DrawAccountStrip stored (single source).
-    if (g_chip_swap_w > 0) {
-        const int chy = cy + (InpRowHeight - 16) / 2;
-        g_kit.CapsuleGradient(px + g_chip_swap_dx,  chy, g_chip_swap_w,  16, // v2.01 RELIEF : tinted chip, light top -> dark bottom
-                              ColorToARGB(TintOver(g_theme.bg_lift, g_theme.accent, 0.20), 255),
-                              ColorToARGB(TintOver(g_theme.bg_lift, g_theme.accent, 0.12), 255));
-        g_kit.CapsuleGradient(px + g_chip_split_dx, chy, g_chip_split_w, 16,
-                              ColorToARGB(TintOver(g_theme.bg_lift, g_theme.ok, 0.20), 255),
-                              ColorToARGB(TintOver(g_theme.bg_lift, g_theme.ok, 0.12), 255));
-    }
-    cy += InpRowHeight;                            // account strip
-    g_kit.Hairline(px + 1, cy, px + w - 2, hl);
-
-    if (g_eff_risktools) {
-        g_kit.RoundFill(px + 6, cy + 5, 3, RC_SECTION_HEIGHT - 10, 1, ColorToARGB(g_theme.accent, 255));
-        cy += RC_SECTION_HEIGHT;
-        for (int i = 0; i < RC_RULE_COUNT; ++i) {
-            const int ry = cy + i * InpRowHeight;
-            // LOT A : NO zebra band (mockup rows are transparent over the panel gradient).
-            const string k = g_rows[i].key;
-            if (k == "rule_margin_pt" || k == "rule_newsstats") continue; // text-only rows
-            const int bx = px + 360;
-            const int bw = w - 360 - 80 - RC_PAD;
-            const int bh = 10; // E1 : thicker rounded meter (was 8 ; by recenters below)
-            const int by = ry + (InpRowHeight - bh) / 2;
-            // E1 : track = SLATE film (mockup --line), readable at 0% on BOTH themes -
-            // deliberately NOT FilmOver (slate already reads on dark AND light).
-            const color track = TintOver(g_theme.bg, C'148,163,184', 0.14);
-            if (g_rows[i].applies) {
-                const double ratio = (g_rows[i].max_pct > 0.0 ? g_rows[i].value_pct / g_rows[i].max_pct : 0.0);
-                color fa, fb; RiskFillColors(g_rows[i].status, fa, fb);
-                g_kit.Meter(bx, by, bw, bh, ratio, track, fa, fb);
-                // E1 : "clear" dot - a 0% SAFE meter shows a start-of-track dot (mockup
-                // News window : clear) instead of an apparently-dead bar. fa = SAFE green.
-                if (ratio < 0.01 && g_rows[i].status == RC_STATUS_OK)
-                    g_kit.CapsuleGradient(bx, by, bh, bh, ColorToARGB(fb, 255), ColorToARGB(fa, 255)); // v2.01 RELIEF : bright top -> deep bottom dot
-                // E2 : saturated ring + tinted interior, one shared painter.
-                PaintStatusPill(px + w - 70, ry + 3, g_rows[i].status, false);
-            } else {
-                g_kit.Meter(bx, by, bw, bh, 0.0, track, g_theme.text_dim, g_theme.text_dim);
-                PaintStatusPill(px + w - 70, ry + 3, g_rows[i].status, true); // N/A pill
-            }
-        }
-        cy += rules_h;
-        // LOT A : divider between RULES and OPEN POSITIONS (mockup .divider, inset 14/14)
-        g_kit.Hairline(px + 14, cy, px + w - 15, hl); // FINESSE 5b : symmetric inset (right end is exclusive)
-    }
-    // positions header tick (LOT A : cyan like every mockup tick, was indigo) + section
-    g_kit.RoundFill(px + 6, cy + 5, 3, RC_SECTION_HEIGHT - 10, 1, ColorToARGB(g_theme.accent, 255));
-    // LOT A : NO zebra ; instead a LIVE tinted status pill per FILLED row (mockup .pill,
-    // ~15% tint pre-blended). g_pos_status is written by RefreshPositionsList (+ the
-    // SL>REC override) BEFORE this repaint in the OnTimer order. Empty slots draw nothing.
-    {
-        const int pcy = cy + RC_SECTION_HEIGHT;
-        for (int p = 0; p < RC_MAX_POSITIONS; ++p) {
-            if (StringLen(g_pos_sym[p]) == 0) continue;
-            PaintStatusPill(px + w - 70, pcy + p * InpRowHeight + 3, g_pos_status[p], false); // E2/E6
-        }
-    }
-    cy += RC_SECTION_HEIGHT + positions_h;
-    // dividers above footer / tf bar / recent bar
-    g_kit.Hairline(px + 1, cy, px + w - 2, hl);
-    // LOT B : footer band = SUBTLE vertical gradient (was a flat opaque slab)
-    g_kit.GradientVFill(px + 1, cy + 1, w - 2, InpRowHeight * footer_rows - 1, 0,
-                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface_hi, 0.45), 255),
-                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface, 0.20), 255));
-    cy += InpRowHeight * footer_rows;                       // -> timeframe bar row
-    g_kit.Hairline(px + 1, cy, px + w - 2, hl);
-    // LOT B : TF-bar band = same subtle gradient
-    g_kit.GradientVFill(px + 1, cy + 1, w - 2, InpRowHeight - 1, 0,
-                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface_hi, 0.45), 255),
-                        ColorToARGB(TintOver(g_theme.bg, g_theme.surface, 0.20), 255));
-    // LOT C : segmented TF control, mockup .seg - a subtle LIGHT track (white-5%, soft
-    // 1px ring, radius 10) ; idle segments draw NOTHING (label-only, .seg b) ; the
-    // ACTIVE segment is a vertical accent->accent_deep gradient (.seg b.act, radius 7).
-    g_kit.CapsuleStroke(px + 28, cy + 3, 322, InpRowHeight - 6, ColorToARGB(hl, 255), // CAPSULE REWRITE : ring + track
-                        ColorToARGB(FilmOver(g_theme.bg, 0.05), 255), 1);
-    {
-        const ENUM_TIMEFRAMES tfv2[9] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
-                                         PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
-        const ENUM_TIMEFRAMES curp = (ENUM_TIMEFRAMES)ChartPeriod(0);
-        for (int s = 0; s < 9; ++s) {
-            const int sx = px + 32 + s * 35; // FINESSE 5a : +2px, strip centred in its track (LOCKSTEP with DrawTimeframeBar x0)
-            if (tfv2[s] != curp) continue; // idle = transparent (label only)
-            g_kit.Segment(sx, cy + 3, 33, InpRowHeight - 6, (InpRowHeight - 6) / 2, true, // POLISH A1 : r=h/2 exact = true capsule
-                          g_theme.accent, g_theme.accent_deep, g_theme.surface);
-        }
-    }
-    cy += InpRowHeight;
-    g_kit.Hairline(px + 1, cy, px + w - 2, hl);
-    // LOT B : recent-symbols band = same subtle gradient. 7b : this is the LAST band -
-    // rounded BOTTOM corners so it stops covering the card's r=15 bottom rounding
-    // (interior radius = RC_R_PANEL-1, the band sits 1px inside the border ring).
-    g_kit.GradientVFillB(px + 1, cy + 1, w - 2, InpRowHeight - 1, RC_R_PANEL - 1,
-                         ColorToARGB(TintOver(g_theme.bg, g_theme.surface_hi, 0.45), 255),
-                         ColorToARGB(TintOver(g_theme.bg, g_theme.surface, 0.20), 255));
-
-    PaintFaces();     // v1.4.1 R3 : paint every registered control face (rounded btns / pills)
-    g_kit.Commit();
-}
-
-//+------------------------------------------------------------------+
-//| Build static skeleton (background + section frames)              |
-//+------------------------------------------------------------------+
-void BuildPanel(void) {
-    if (InpShellV2) return;   // v3 SHELL owns the chart : the legacy panel is not built
-    const int x = g_anchor_x; // B2 : live anchor (drag-updated, persisted)
-    const int y = g_anchor_y;
-    const int w = InpPanelWidth;
-    HitReset(); // v1.4.1 R3 : clear hit-zones ; the section draws below re-register them
-
-    // Estimate height: title + strip + section header + rules + section header + positions + footer
-    // Footer is 3 rows by default, 4 when pyramid advisor is enabled.
-    const int rules_h = (g_eff_risktools ? RC_RULE_COUNT * InpRowHeight : 0); // V1.29 L : collapse rules section when risk-tools OFF
-    const int positions_h = RC_MAX_POSITIONS * InpRowHeight;
-    const int footer_rows = (InpEnablePyramidSafe ? 4 : 3);
-    const int recbar_h = InpRowHeight; // B8 : recent-symbols quick-switch bar
-    const int tfbar_h  = InpRowHeight; // LOT 4 : timeframe quick-switch bar
-    const int total_h = RC_TITLE_HEIGHT + InpRowHeight + (g_eff_risktools ? RC_SECTION_HEIGHT : 0) + rules_h + RC_SECTION_HEIGHT + positions_h + InpRowHeight * footer_rows + tfbar_h + recbar_h; // V1.29 L : drop the rules header height too when OFF
-    g_panel_height = total_h; // fix #5 : exposed for UpdateDisciplineOverlay
-
-    // POLISH A2 : the v1.4 legacy SQUARE rects are RETIRED - "shadow" (offset +5/+6)
-    // poked out past the rounded card with sharp corners, and "bg" showed its square
-    // corners inside the r=15 corner notches. The canvas already provides the ROUNDED
-    // drop shadow (SoftShadow) + glow + opaque Card ; outside the card the chart shows
-    // through, which is exactly what rounded corners should do.
-    ObjectDelete(0, RC_PREFIX + "shadow");
-    ObjectDelete(0, RC_PREFIX + "bg");
-    // v1.4 MODERN : draw the panel body into g_kit, created FIRST so the text
-    // (OBJ_LABEL) + controls from the section draws below render ON TOP of it, and
-    // the glow (g_fx) above that. The rect backgrounds above are now hidden under
-    // the canvas (kept for R1 ; removed in R2).
-    g_kit.Create(RC_PREFIX + "ui", x - RC_KIT_MARGIN, y - RC_KIT_MARGIN,
-                 w + 2 * RC_KIT_MARGIN, total_h + 2 * RC_KIT_MARGIN);
-    // RepaintCanvas is called at the END of BuildPanel (below), AFTER the sections
-    // register their hit-zones, so PaintFaces() can paint the control faces. The
-    // g_kit bitmap is created HERE (early) so text + controls render on top of it.
-    CreateFxCanvas(x, y, w, total_h); // v1.4 : glow ring around the panel (breach pulse)
-
-    int cy = y;
-    DrawTitleBar(x, cy, w);
-    cy += RC_TITLE_HEIGHT;
-    DrawAccountStrip(x, cy, w);
-    cy += InpRowHeight;
-    if (g_eff_risktools) cy = DrawRulesSection(x, cy, w); // V1.29 L : skip the whole rules section when OFF (compact panel)
-    cy = DrawPositionsSection(x, cy, w);
-    DrawFooter(x, cy, w);
-    cy += InpRowHeight * footer_rows; // advance past the footer rows
-    // LOT 4 : timeframe quick-switch row, just above the recent-symbols bar.
-    g_tfbar_y = cy; // P4 : copy-lot fields are placed on this row (left of BE)
-    DrawTimeframeBar(x, cy, w);
-    cy += InpRowHeight;
-    // B8 : recent-symbols quick-switch bar pinned at the very bottom.
-    g_recbar_y = cy;
-    UpdateRecentSymbols();
-    DrawRecentSymbolsBar(x, cy, w);
-
-    // v1.4.1 R3 : paint the modern body + all registered control faces NOW that
-    // every section has registered its hit-zones (single geometry source).
-    RepaintCanvas(x, y, w);
-
-    // G3 : if the settings popup is open, float it ABOVE everything else.
-    if (g_settings_open)
-        DrawSettingsOverlay(x, y, w);
-}
-
-//+------------------------------------------------------------------+
-//| Title bar                                                        |
-//+------------------------------------------------------------------+
-void DrawTitleBar(int x, int y, int w) {
-    // BATCH 2 : title band now drawn on the canvas (RepaintCanvas) ; legacy title_bg rect removed.
-
-    // R3 : header logo - a FIXED asset (RC_LOGO_FILE), not a user input. MT5
-    // renders it via an OBJ_BITMAP_LABEL pointing at MQL5\Images\<file> (shipped
-    // 22x22 ; MT5 crops, doesn't scale). If the file is missing MT5 shows nothing.
-    const int logo_sz = 22;
-    const int logo_x  = x + RC_PAD;
-    const int logo_y  = y + 4;
-    const string logo_id = RC_PREFIX + "logo";
-    if (ObjectFind(0, logo_id) < 0) ObjectCreate(0, logo_id, OBJ_BITMAP_LABEL, 0, 0, 0);
-    ObjectSetInteger(0, logo_id, OBJPROP_XDISTANCE, logo_x);
-    ObjectSetInteger(0, logo_id, OBJPROP_YDISTANCE, logo_y);
-    ObjectSetInteger(0, logo_id, OBJPROP_XSIZE, logo_sz);
-    ObjectSetInteger(0, logo_id, OBJPROP_YSIZE, logo_sz);
-    ObjectSetInteger(0, logo_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetString (0, logo_id, OBJPROP_BMPFILE, "::RiskCockpit_logo.bmp"); // V1.29 : embedded resource (ships with the .ex5 -> buyers see the logo)
-    ObjectSetInteger(0, logo_id, OBJPROP_BACK, false);
-    ObjectSetInteger(0, logo_id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, logo_id, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, logo_id, OBJPROP_ZORDER, 110);
-    const int title_x = logo_x + logo_sz + 8; // title starts to the right of the logo
-
-    // V1.29 E : bare brand title only. The "- profile unresolved" suffix made the
-    // left-anchored title grow right UNDER the gear/X cluster (JR : "X chevauche le
-    // titre"). The unresolved state is already shown in the strip below.
-    // (Note : the gear/X stay left-anchored here ; right-anchoring them as the spec
-    //  suggested would collide with the right-anchored title_model that grows
-    //  leftward from x+w-RC_PAD-RC_TITLE_CLOCK_W. Bare title ends well before gear_x.)
-    // LOT B (mockup .brand) : two-tone wordmark - "RISK" in near-white, "COCKPIT" in
-    // cyan. Two labels ; the +36px offset fits "RISK" at the semibold title size.
-    DrawLabel(RC_PREFIX + "title_text", title_x, y + 6, "RISK", g_theme.text, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);       // FINESSE 2a : 11pt cell recentred (was the 9pt clock offset)
-    DrawLabel(RC_PREFIX + "title_text2", title_x + 36, y + 6, "COCKPIT", g_theme.accent, RC_FONT_SIZE_TITLE, RC_FONT_UI_SB);
-    // v1.4 : discreet dev build tag just right of the brand (empty in release).
-    if (StringLen(RC_BUILD_TAG) > 0)
-        DrawLabel(RC_PREFIX + "build", title_x + 104, y + 10, RC_BUILD_TAG, g_theme.text_dim, RC_FONT_SIZE_LABEL, RC_FONT_UI); // FINESSE 2d : follows the recentred wordmark (no-op in release, tag empty)
-
-    // R2 : settings GEAR button (U+2699) just right of the title. "Segoe UI
-    // Symbol" renders the gear reliably on Windows ; the rest of the panel keeps
-    // RC_FONT. Click toggles the in-panel SETTINGS modal.
-    // V1.29 K : X in the TOP-RIGHT corner, gear just left of it (were left-anchored
-    // to the title and overrun by the right-anchored model label).
-    const int bw = 22, gap = 6; // FINESSE 1d : gear<->X air 4 -> 6px
-    const int kill_x = x + w - RC_PAD - bw;   // X = rightmost
-    const int gear_x = kill_x - gap - bw;     // gear left of the X
-    // v1.4.1 R3 : gear = canvas rounded button (face via PaintFaces) + click zone + glyph label on top.
-    HitAdd(gear_x, y + 5, gear_x + 22, y + 25, "set", -1, RCF_BTN);
-    DrawLabel(RC_PREFIX + "gearlbl", gear_x + 11, y + 15, ShortToString((ushort)0x2699), g_theme.label, RC_FONT_SIZE + 2, "Segoe UI Symbol");
-    ObjectSetInteger(0, RC_PREFIX + "gearlbl", OBJPROP_ANCHOR, ANCHOR_CENTER);
-    ObjectSetString (0, RC_PREFIX + "gearlbl", OBJPROP_TOOLTIP, "Settings : account / risk / display / alerts");
-    // V1.28 : title-bar X button -> removes THIS indicator from the chart
-    // (ChartIndicatorDelete), so no trip to the Indicators List is needed.
-    // (kill_x computed above = top-right corner.)
-    // v1.4.1 R3 : X = canvas rounded button (red edge) + click zone + "X" label on top.
-    // E3 : discreet grey close (mockup .ico) - red was too loud for an idle header
-    // control. RCF_BTN_RED stays defined as a future BREACH-state hook.
-    HitAdd(kill_x, y + 5, kill_x + 22, y + 25, "kill", -1, RCF_BTN);
-    DrawLabel(RC_PREFIX + "kill_x", kill_x + 11, y + 15, ShortToString((ushort)0x00D7), g_theme.label, RC_FONT_SIZE + 1, RC_FONT_UI); // POLISH D : glyph tone unified with the gear (readable both themes)
-    ObjectSetInteger(0, RC_PREFIX + "kill_x", OBJPROP_ANCHOR, ANCHOR_CENTER);
-    ObjectSetString (0, RC_PREFIX + "kill_x", OBJPROP_TOOLTIP, Tr("kill_tip"));
-
-    // FIX 7 (V1.0.2) : balance ("model | $XXK") and the clock blinker are BOTH
-    // right-anchored. The clock (news countdown / "WEEKEND HOLD!" / LIVE) grows
-    // LEFTWARD from the right edge and used to overrun the balance (only 70 px were
-    // reserved). Reserve a fixed clock zone (RC_TITLE_CLOCK_W = 120) and anchor the
-    // balance to the LEFT of it, so the two never overlap whatever the clock shows.
-    string right = "";
-    if (g_profile_ok || g_profile.is_default_fallback) {
-        const int balance_k = (int)MathRound(g_profile.initial_balance / 1000.0);
-        right = g_profile.model + " " + ShortToString((ushort)0x00B7) + " $" + IntegerToString(balance_k) + "K"; // FINAL : mockup "Name · Size" separator
-    }
-    StringReplace(right, " (no prop rules)", ""); // V1.29 K : shorten the Personal label so it clears the gear/X cluster
-    // V1.29 K : model sits LEFT of the (left-shifted) clock zone, which sits left of the gear.
-    DrawLabel(RC_PREFIX + "title_model", (gear_x - RC_HEADER_GAP) - RC_TITLE_CLOCK_W, y + 8, right, g_theme.label, RC_FONT_SIZE); // E4 : dim (mockup .clock) so the green LIVE pops ; FINESSE 1 : lockstep gap
-    ObjectSetInteger(0, RC_PREFIX + "title_model", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
-
-    // FINAL (mockup .live) : "● LIVE" in green - the dot is PART OF THE LABEL TEXT
-    // (U+25CF), so it rides this right-anchored dynamic multi-state zone (news countdown /
-    // weekend hold / degraded verdict via UpdateClockBlinker) with zero collision.
-    DrawLabel(RC_PREFIX + "title_clock", gear_x - RC_HEADER_GAP, y + 8,
-              ShortToString((ushort)0x25CF) + " " + Tr("live"), g_theme.ok, RC_FONT_SIZE);
-    ObjectSetInteger(0, RC_PREFIX + "title_clock", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
-}
-
-//+------------------------------------------------------------------+
-//| Account strip (cycle, account #, type, days remaining)           |
-//+------------------------------------------------------------------+
-void DrawAccountStrip(int x, int y, int w) {
-    // BATCH 2 : account-strip band now drawn on the canvas (RepaintCanvas) ; legacy strip_bg rect removed.
-
-    const long acc_login = AccountInfoInteger(ACCOUNT_LOGIN);
-    const string acc_type_str = (g_profile.swap_charged ? "SWAP" : "SWAP-FREE");
-
-    // G3 : a Personal / broker account has no prop profit-split -> show N/A
-    // (like the other prop-only meters) rather than a meaningless "Split 100%".
-    const string split_str = (g_profile.plan_id == FN_PLAN_PERSONAL)
-                                 ? Tr("split") + " N/A"
-                                 : Tr("split") + " " + DoubleToString(g_profile.profit_split_pct, 0) + "%";
-    // V1.29 I : a Personal account shows its REAL / DEMO type word (labeling only).
-    const string perso_tag = (g_profile.plan_id == FN_PLAN_PERSONAL)
-                                 ? (g_eff_personal_demo == 1 ? "DEMO  " : "REAL  ") : "";
-    // FINAL (mockup .chip) : account id alone in mono near-white ; SWAP + Split become
-    // tinted pill CHIPS - the rects are stored PANEL-RELATIVE (single geometry source,
-    // see the globals) and RepaintCanvas paints the pill faces underneath these labels.
-    string left;
-    StringConcatenate(left, Tr("acc"), " #", acc_login, (perso_tag == "" ? "" : "  " + perso_tag));
-    DrawLabel(RC_PREFIX + "strip_left", x + RC_PAD, y + 4, left, g_theme.text, RC_FONT_SIZE);
-    const int chip_h = 16;
-    const int chip_y = y + (InpRowHeight - chip_h) / 2;
-    int cdx = RC_PAD + 164; // FINESSE 6a : +14px cushion for long Personal logins (chips slide together, strip_right is right-anchored)
-    g_chip_swap_dx = cdx;
-    g_chip_swap_w  = RC_CapWidth(acc_type_str, chip_h, RC_FONT_UI_SB); // CAPSULE TEXT : measured, never overflows
-    DrawLabel(RC_PREFIX + "strip_chip1", x + cdx + g_chip_swap_w / 2, chip_y + chip_h / 2,
-              acc_type_str, g_theme.accent, RC_CapFont(chip_h), RC_FONT_UI_SB);
-    ObjectSetInteger(0, RC_PREFIX + "strip_chip1", OBJPROP_ANCHOR, ANCHOR_CENTER);
-    cdx += g_chip_swap_w + 8;
-    g_chip_split_dx = cdx;
-    g_chip_split_w  = RC_CapWidth(split_str, chip_h, RC_FONT_UI_SB); // CAPSULE TEXT
-    DrawLabel(RC_PREFIX + "strip_chip2", x + cdx + g_chip_split_w / 2, chip_y + chip_h / 2,
-              split_str, g_theme.ok, RC_CapFont(chip_h), RC_FONT_UI_SB);
-    ObjectSetInteger(0, RC_PREFIX + "strip_chip2", OBJPROP_ANCHOR, ANCHOR_CENTER);
-
-    // Right: min-trading-days counter (date-free, computed from trade history).
-    // FIX : the Cycle / Payout countdown was removed (too personal + required
-    // manually entering cycle/payout dates the trader rarely knows).
-    string right = "";
-    {
-        const int min_days = g_profile.min_trading_days;
-        if (min_days <= 0)
-            right = Tr("min_days_none");
-        else {
-            const int done = Live_TradingDaysCount();
-            StringConcatenate(right, Tr("days_traded"), " ", done, "/", min_days,
-                              (done >= min_days ? "  OK" : ""));
-        }
-    }
-    DrawLabel(RC_PREFIX + "strip_right", x + w - RC_PAD, y + 4, right, g_theme.label, RC_FONT_SIZE, RC_FONT_UI); // FINAL : mockup --label tone, UI font
-    ObjectSetInteger(0, RC_PREFIX + "strip_right", OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
-}
-
-//+------------------------------------------------------------------+
-//| Section header                                                   |
-//+------------------------------------------------------------------+
-void DrawSectionHeader(const string id, int x, int y, int w, const string title, color accent) {
-    // LOT A : the legacy opaque _bg band + _tick rects were created AFTER the canvas ->
-    // they painted OVER the modern card + canvas tick and flattened the look. The header
-    // is now label-only (mockup .sec-h is transparent) ; the accent tick lives on the
-    // canvas (RepaintCanvas). Drop any stale rects from a previous build in place.
-    ObjectDelete(0, RC_PREFIX + id + "_bg");
-    ObjectDelete(0, RC_PREFIX + id + "_tick");
-    DrawLabel(RC_PREFIX + id + "_txt", x + RC_PAD, y + 3, title, accent, RC_FONT_SIZE_TITLE - 1, RC_FONT_UI_SB); // FINESSE 2b : centred on the accent tick (cy+11)
-}
-
-//+------------------------------------------------------------------+
-//| Rules section - returns the y-coordinate after the section       |
-//+------------------------------------------------------------------+
-int DrawRulesSection(int x, int y, int w) {
-    DrawSectionHeader("sec_rules", x, y, w, Tr("rules"), g_theme.accent);
-    int cy = y + RC_SECTION_HEIGHT;
-    for (int i = 0; i < RC_RULE_COUNT; ++i) {
-        DrawRuleRow(g_rows[i].key, i, x, cy, w, InpRowHeight,
-                    Tr(g_rows[i].key), g_rows[i].value_text,
-                    g_rows[i].value_pct, g_rows[i].max_pct,
-                    g_rows[i].status, g_rows[i].applies);
-        cy += InpRowHeight;
-    }
-    return cy;
-}
-
-//+------------------------------------------------------------------+
-//| Single rule row                                                  |
-//+------------------------------------------------------------------+
-void DrawRuleRow(const string key_prefix, int idx,
-                 int x, int y, int w, int h,
-                 const string label, const string value_text,
-                 double pct, double max_pct,
-                 ENUM_RC_STATUS status, bool applies) {
-    const string id = RC_PREFIX + key_prefix;
-
-    // BATCH 2 : rule-row zebra now drawn on the canvas (RepaintCanvas) ; legacy _rowbg rect removed.
-
-    const color text_clr = applies ? g_theme.text : g_theme.text_dim;
-
-    // B7 : clickable violation toggle in front of Margin (rule_margin_cum) and
-    // Risk (rule_risk_cum) rows. Toggling it tightens that cumulative cap to the
-    // FN 2nd-strike value. Label shifts right to make room for the checkbox.
-    // FIX 4 (V1.0.1) : the toggles tighten caps to FundedNext's 2nd-strike values
-    // (margin 30% / risk 1%). Those restrictions only exist on real funded-money
-    // accounts (Funded + Instant). On challenge phases you simply fail the
-    // objective; Free Trial / Free Competition are demo - so the toggle is hidden.
-    const bool has_viol_toggle = ProfileCanBeRestricted() &&
-                                 (key_prefix == "rule_margin_cum" || key_prefix == "rule_risk_cum");
-    int label_x = x + RC_PAD;
-    if (has_viol_toggle) {
-        const bool viol_active = (key_prefix == "rule_margin_cum") ? g_margin_violation_active
-                                                                   : g_risk_violation_active;
-        DrawViolationToggle(key_prefix, x + 2, y + 3, h - 6, viol_active);
-        label_x = x + 30; // v1.4.1 R3 : room for the wider sliding-pill violation toggle
-    }
-
-    // Label (left) - premium UI font (Segoe UI) ; values/numbers stay Consolas
-    DrawLabel(id + "_lbl", label_x, y + 4, label, text_clr, RC_FONT_SIZE, RC_FONT_UI);
-
-    // Value text - widened column to fit "ACTIVE cap 40%", "0.0% / 20-30%", etc.
-    DrawLabel(id + "_val", x + 170, y + 4, value_text, text_clr, RC_FONT_SIZE);
-
-    // LOT A : the legacy sharp OBJ progress bar (_bar/_bar_empty rects) painted OVER the
-    // canvas rounded Meter and flattened it - the canvas Meter (RepaintCanvas) is now the
-    // ONLY bar. Same for the chip _bg : DrawStatusChip is label-only, the tinted pill
-    // face lives on the canvas. Clear any stale bar rects from a previous build.
-    // 1.1 : the "Max lot allowed" row (rule_margin_pt) stays TEXT-ONLY.
-    if (key_prefix != "rule_margin_pt" && key_prefix != "rule_newsstats") {
-        ObjectsDeleteAll(0, id + "_bar");
-        ObjectDelete(0, id + "_bar_empty");
-        // Status chip (right) - centered semantic-coloured label over the canvas pill
-        const int chip_x = x + w - 70;
-        DrawStatusChip(id + "_chip", chip_x, y + 3, 60, h - 6, applies ? status : RC_STATUS_NA);
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Progress bar                                                     |
-//+------------------------------------------------------------------+
-void DrawProgressBar(const string id, int x, int y, int w, int h,
-                     double pct, double max_pct, ENUM_RC_STATUS status) {
-    DrawRect(id + "_bg", x, y, w, h, g_theme.bar_bg, g_theme.bar_bg, 0);
-
-    double r = (max_pct > 0.0 ? pct / max_pct : 0.0);
-    if (r < 0.0)
-        r = 0.0;
-    if (r > 1.0)
-        r = 1.0;
-    const int fill_w = (int)MathRound(w * r);
-
-    // LOT E : color-graded fill. NA / inapplicable rows keep the StatusColor
-    // (grey) ; everyone else interpolates green -> amber -> red along r so the
-    // bar visually fades into danger instead of jumping at status thresholds.
-    const color fill = (status == RC_STATUS_NA) ? StatusColor(status) : GradientColor(r);
-    if (fill_w > 0)
-        DrawRect(id + "_fill", x, y, fill_w, h, fill, fill, 0);
-}
-
-//+------------------------------------------------------------------+
-//| LOT E : linearly interpolate the bar fill across green -> amber   |
-//| -> red according to r (the used / cap ratio). Anchors :           |
-//|   r <= 0.0 -> g_theme.ok   (green)                                |
-//|   r = 0.7  -> g_theme.warn (amber)                                |
-//|   r >= 1.0 -> g_theme.red                                         |
-//| MQL5 color packing : R in lowest byte, G in mid, B in high byte.  |
-//+------------------------------------------------------------------+
-color GradientColor(double r) {
-    if (r <= 0.0) return g_theme.ok;
-    if (r >= 1.0) return g_theme.red;
-    double r0, r1;
-    color c0, c1;
-    if (r < 0.7) { r0 = 0.0; r1 = 0.7; c0 = g_theme.ok;   c1 = g_theme.warn; }
-    else         { r0 = 0.7; r1 = 1.0; c0 = g_theme.warn; c1 = g_theme.red;  }
-    const double t = (r - r0) / (r1 - r0);
-    const int rA = (int)((((int)c0      ) & 0xFF) * (1.0 - t) + (((int)c1      ) & 0xFF) * t);
-    const int gA = (int)((((int)c0 >>  8) & 0xFF) * (1.0 - t) + (((int)c1 >>  8) & 0xFF) * t);
-    const int bA = (int)((((int)c0 >> 16) & 0xFF) * (1.0 - t) + (((int)c1 >> 16) & 0xFF) * t);
-    return (color)((rA & 0xFF) | ((gA & 0xFF) << 8) | ((bA & 0xFF) << 16));
 }
 
 //+------------------------------------------------------------------+
@@ -2691,103 +1329,8 @@ datetime g_disc_last_alert = 0;     // tilt sound/Telegram throttle
 
 // One bounded history scan (cached 5 s) feeding all the discipline metrics, so
 // nothing heavy runs on the 500 ms refresh path (LOT 1 freeze lesson).
-void ComputeDisciplineMetrics(void) {
-    if (g_disc_scan != 0 && TimeCurrent() - g_disc_scan < 5) return;
-    g_disc_scan = TimeCurrent();
-    g_disc_consec = 0; g_disc_lastloss = 0; g_disc_trades_win = 0; g_disc_revenge = false;
-    const datetime now = TimeCurrent();
-    const datetime win_from = now - (datetime)MathMax(1, g_eff_tilt_win) * 60;
-    if (!HistorySelect(now - 30 * 86400, now)) return;
-    const int n = HistoryDealsTotal();
-    bool   streak_open = true;
-    double last_loss_vol = -1.0;
-    for (int i = n - 1; i >= 0; --i) {
-        const ulong t = HistoryDealGetTicket(i);
-        if (t == 0) continue;
-        const long     e  = HistoryDealGetInteger(t, DEAL_ENTRY);
-        const datetime dt = (datetime)HistoryDealGetInteger(t, DEAL_TIME);
-        if (e == DEAL_ENTRY_IN && dt >= win_from) g_disc_trades_win++;
-        if (e == DEAL_ENTRY_OUT || e == DEAL_ENTRY_INOUT) {
-            const double pnl = HistoryDealGetDouble(t, DEAL_PROFIT) +
-                               HistoryDealGetDouble(t, DEAL_SWAP) +
-                               HistoryDealGetDouble(t, DEAL_COMMISSION);
-            if (streak_open) {
-                if (pnl < 0.0) { g_disc_consec++; if (g_disc_lastloss == 0) g_disc_lastloss = dt; }
-                else           { streak_open = false; } // a win/breakeven ends the streak
-            }
-            if (last_loss_vol < 0.0 && pnl < 0.0) last_loss_vol = HistoryDealGetDouble(t, DEAL_VOLUME);
-        }
-    }
-    // revenge sizing : newest OPEN position bigger than the last closed LOSS
-    if (last_loss_vol > 0.0) {
-        double newest_vol = 0.0; datetime newest_time = 0;
-        const int np = PositionsTotal();
-        for (int i = 0; i < np; ++i) {
-            const ulong pt = PositionGetTicket(i);
-            if (pt == 0 || !PositionSelectByTicket(pt)) continue;
-            const datetime ot = (datetime)PositionGetInteger(POSITION_TIME);
-            if (ot >= newest_time) { newest_time = ot; newest_vol = PositionGetDouble(POSITION_VOLUME); }
-        }
-        if (newest_vol > last_loss_vol + 1e-9) g_disc_revenge = true;
-    }
-}
 
 // Full-panel red STOP overlay used by self-lock / daily-DD / cooldown.
-void DrawHardLock(const string msg, bool show_unlock) {
-    const string id        = RC_PREFIX + "discipline_overlay";
-    const string txt_id    = RC_PREFIX + "discipline_text";
-    const string unlock_id = RC_PREFIX + "disc_unlock";
-    const int overlay_h = (g_panel_height > 0 ? g_panel_height : RC_TITLE_HEIGHT + InpRowHeight);
-    if (ObjectFind(0, id) < 0) ObjectCreate(0, id, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-    ObjectSetInteger(0, id, OBJPROP_XDISTANCE, g_anchor_x);
-    ObjectSetInteger(0, id, OBJPROP_YDISTANCE, g_anchor_y);
-    ObjectSetInteger(0, id, OBJPROP_XSIZE, InpPanelWidth);
-    ObjectSetInteger(0, id, OBJPROP_YSIZE, overlay_h);
-    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.red);
-    ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.red);
-    ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, id, OBJPROP_BACK, false);
-    ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, id, OBJPROP_ZORDER, 200);
-    if (ObjectFind(0, txt_id) < 0) ObjectCreate(0, txt_id, OBJ_LABEL, 0, 0, 0);
-    ObjectSetInteger(0, txt_id, OBJPROP_XDISTANCE, g_anchor_x + InpPanelWidth / 2);
-    ObjectSetInteger(0, txt_id, OBJPROP_YDISTANCE, g_anchor_y + overlay_h / 2 - 8);
-    ObjectSetString(0, txt_id, OBJPROP_TEXT, msg);
-    ObjectSetInteger(0, txt_id, OBJPROP_COLOR, (color)0x00FFFFFF); // V1.29 B : white on the red STOP box (was g_theme.bg = black in dark theme)
-    ObjectSetInteger(0, txt_id, OBJPROP_FONTSIZE, 11);
-    ObjectSetString(0, txt_id, OBJPROP_FONT, RC_FONT_UI);
-    ObjectSetInteger(0, txt_id, OBJPROP_ANCHOR, ANCHOR_CENTER);
-    ObjectSetInteger(0, txt_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, txt_id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, txt_id, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, txt_id, OBJPROP_ZORDER, 201);
-    if (show_unlock) {
-        const bool armed = (g_unlock_arm > 0 && TimeCurrent() - g_unlock_arm <= 5);
-        if (ObjectFind(0, unlock_id) < 0) ObjectCreate(0, unlock_id, OBJ_BUTTON, 0, 0, 0);
-        ObjectSetInteger(0, unlock_id, OBJPROP_XDISTANCE, g_anchor_x + InpPanelWidth / 2 - 80);
-        ObjectSetInteger(0, unlock_id, OBJPROP_YDISTANCE, g_anchor_y + overlay_h / 2 + 14);
-        ObjectSetInteger(0, unlock_id, OBJPROP_XSIZE, 160);
-        ObjectSetInteger(0, unlock_id, OBJPROP_YSIZE, 22);
-        ObjectSetString(0, unlock_id, OBJPROP_TEXT, armed ? Tr("disc_unlock_confirm") : Tr("disc_unlock"));
-        ObjectSetString(0, unlock_id, OBJPROP_FONT, RC_FONT_UI);
-        ObjectSetInteger(0, unlock_id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
-        ObjectSetInteger(0, unlock_id, OBJPROP_COLOR, (color)0x00FFFFFF); // V1.29 B : white Unlock label (readable in dark theme)
-        ObjectSetInteger(0, unlock_id, OBJPROP_BGCOLOR, armed ? g_theme.warn : g_theme.bg_section);
-        ObjectSetInteger(0, unlock_id, OBJPROP_BORDER_COLOR, g_theme.border);
-        ObjectSetInteger(0, unlock_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-        ObjectSetInteger(0, unlock_id, OBJPROP_STATE, false);
-        ObjectSetInteger(0, unlock_id, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, unlock_id, OBJPROP_HIDDEN, true);
-        ObjectSetInteger(0, unlock_id, OBJPROP_ZORDER, 260);
-    } else {
-        ObjectDelete(0, unlock_id);
-    }
-    // V1.24 fix : hide every panel control (buttons / OBJ_EDIT / logo bitmap)
-    // except the unlock button - a rectangle overlay cannot cover MT5 controls.
-    // Also blocks the gear during a lock so it can't be disabled to bypass it.
-    SetPanelControlsHidden(true, "disc_unlock");
-}
 
 // V1.24 fix (JR test #2) : returns TRUE if a HARD LOCK (self-lock / daily-DD /
 // cooldown) is active - it has then drawn the full-panel STOP + hidden the
@@ -2800,233 +1343,6 @@ void DrawHardLock(const string msg, bool show_unlock) {
 // is skipped and the overlay hid/covered objects -> without a rebuild the panel came
 // back half-rendered ; a risk tool must always re-display its full state).
 bool g_disc_locked_prev = false;
-
-bool UpdateDisciplineOverlay(double daily_dd_pct, double daily_cap) {
-    const string id        = RC_PREFIX + "discipline_overlay";
-    const string txt_id    = RC_PREFIX + "discipline_text";
-    const string unlock_id = RC_PREFIX + "disc_unlock";
-    if (!g_eff_discipline || !g_eff_risktools) { // V1.29 J : risk-tools OFF also clears any lock overlay
-        ObjectDelete(0, id); ObjectDelete(0, txt_id); ObjectDelete(0, unlock_id);
-        SetPanelControlsHidden(false, "");
-        return false;
-    }
-    ComputeDisciplineMetrics();
-    const datetime now = TimeCurrent();
-
-    // --- hard locks, by priority ---
-    if (g_selflock_until > now) {
-        const int mins = (int)((g_selflock_until - now) / 60) + 1;
-        DrawHardLock(Tr("disc_selflock") + "  " + IntegerToString(mins / 60) + "h " +
-                     IntegerToString(mins % 60) + "m", true);
-        return true;
-    }
-    if (daily_cap > 0.0 && daily_dd_pct >= 0.80 * daily_cap) {
-        DrawHardLock(Tr("stop_trading") + "  (" + DoubleToString(daily_dd_pct, 1) +
-                     "% / cap " + DoubleToString(daily_cap, 1) + "%)", false);
-        return true;
-    }
-    if (g_eff_cooldown_n > 0 && g_disc_consec >= g_eff_cooldown_n && g_disc_lastloss > 0) {
-        const datetime cd_until = g_disc_lastloss + (datetime)MathMax(0, g_eff_cooldown_m) * 60;
-        if (now < cd_until) {
-            const int m = (int)((cd_until - now) / 60) + 1;
-            DrawHardLock(Tr("disc_cooldown") + "  (" + IntegerToString(g_disc_consec) + "L / " +
-                         IntegerToString(m) + "m)", false);
-            return true;
-        }
-    }
-    // no hard lock -> clear the red overlay + show the controls again.
-    ObjectDelete(0, id); ObjectDelete(0, txt_id); ObjectDelete(0, unlock_id);
-    SetPanelControlsHidden(false, "");
-    return false;
-}
-
-// Soft TILT warning (amber banner over the strip). Drawn at the END of
-// RefreshPanel, only when NOT hard-locked. Uses the metrics cached this tick.
-void DrawTiltBanner(void) {
-    const string tilt_id   = RC_PREFIX + "disc_tilt";
-    const string tiltx_id  = RC_PREFIX + "disc_tilt_txt";
-    const datetime now = TimeCurrent();
-    const bool tilt = (g_eff_discipline &&
-                       ((g_eff_tilt_n > 0 && g_disc_trades_win > g_eff_tilt_n) || g_disc_revenge));
-    if (!tilt) { ObjectDelete(0, tilt_id); ObjectDelete(0, tiltx_id); return; }
-    if (ObjectFind(0, tilt_id) < 0) ObjectCreate(0, tilt_id, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-    ObjectSetInteger(0, tilt_id, OBJPROP_XDISTANCE, g_anchor_x);
-    ObjectSetInteger(0, tilt_id, OBJPROP_YDISTANCE, g_anchor_y + RC_TITLE_HEIGHT);
-    ObjectSetInteger(0, tilt_id, OBJPROP_XSIZE, InpPanelWidth);
-    ObjectSetInteger(0, tilt_id, OBJPROP_YSIZE, InpRowHeight);
-    ObjectSetInteger(0, tilt_id, OBJPROP_BGCOLOR, g_theme.warn);
-    ObjectSetInteger(0, tilt_id, OBJPROP_COLOR, g_theme.warn);
-    ObjectSetInteger(0, tilt_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, tilt_id, OBJPROP_BACK, false);
-    ObjectSetInteger(0, tilt_id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, tilt_id, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, tilt_id, OBJPROP_ZORDER, 150);
-    if (ObjectFind(0, tiltx_id) < 0) ObjectCreate(0, tiltx_id, OBJ_LABEL, 0, 0, 0);
-    ObjectSetInteger(0, tiltx_id, OBJPROP_XDISTANCE, g_anchor_x + InpPanelWidth / 2);
-    ObjectSetInteger(0, tiltx_id, OBJPROP_YDISTANCE, g_anchor_y + RC_TITLE_HEIGHT + InpRowHeight / 2); // P5 : vertical-center
-    ObjectSetString(0, tiltx_id, OBJPROP_TEXT, Tr("disc_tilt") + (g_disc_revenge ? "  (revenge)" : ""));
-    ObjectSetInteger(0, tiltx_id, OBJPROP_COLOR, g_theme.bg);
-    ObjectSetInteger(0, tiltx_id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
-    ObjectSetString(0, tiltx_id, OBJPROP_FONT, RC_FONT_UI);
-    ObjectSetInteger(0, tiltx_id, OBJPROP_ANCHOR, ANCHOR_CENTER);
-    ObjectSetInteger(0, tiltx_id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, tiltx_id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, tiltx_id, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, tiltx_id, OBJPROP_ZORDER, 151);
-    if (now - g_disc_last_alert >= 60) {
-        g_disc_last_alert = now;
-        if (g_eff_sound)    PlaySound(InpSoundWarn);
-        if (g_eff_telegram) SendTelegramMessage("[TILT] RiskCockpit : tilt detected - slow down (Acc #" +
-                                                 IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)) + ")");
-    }
-}
-
-// v2.13 FEATURE B2 : RED SL-guard banner - the aggregate worst-case loss at the
-// CURRENT SLs would eat past 80% of the room to the nearest active limit. Shows
-// the recommended MINIMUM SL (the price that keeps the 20% survival margin) for
-// the biggest-risk position. Drawn one row BELOW the tilt banner slot so both
-// alerts can coexist. READ-ONLY advisor : displays the fix, never touches trades.
-void DrawSlGuardBanner(void) {
-    const string gid  = RC_PREFIX + "slguard";
-    const string gtxt = RC_PREFIX + "slguard_txt";
-    string reco_sym; double reco_sl;
-    if (!Live_SlGuardBreached(reco_sym, reco_sl)) {
-        ObjectDelete(0, gid);
-        ObjectDelete(0, gtxt);
-        return;
-    }
-    if (ObjectFind(0, gid) < 0) ObjectCreate(0, gid, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-    ObjectSetInteger(0, gid, OBJPROP_XDISTANCE, g_anchor_x);
-    ObjectSetInteger(0, gid, OBJPROP_YDISTANCE, g_anchor_y + RC_TITLE_HEIGHT + InpRowHeight);
-    ObjectSetInteger(0, gid, OBJPROP_XSIZE, InpPanelWidth);
-    ObjectSetInteger(0, gid, OBJPROP_YSIZE, InpRowHeight);
-    ObjectSetInteger(0, gid, OBJPROP_BGCOLOR, g_theme.red);
-    ObjectSetInteger(0, gid, OBJPROP_COLOR, g_theme.red);
-    ObjectSetInteger(0, gid, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, gid, OBJPROP_BACK, false);
-    ObjectSetInteger(0, gid, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, gid, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, gid, OBJPROP_ZORDER, 150);
-    string txt = Tr("slguard");
-    if (reco_sym != "" && reco_sl > 0.0)
-        txt += "  " + reco_sym + " " + ShortToString((ushort)0x2265) + " " + // >= glyph
-               DoubleToString(reco_sl, (int)SymbolInfoInteger(reco_sym, SYMBOL_DIGITS));
-    if (ObjectFind(0, gtxt) < 0) ObjectCreate(0, gtxt, OBJ_LABEL, 0, 0, 0);
-    ObjectSetInteger(0, gtxt, OBJPROP_XDISTANCE, g_anchor_x + InpPanelWidth / 2);
-    ObjectSetInteger(0, gtxt, OBJPROP_YDISTANCE, g_anchor_y + RC_TITLE_HEIGHT + InpRowHeight + InpRowHeight / 2);
-    ObjectSetString (0, gtxt, OBJPROP_TEXT, txt);
-    ObjectSetInteger(0, gtxt, OBJPROP_COLOR, g_theme.bg);
-    ObjectSetInteger(0, gtxt, OBJPROP_FONTSIZE, RC_FONT_SIZE);
-    ObjectSetString (0, gtxt, OBJPROP_FONT, RC_FONT_UI);
-    ObjectSetInteger(0, gtxt, OBJPROP_ANCHOR, ANCHOR_CENTER);
-    ObjectSetInteger(0, gtxt, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, gtxt, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, gtxt, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, gtxt, OBJPROP_ZORDER, 151);
-}
-
-//+------------------------------------------------------------------+
-//| Status chip                                                      |
-//+------------------------------------------------------------------+
-void DrawStatusChip(const string id, int x, int y, int w, int h, ENUM_RC_STATUS status) {
-    // LOT A (mockup .pill) : the chip is now LABEL-ONLY - the ~15% tinted rounded pill
-    // face is painted on the canvas (RepaintCanvas), and the text carries the SEMANTIC
-    // colour (ok/warn/red ; dim for N/A) exactly like .p-ok/.p-warn/.p-red. The old
-    // opaque _bg rect rendered OVER the canvas pill and flattened it -> dropped.
-    ObjectDelete(0, id + "_bg"); // clear the legacy rect from any previous build
-    const color txt_clr = (status == RC_STATUS_NA ? g_theme.text_dim : StatusColor(status));
-    DrawLabel(id + "_txt", x + w / 2, y + h / 2, StatusLabel(status), txt_clr, RC_CapFont(h), RC_FONT_UI_SB); // CAPSULE TEXT : font follows the pill height
-    ObjectSetInteger(0, id + "_txt", OBJPROP_ANCHOR, ANCHOR_CENTER); // centered like .pill
-}
-
-//+------------------------------------------------------------------+
-//| Violation toggle (B7) - clickable OBJ_BUTTON checkbox            |
-//|                                                                  |
-//| Red fill + "X" when active (cap tightened), neutral + blank when |
-//| inactive. The button only triggers the click; the boolean flag   |
-//| (g_*_violation_active) remains the source of truth. OnChartEvent  |
-//| toggles the flag, persists it, and resets OBJPROP_STATE so the    |
-//| button never sticks in the pressed look.                         |
-//+------------------------------------------------------------------+
-void DrawViolationToggle(const string key, int x, int y, int h, bool active) {
-    // v1.4.1 R3 : violation toggle = a small sliding PILL (canvas face via PaintFaces)
-    // + a click zone ; DispatchHit routes "viol_m" / "viol_r". Drop the pre-R3 OBJ_BUTTON.
-    const string id  = RC_PREFIX + key + "_viol";
-    ObjectDelete(0, id);
-    const string act = (key == "rule_margin_cum") ? "viol_m" : "viol_r";
-    const int pw = 24; // pill width (room for the knob to slide) ; label_x is shifted to x+30
-    HitAdd(x, y, x + pw, y + h, act, -1, active ? RCF_PILL_ON : RCF_PILL_OFF);
-    // invisible label at the pill carries the hover tooltip (the canvas face has no object)
-    DrawLabel(id + "_tip", x, y + h / 2, " ", g_theme.text_dim, RC_FONT_SIZE - 1);
-    ObjectSetInteger(0, id + "_tip", OBJPROP_ANCHOR, ANCHOR_LEFT);
-    ObjectSetString (0, id + "_tip", OBJPROP_TOOLTIP,
-                    (key == "rule_margin_cum")
-                        ? "Margin violation suffered -> cumulative cap tightens to InpMarginCapViolated"
-                        : "Risk violation suffered -> cumulative cap tightens to InpRiskCapViolated");
-}
-
-//+------------------------------------------------------------------+
-//| Positions section                                                |
-//+------------------------------------------------------------------+
-int DrawPositionsSection(int x, int y, int w) {
-    DrawSectionHeader("sec_pos", x, y, w, Tr("open_pos"), g_theme.accent); // FINAL : all-cyan section headers (mockup .sec-h)
-    int cy = y + RC_SECTION_HEIGHT;
-    for (int i = 0; i < RC_MAX_POSITIONS; ++i) {
-        const string id = RC_PREFIX + "pos_" + IntegerToString(i);
-        // BATCH 2 : position-row zebra now drawn on the canvas (RepaintCanvas) ; legacy _rowbg rect removed.
-        DrawLabel(id + "_lbl", x + RC_PAD, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
-        DrawLabel(id + "_pnl", x + 220, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
-        DrawLabel(id + "_age", x + 320, cy + 4, "", g_theme.text_dim, RC_FONT_SIZE);
-        DrawStatusChip(id + "_chip", x + w - 70, cy + 3, 60, InpRowHeight - 6, RC_STATUS_NA);
-        // start every slot empty : no chip text, no canvas pill (g_pos_sym empty -> the
-        // RepaintCanvas pill loop skips the slot). LOT A : legacy _chip_bg rect is gone.
-        ObjectSetString(0, id + "_chip_txt", OBJPROP_TEXT, " ");
-        // V1.27 : the symbol cell is a click-to-switch button (OBJ_BUTTON is the
-        // reliable click target in this codebase ; it sits over the _lbl and
-        // carries the same text, so clicking it switches the chart symbol).
-        // v1.4.1 R3 : the symbol cell is a click-to-switch HIT-ZONE (no face - the row
-        // visual is the rowbg + labels + chip) ; DispatchHit routes "possym" idx. Drop
-        // the pre-R3 OBJ_BUTTON that used to sit over the cell.
-        ObjectDelete(0, RC_PREFIX + "pos_row_" + IntegerToString(i));
-        HitAdd(x + 1, cy, x + 1 + 210, cy + InpRowHeight, "possym", i, RCF_NONE);
-        ObjectSetString(0, id + "_lbl", OBJPROP_TOOLTIP, Tr("pos_click_tip"));
-        cy += InpRowHeight;
-    }
-    return cy;
-}
-
-//+------------------------------------------------------------------+
-//| Footer                                                           |
-//+------------------------------------------------------------------+
-void DrawFooter(int x, int y, int w) {
-    // 3 rows by default; +1 row (L4) when pyramid advisor is enabled.
-    // BATCH 2 : footer band + row count now live on the canvas (RepaintCanvas.footer_rows) ; legacy footer_bg rect removed.
-
-    // Row 1 - profit metrics : drawn as individually-coloured segments
-    // (RC_ + "fseg_*") by RefreshFooterMetrics (P1). Just record the row y here.
-    g_footer_y = y;
-
-    // Row 2 - suggested lot info + interactive max-parallel control
-    DrawLabel(RC_PREFIX + "footer_l2", x + RC_PAD, y + 4 + InpRowHeight, " ", g_theme.text, RC_FONT_SIZE);
-    DrawMaxParallelControl(x + w - 90, y + 2 + InpRowHeight);
-
-    // Row 3 - add-ons + brand
-    string addons_str = g_catalog.DescribeAddons(g_addons_mask);
-    string line3;
-    StringConcatenate(line3,
-                      "Add-ons : ", addons_str,
-                      "    Split ", DoubleToString(g_profile.profit_split_pct, 0), "%",
-                      "    Min days ", g_profile.min_trading_days,
-                      "    -  javadrazavi.fr");
-    DrawLabel(RC_PREFIX + "footer_l3", x + RC_PAD, y + 4 + InpRowHeight * 2,
-              line3, g_theme.text_dim, RC_FONT_SIZE - 1);
-
-    // Row 4 - Pyramid advisor (visible only when InpEnablePyramidSafe).
-    if (InpEnablePyramidSafe) {
-        DrawLabel(RC_PREFIX + "footer_l4", x + RC_PAD, y + 4 + InpRowHeight * 3,
-                  "Pyramid : initializing...", g_theme.accent, RC_FONT_SIZE);
-    }
-}
 
 //+------------------------------------------------------------------+
 //| RefreshPanel - reads stub values and updates labels/bars          |
@@ -3506,7 +1822,7 @@ void ShellArmSelfLock(void) {
 void ShellSyncLotEdit(const double lot, const int digits) {
     const string id = RC_PREFIX + "V3_copylot";
     int x, y, w, h;
-    if (!InpShellV2 || !g_shell.LotEditRect(x, y, w, h)) {
+    if (!g_shell.LotEditRect(x, y, w, h)) {
         ObjectDelete(0, id);
         return;
     }
@@ -3671,7 +1987,7 @@ void ShellApplyCascade(const int row, const int dir) {
 void ShellSyncMaxEdit(const double lot, const int digits) {
     const string id = RC_PREFIX + "V3_copymax";
     int x, y, w, h;
-    if (!InpShellV2 || !g_shell.MaxEditRect(x, y, w, h)) {
+    if (!g_shell.MaxEditRect(x, y, w, h)) {
         ObjectDelete(0, id);
         return;
     }
@@ -3730,7 +2046,6 @@ void ShellRuleAlerts(const RCDeckData &d) {
 }
 
 void ShellRefresh(void) {
-    if (!InpShellV2) return;
     ShellApplyCfg(g_shell.PendCfgTake());  // consume a toggle click before rendering
     {   // steppers + cascade : the shell asked, the host writes
         int row = 0, dir = 0;
@@ -3751,358 +2066,15 @@ void ShellRefresh(void) {
     ShellSyncMaxEdit(d.maxLot, d.maxLotDigits);
 }
 
+//+------------------------------------------------------------------+
+//| RefreshPanel - the ONE refresh path. The legacy canvas panel was  |
+//| removed in v3.06 (JR : "supprime l'ancien shell") ; everything it |
+//| computed lives in BuildDeckData + the v3 shell, and every side    |
+//| effect it carried (alerts, SL lines, BE lines) moved to           |
+//| ShellRefresh, which is what this now delegates to.                |
+//+------------------------------------------------------------------+
 void RefreshPanel(void) {
-    if (InpShellV2) { ShellRefresh(); return; }   // v3 SHELL : one refresh path, legacy rows skipped
-    if (!g_profile_ok && !g_profile.is_default_fallback)
-        return;
-
-    // V1.24 fix : if a discipline HARD LOCK is active, the overlay is drawn here
-    // and we SKIP the whole panel refresh - otherwise UpdateRow would recreate
-    // the bars/chips every tick on top of the overlay (MT5 redraws rectangle
-    // labels in creation order). The lingering rows from the last normal refresh
-    // stay UNDER the freshly-created overlay ; controls are hidden by it too.
-    const bool disc_locked = UpdateDisciplineOverlay(Live_DailyDdPct(), g_profile.daily_loss_pct);
-    // FIX lock-lifecycle : lock JUST cleared -> one FULL rebuild (DestroyAllObjects +
-    // BuildPanel + refresh + canvas repaint + ChartRedraw via ApplySettingsChange) so
-    // every object the overlay hid/covered is recreated. Clear the flag FIRST :
-    // ApplySettingsChange re-enters RefreshPanel once, which must take the normal path.
-    if (g_disc_locked_prev && !disc_locked) {
-        g_disc_locked_prev = false;
-        ApplySettingsChange();
-        return;
-    }
-    g_disc_locked_prev = disc_locked;
-    if (disc_locked)
-        return;
-
-    // V1.29 J : the whole prop rule-set (live values + rows + bars + chips +
-    // sound alerts via UpdateRow) only refreshes when the risk toolkit is ON.
-    // When OFF the rule rows stay INERT (drawn by BuildPanel, not updated) ; the
-    // account strip + positions below always refresh so basic info stays live.
-    if (g_eff_risktools) {
-    // === Compute live values (T7) ====================================
-    const double margin_cum_pct = Live_CumulativeMarginPct();
-    const double margin_pt_pct = Live_PerTradeMarginPct();
-    const double risk_cum_pct = Live_CumulativeRiskPct();
-    const double daily_dd_pct = Live_DailyDdPct();
-    const double overall_dd_pct = Live_OverallDdPct();
-    const double target_pct = Live_ProfitTargetPct();
-    const double qs_ratio_pct = Live_QuickStrikeRatioPct();
-    const int trades_today = Live_TradesToday();
-
-    // === Update rule rows ============================================
-    // 0: Cumulative Margin (cap tightens to InpMarginCapViolated if violation active - B7)
-    const double margin_cap = EffectiveMarginCap();
-    const string margin_suffix = (g_margin_violation_active ? "  VIOL" : "");
-    UpdateRow(0, margin_cum_pct, margin_cap,
-              FormatPct(margin_cum_pct) + " / " + FormatPct(margin_cap) + margin_suffix,
-              ComputeRangeStatus(margin_cum_pct, margin_cap, 0.80, 1.00),
-              true);
-
-    // 1: Max lot allowed (1.1) - TEXT-ONLY row (bar hidden in the indicator).
-    // Largest lot of the ACTIVE symbol allowed under BOTH the per-trade margin
-    // cap (g_eff_max_margin_pt) AND the per-trade risk cap
-    // (g_eff_max_risk_pt, SL at g_eff_sl_pct). margin_pt_pct stays computed
-    // and passed as the (hidden) bar pct for the future Helper-EA.
-    // 1: Max lot allowed (1.1 + M1c) - largest lot of the active symbol under the
-    // per-trade margin cap, via the broker-exact MarginPerLot (OrderCalcMargin
-    // primary, calc-mode-aware fallback). Text-only row (bar hidden).
-    string maxlot_text;
-    {
-        // FIX (LOT 3) : adaptive Max Lot. Shows the RULE-allowed lot (target % of
-        // INITIAL balance) when free margin covers it ; otherwise falls back to
-        // "N lots @ X% free (target Y%)" so the user sees both the cap AND what
-        // is actually openable RIGHT NOW with the real broker free margin.
-        // v3.01 : the MATH now lives in Live_MaxLot() (shared with the v3 shell) ;
-        // this block keeps the legacy row's TEXT formatting, unchanged.
-        const double tgt_pct  = g_eff_max_margin_pt;
-        double pct_disp = 0.0, avail_pct = 0.0, cum_used = 0.0, cum_cap = 0.0;
-        string tag = ""; int ld = 2;
-        const double lot = Live_MaxLot(pct_disp, tag, ld, avail_pct, cum_used, cum_cap);
-        if (lot < 0.0) {
-            maxlot_text = Tr("maxlot_na") + " err=" + IntegerToString(g_maxlot_err);
-        } else {
-            const string tag_disp = (tag == "marg" ? Tr("tag_marg") : tag == "room" ? Tr("tag_room") : Tr("tag_free"));
-            if (lot <= 0.0) {
-                maxlot_text = Tr("maxlot_belowmin") + " " + DoubleToString(pct_disp, 1) + "% " + tag_disp +
-                              "  (" + Tr("tag_free") + " " + DoubleToString(avail_pct, 1) + "%)";
-            } else if (tag == "marg") {
-                maxlot_text = DoubleToString(lot, ld) + " lots @ " + DoubleToString(tgt_pct, 1) +
-                              "% " + tag_disp + "  (" + _Symbol + ")";
-            } else {
-                maxlot_text = DoubleToString(lot, ld) + " lots @ " + DoubleToString(pct_disp, 1) + "% " + tag_disp +
-                              "  (" + Tr("used") + " " + DoubleToString(cum_used, 1) + "/" + DoubleToString(cum_cap, 0) +
-                              "% cap)  " + _Symbol;
-            }
-        }
-    }
-    UpdateRow(1, margin_pt_pct, g_eff_max_margin_pt, maxlot_text, RC_STATUS_NA, true);
-
-    // 2: Cumulative Open Risk (cap tightens to InpRiskCapViolated if violation active - B7)
-    // FIX 1 (V1.0.1) : the open-risk meter must stay LIVE + alert (sound + Telegram)
-    // wherever a cap is defined - challenge / free / Instant / funded - not only on
-    // funded. The old gate (g_profile.open_risk_rule_applies = funded-only) silenced
-    // the alert on every non-funded profile (the 200K challenge/free JR tested
-    // included), which is exactly the rule JR breached and the whole reason this
-    // panel exists. Excess open risk is dangerous on ANY account; monitor it
-    // whenever a cap exists (cap > 0). Only Futures-placeholder (cap 0) shows N/A.
-    const double risk_cap = EffectiveRiskCap();
-    const bool risk_applies = (risk_cap > 0.0);
-    const string risk_suffix = (g_risk_violation_active ? "  VIOL" : "");
-    // FIX (LOT 2) : "Locked risk" = the value FundedNext scores against (sum of
-    // risks at each position's INITIAL SL, locked at opening). Distinct from the
-    // current-market risk : tightening a SL after opening does NOT reduce it.
-    const double locked_risk_pct = Live_LockedRiskPct();
-    UpdateRow(2, risk_cum_pct, risk_cap,
-              risk_applies
-                  ? (FormatPct(risk_cum_pct) + " / " + FormatPct(risk_cap) + risk_suffix +
-                     (locked_risk_pct > 0.001 ? "  " + Tr("locked") + " " + FormatPct(locked_risk_pct) : ""))
-                  : "N/A",
-              ComputeRangeStatus(risk_cum_pct, risk_cap, 0.70, 1.00),
-              risk_applies);
-
-    // 3: Daily DD
-    const bool dd_applies = (g_profile.daily_loss_pct > 0.0);
-    // V1.24 fix : the discipline overlay is now drawn LAST (end of RefreshPanel)
-    // so it sits on top of every row/footer/position object recreated this tick.
-    UpdateRow(3, daily_dd_pct, g_profile.daily_loss_pct,
-              dd_applies
-                  ? (FormatPct(daily_dd_pct) + " / " + FormatPct(g_profile.daily_loss_pct))
-                  : "N/A (Instant)",
-              ComputeRangeStatus(daily_dd_pct, g_profile.daily_loss_pct, 0.70, 1.00),
-              dd_applies);
-
-    // 4: Overall DD - Personal / no-prop profile has max_loss_pct=0 -> show N/A
-    // instead of a meaningless "2.0% / 0.0%".
-    // v2.02.05 FIX 3 : on a trailing (Instant) profile the row leads with the SAME
-    // DOLLARS the FN dashboard shows (room above the floor) ; the abstract % drops
-    // to a secondary mention and the full detail (floor / fixed permitted loss /
-    // breakeven-lock progression) rides the hover tooltip. Non-trailing presets
-    // (2-Step, 1-Step, FTMO, E8, The5ers...) keep the previous % display EXACTLY.
-    const bool max_loss_applies = (g_profile.max_loss_pct > 0.0);
-    string        maxloss_text   = "N/A";
-    ENUM_RC_STATUS maxloss_status = ComputeRangeStatus(overall_dd_pct, g_profile.max_loss_pct, 0.70, 1.00);
-    if (max_loss_applies && g_profile.max_loss_trailing && g_profile.initial_balance > 0.0) {
-        const double ins_init      = g_profile.initial_balance;
-        const double ins_permitted = (g_profile.max_loss_pct / 100.0) * ins_init;      // fixed $ (120 on 2K)
-        const double ins_floor     = MathMin(g_peak_balance - ins_permitted, ins_init); // breakeven cap
-        const double ins_room      = AccountInfoDouble(ACCOUNT_EQUITY) - ins_floor;     // $ before breach
-        const bool   ins_locked    = (ins_floor >= ins_init - 0.005);                   // floor == initial
-        maxloss_text = Tr("ins_margin") + " " +
-                       DoubleToString(ins_room, ins_room < 1000.0 ? 2 : 0) + " $ " + // adaptive : 5-digit rooms (25K+) keep the ~190px column
-                       ShortToString((ushort)0x00B7) + " " +
-                       (ins_locked ? Tr("ins_locked")
-                                   : DoubleToString(overall_dd_pct, 1) + "/" +
-                                     DoubleToString(g_profile.max_loss_pct, 0) + "%");
-        // status on the $ margin : WATCH once HALF the permitted loss is consumed,
-        // BREACH (RED chip) only at a REAL breach (equity at/under the floor) - the
-        // chip must never cry BREACH while the account is still alive.
-        maxloss_status = ComputeRangeStatus(overall_dd_pct, g_profile.max_loss_pct, 0.50, 1.00);
-        const double ins_lockprog = (ins_permitted > 0.0
-            ? MathMin(100.0, MathMax(0.0, 100.0 * (g_peak_balance - ins_init) / ins_permitted)) : 0.0);
-        const string ins_tip = Tr("ins_tip_floor") + " " + DoubleToString(ins_floor, 2) + " $ (" +
-                               Tr("ins_tip_floor2") + ") | " +
-                               Tr("ins_tip_permitted") + " " + DoubleToString(ins_permitted, 2) + " $ (" +
-                               DoubleToString(g_profile.max_loss_pct, 0) + "%) | " +
-                               DoubleToString(overall_dd_pct, 2) + "% / " +
-                               DoubleToString(g_profile.max_loss_pct, 0) + "% | " +
-                               (ins_locked
-                                    ? Tr("ins_tip_locked1") + " " + DoubleToString(ins_init, 0) + " $ " + Tr("ins_tip_locked2")
-                                    : Tr("ins_tip_lock") + " " + DoubleToString(ins_lockprog, 0) + "% (" +
-                                      DoubleToString(g_peak_balance, 2) + " -> " +
-                                      DoubleToString(ins_init + ins_permitted, 0) + " $)");
-        ObjectSetString(0, RC_PREFIX + "rule_overall_dd_lbl", OBJPROP_TOOLTIP, ins_tip);
-        ObjectSetString(0, RC_PREFIX + "rule_overall_dd_val", OBJPROP_TOOLTIP, ins_tip);
-    } else {
-        if (max_loss_applies)
-            maxloss_text = FormatPct(overall_dd_pct) + " / " + FormatPct(g_profile.max_loss_pct);
-        // clear a stale Instant tooltip after a plan switch (trailing -> non-trailing)
-        ObjectSetString(0, RC_PREFIX + "rule_overall_dd_lbl", OBJPROP_TOOLTIP, " ");
-        ObjectSetString(0, RC_PREFIX + "rule_overall_dd_val", OBJPROP_TOOLTIP, " ");
-    }
-    UpdateRow(4, overall_dd_pct, g_profile.max_loss_pct, maxloss_text, maxloss_status,
-              max_loss_applies);
-
-    // 5: Profit Target - PROGRESS meter, NOT a risk meter. FIX 3 (V1.0.1) : the old
-    // 2-state mapping (reached = green, else amber) painted the row amber the whole
-    // way to target, reading as a warning while you were doing well. Invert to a
-    // progress palette for THIS row only: far = neutral/grey, near (>=70%) = amber,
-    // reached/exceeded = GREEN. Alerts are suppressed for this row in
-    // TryFireSoundAlert (hitting your target is good news, not a warning).
-    const bool tgt_applies = (g_profile.profit_target_pct > 0.0);
-    ENUM_RC_STATUS tgt_status = RC_STATUS_NA;
-    if (tgt_applies) {
-        const double tgt_ratio = target_pct / g_profile.profit_target_pct;
-        if (tgt_ratio >= 1.0)       tgt_status = RC_STATUS_OK;    // reached/exceeded = GREEN
-        else if (tgt_ratio >= 0.70) tgt_status = RC_STATUS_WARN;  // near = amber
-        else                        tgt_status = RC_STATUS_NA;    // far = neutral/grey
-    }
-    UpdateRow(5, target_pct, g_profile.profit_target_pct,
-              tgt_applies
-                  ? (FormatPct(target_pct) + " / " + FormatPct(g_profile.profit_target_pct))
-                  : "-- (funded)",
-              tgt_status,
-              tgt_applies);
-    // v2.02.05 FIX 3 : on Instant the 5% is the first-PAYOUT eligibility threshold,
-    // NOT a challenge target to pass - relabel the row (catalog value unchanged).
-    ObjectSetString(0, RC_PREFIX + "rule_target_lbl", OBJPROP_TEXT,
-                    Tr(g_profile.max_loss_trailing ? "rule_payout" : "rule_target"));
-
-    // 6: Quick Strike Ratio
-    UpdateRow(6, qs_ratio_pct, g_profile.quick_strike_violate_pct,
-              FormatPct(qs_ratio_pct) + " / " + FormatPct(g_profile.quick_strike_violate_pct),
-              ComputeRangeStatus(qs_ratio_pct,
-                                 g_profile.quick_strike_violate_pct,
-                                 g_profile.quick_strike_warn_pct / g_profile.quick_strike_violate_pct,
-                                 1.00),
-              true);
-
-    // 7: Hyperactivity
-    const double hyper_pct = (g_profile.hyperactivity_trades_per_day > 0
-                                  ? 100.0 * trades_today / g_profile.hyperactivity_trades_per_day
-                                  : 0.0);
-    string hyper_text;
-    StringConcatenate(hyper_text, trades_today, " / ", g_profile.hyperactivity_trades_per_day);
-    UpdateRow(7, hyper_pct, 100.0, hyper_text,
-              ComputeRangeStatus(hyper_pct, 100.0, 0.75, 1.00),
-              true);
-
-    // 8: News Window - the bar FILLS over the hour BEFORE the event, stays ACTIVE
-    // through the +/-window (FN +/-5 min), then goes idle.
-    // v2.02.05 FIX 2 : the RULE state (red-amber "ACTIVE eligible 40%") fires on
-    // HIGH-impact ONLY. When no HIGH is near but a MEDIUM is, the row shows a
-    // DISTINCT amber vigilance hint ("Medium - check FN", no 40% implication) :
-    // the FN calendar treats some events as HIGH that MQL5 classes MODERATE.
-    const bool news_applies = g_profile.news_rule_applies;
-    const datetime news_evt = Live_NextNewsEvt(); // HIGH only = the RULE
-    double news_pct = 0.0; bool news_active = false; int news_mins = 0;
-    if (news_evt > 0) {
-        const int      nwin = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
-        const datetime nnow = TimeCurrent();
-        const datetime nws  = news_evt - nwin;   // window start
-        const datetime nwe  = news_evt + nwin;   // window end
-        const int      napp = 3600 - nwin;       // approach span (the hour before the window)
-        if (nnow >= nws && nnow <= nwe) { news_active = true; news_pct = 100.0; }
-        else if (napp > 0 && nnow < nws && nnow >= news_evt - 3600) {
-            news_pct  = 100.0 * (double)(nnow - (news_evt - 3600)) / (double)napp;
-            news_mins = (int)((nws - nnow) / 60) + 1;
-        }
-    }
-    bool news_med_vigil = false;
-    if (news_applies && news_evt == 0) { // no HIGH near -> medium VIGILANCE (display only)
-        const datetime med_evt = Live_NextMedNewsEvt();
-        if (med_evt > 0) {
-            news_med_vigil = true;
-            const int      nwin = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
-            const datetime nnow = TimeCurrent();
-            if (nnow >= med_evt - nwin && nnow <= med_evt + nwin) news_pct = 100.0;
-            else if (nnow < med_evt - nwin && nnow >= med_evt - 3600 && 3600 - nwin > 0)
-                news_pct = 100.0 * (double)(nnow - (med_evt - 3600)) / (double)(3600 - nwin);
-        }
-    }
-    string news_text;
-    if (!news_applies)
-        news_text = "N/A (challenge)";
-    else if (news_active)
-        news_text = "ACTIVE  eligible " + DoubleToString(g_profile.news_profit_share_pct, 0) + "%"; // FN : winning news-window trade keeps only 40 % of its profit (losses count 100 %)
-    else if (news_pct > 0.0 && !news_med_vigil)
-        news_text = "in " + IntegerToString(news_mins) + "m";
-    else if (news_med_vigil)
-        news_text = Tr("news_med_check"); // amber hint, NO 40% implication
-    else
-        news_text = "Inactive";
-    UpdateRow(8,
-              news_pct,
-              100.0,
-              news_text,
-              !news_applies ? RC_STATUS_NA
-                            : ((news_active || news_pct > 0.0) ? RC_STATUS_WARN : RC_STATUS_OK),
-              news_applies);
-    // v2.02.05 FIX 2e : explain the rule vs the vigilance on hover.
-    // v2.03 F3 : honest SOURCE badge on the panel - [FF] = ForexFactory feed active
-    // (FN-aligned classification), [MT] = MT5-calendar fallback.
-    ObjectSetString(0, RC_PREFIX + "rule_news_lbl", OBJPROP_TEXT,
-                    Tr("rule_news") + (g_ff_active ? "  [FF]" : "  [MT]"));
-    const string news_tip = Tr(g_ff_active ? "news_src_ff" : "news_src_mt") + " | " + Tr("news_rule_tip");
-    ObjectSetString(0, RC_PREFIX + "rule_news_lbl", OBJPROP_TOOLTIP, news_tip);
-    ObjectSetString(0, RC_PREFIX + "rule_news_val", OBJPROP_TOOLTIP, news_tip);
-
-    // 9: Server messages today (orders touched - placed/modified/cancelled/filled)
-    const int orders_today = Live_OrdersToday();
-    const int msgs_cap = g_profile.hyperactivity_msgs_per_day;
-    const double msgs_pct = (msgs_cap > 0 ? 100.0 * orders_today / msgs_cap : 0.0);
-    string msgs_text;
-    StringConcatenate(msgs_text, orders_today, " / ", msgs_cap);
-    UpdateRow(9, msgs_pct, 100.0, msgs_text,
-              ComputeRangeStatus(msgs_pct, 100.0, 0.75, 1.00),
-              true);
-
-    // 10: News-Trading stats (V1.24 G2) - text-only row mirroring FundedNext's
-    // "News Trading" card : # trades opened in a news window + their total P&L +
-    // the 40%-eligible profit. Bounded ~30-day scan for the chart symbol, cached.
-    ComputeNewsStats();
-    string newsstats_text;
-    if (!news_applies)
-        newsstats_text = "N/A";
-    else
-        StringConcatenate(newsstats_text,
-                          g_news_trades, "t  P&L ", (g_news_pnl >= 0 ? "+$" : "-$"),
-                          DoubleToString(MathAbs(g_news_pnl), 2),
-                          "  elig ", DoubleToString(g_profile.news_profit_share_pct, 0), "% ",
-                          (g_news_eligible >= 0 ? "+$" : "-$"), DoubleToString(MathAbs(g_news_eligible), 2));
-    UpdateRow(10, 0.0, 0.0, newsstats_text, RC_STATUS_NA, news_applies);
-    } // V1.29 J : end risk-tools gate (rule-set values/rows/bars/alerts)
-
-    RefreshPositionsList(); // basic info : ALWAYS
-    RefreshAccountStrip();  // basic info : ALWAYS
-    RefreshFooterMetrics(); // V1.29 N : ALWAYS - keeps the 2 footer info lines ; it gates the lot/budget/copy parts internally on g_eff_risktools
-    // Always refresh SL/TP recommendation lines AFTER positions so the
-    // "SL>REC" chip override stays in sync with current SL state, not just
-    // on position add/remove. (Internally a no-op when risk-tools are OFF.)
-    RefreshSlLines();
-    if (PositionListChanged())
-        SnapshotPositionList();
-    // V1.24 : soft TILT banner LAST (after the strip is drawn) so it sits on top
-    // of the account strip. Hard locks are handled at the TOP of RefreshPanel.
-    if (g_eff_risktools) {
-        DrawTiltBanner();
-        DrawSlGuardBanner(); // v2.13 B2 : SL-vs-limit survival guard (advisor)
-    }
-}
-
-//+------------------------------------------------------------------+
-//| UpdateRow - mutate g_rows[idx] then re-render that row in-place   |
-//+------------------------------------------------------------------+
-void UpdateRow(int idx, double pct, double max_pct, const string value_text,
-               ENUM_RC_STATUS status, bool applies) {
-    g_rows[idx].value_pct = pct;
-    g_rows[idx].max_pct = max_pct;
-    g_rows[idx].value_text = value_text;
-    g_rows[idx].status = status;
-    g_rows[idx].applies = applies;
-
-    TryFireSoundAlert(idx, applies ? status : RC_STATUS_NA);
-
-    const string id = RC_PREFIX + g_rows[idx].key;
-    ObjectSetString(0, id + "_val_lbl", OBJPROP_TEXT, " "); // legacy id no-op
-    ObjectSetString(0, id + "_val", OBJPROP_TEXT, value_text);
-    ObjectSetInteger(0, id + "_val", OBJPROP_COLOR, applies ? g_theme.text : g_theme.text_dim);
-
-    // 1.1 : the "Max lot allowed" row (rule_margin_pt) is text-only in the
-    // indicator -> skip the chip re-draw (kept for the future Helper-EA).
-    // LOT A : NO legacy bar re-draw - the canvas Meter (RepaintCanvas, runs right after
-    // this in the OnTimer order) is the only bar now. Only the chip LABEL updates here.
-    if (g_rows[idx].key != "rule_margin_pt" && g_rows[idx].key != "rule_newsstats") {
-        ObjectsDeleteAll(0, id + "_bar"); // clear any stale legacy bar rects
-        ObjectDelete(0, id + "_bar_empty");
-        const int x = g_anchor_x, w = InpPanelWidth; // B2 : live anchor
-        const int row_y = (int)ObjectGetInteger(0, id + "_lbl", OBJPROP_YDISTANCE) + 1;
-        // Re-draw chip label (semantic colour ; canvas pill tint follows via g_rows[].status)
-        ObjectsDeleteAll(0, id + "_chip");
-        const int chip_x = x + w - 70;
-        const int chip_y = row_y - 2;
-        DrawStatusChip(id + "_chip", chip_x, chip_y, 60, InpRowHeight - 6, applies ? status : RC_STATUS_NA);
-    }
+    ShellRefresh();
 }
 
 //+------------------------------------------------------------------+
@@ -4119,211 +2091,14 @@ ENUM_RC_STATUS ComputeRangeStatus(double v, double max_v, double warn_ratio, dou
     return RC_STATUS_OK;
 }
 
-ENUM_RC_STATUS ComputeBandStatus(double v, double lo, double hi) {
-    // Per-trade margin recommendation: stay WITHIN [lo, hi]. Below = OK (under-leveraged).
-    // Above hi = WARN. Way above (gambling territory > 70 % cumulative handled by row 0) = RED.
-    if (v <= 0.0)
-        return RC_STATUS_NA;
-    if (v <= hi)
-        return RC_STATUS_OK;
-    if (v <= hi * 1.5)
-        return RC_STATUS_WARN;
-    return RC_STATUS_RED;
-}
-
-string StatusLabel(ENUM_RC_STATUS s) {
-    switch (s) {
-    case RC_STATUS_OK:
-        return Tr("chip_safe"); // E2 : metered RULES rows read SAFE (positions go through PositionStatusLabel -> chip_ok)
-    case RC_STATUS_WARN:
-        return Tr("chip_warn");
-    case RC_STATUS_RED:
-        return Tr("chip_red");
-    }
-    return Tr("chip_na");
-}
-
-color StatusColor(ENUM_RC_STATUS s) {
-    switch (s) {
-    case RC_STATUS_OK:
-        return g_theme.ok;
-    case RC_STATUS_WARN:
-        return g_theme.warn;
-    case RC_STATUS_RED:
-        return g_theme.red;
-    }
-    return g_theme.bar_bg;
-}
-
-//+------------------------------------------------------------------+
-//| Position list refresh - live PositionGet* readings               |
-//+------------------------------------------------------------------+
-void RefreshPositionsList(void) {
-    const int n = PositionsTotal();
-    for (int i = 0; i < RC_MAX_POSITIONS; ++i) {
-        const string id = RC_PREFIX + "pos_" + IntegerToString(i);
-
-        if (i >= n || !PositionSelectByTicket(PositionGetTicket(i))) {
-            // Empty slot - clear text AND reset all colors to panel-bg so
-            // a previously red/green row doesn't ghost after a close.
-            // FINAL (optional) : with 0 positions the whole section is bare panel ->
-            // row 0 shows a discreet dim hint (not clickable -> tooltip suppressed).
-            ObjectSetString(0, id + "_lbl", OBJPROP_TEXT, (i == 0 && n == 0 ? Tr("pos_none") : " "));
-            ObjectSetInteger(0, id + "_lbl", OBJPROP_COLOR, g_theme.text_dim);
-            ObjectSetString(0, id + "_lbl", OBJPROP_TOOLTIP, "\n"); // "\n" = tooltip disabled
-            ObjectSetString(0, id + "_pnl", OBJPROP_TEXT, " ");
-            ObjectSetInteger(0, id + "_pnl", OBJPROP_COLOR, g_theme.text_dim);
-            ObjectSetString(0, id + "_age", OBJPROP_TEXT, " ");
-            ObjectSetInteger(0, id + "_age", OBJPROP_COLOR, g_theme.text_dim);
-            // LOT A : chip is label-only ; blanking the text + emptying g_pos_sym is
-            // enough (the canvas pill loop skips empty slots -> no ghost tint).
-            ObjectSetString(0, id + "_chip_txt", OBJPROP_TEXT, " ");
-            g_pos_status[i] = RC_STATUS_NA;
-            g_pos_sym[i] = ""; // V1.27 : empty slot -> no click target
-            ObjectSetString(0, RC_PREFIX + "pos_row_" + IntegerToString(i), OBJPROP_TEXT, " ");
-            continue;
-        }
-
-        const string sym = PositionGetString(POSITION_SYMBOL);
-        g_pos_sym[i] = sym; // V1.27 : remember this row's symbol for click-to-switch
-        const int type = (int)PositionGetInteger(POSITION_TYPE);
-        const double vol = PositionGetDouble(POSITION_VOLUME);
-        const double pnl = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
-        const datetime open_time = (datetime)PositionGetInteger(POSITION_TIME);
-        const double sl = PositionGetDouble(POSITION_SL);
-        const int age = (int)(TimeCurrent() - open_time);
-        const bool sl_miss = (sl <= 0.0);
-
-        const string type_str = (type == POSITION_TYPE_BUY ? "BUY" : "SELL");
-        const string sym_short = (StringLen(sym) > 12 ? StringSubstr(sym, 0, 12) : sym); // E6 : "US30.cash" / "JP225.cash" fit whole
-
-        string lbl;
-        StringConcatenate(lbl, sym_short, " ", type_str, " ", DoubleToString(vol, VolDigits(sym))); // V1.28 : up to 4 dp
-        ObjectSetString(0, id + "_lbl", OBJPROP_TEXT, lbl);
-        ObjectSetInteger(0, id + "_lbl", OBJPROP_COLOR, g_theme.text);
-        ObjectSetString(0, id + "_lbl", OBJPROP_TOOLTIP, Tr("pos_click_tip")); // restore (row 0 may have been the no-positions hint)
-        ObjectSetString(0, RC_PREFIX + "pos_row_" + IntegerToString(i), OBJPROP_TEXT, lbl); // V1.27 : button mirrors the symbol cell
-
-        string pnl_str;
-        StringConcatenate(pnl_str, (pnl >= 0.0 ? "+$" : "-$"), DoubleToString(MathAbs(pnl), 2));
-        ObjectSetString(0, id + "_pnl", OBJPROP_TEXT, pnl_str);
-        ObjectSetInteger(0, id + "_pnl", OBJPROP_COLOR, (pnl >= 0.0 ? g_theme.ok : g_theme.red));
-
-        string age_str = FormatAge(age);
-        color age_color = g_theme.text_dim;
-        if (sl_miss && g_profile.mandatory_sl_minutes > 0) {
-            const int deadline = g_profile.mandatory_sl_minutes * 60;
-            const int remaining = deadline - age;
-            if (remaining > 0) {
-                age_str = age_str + "  SL " + IntegerToString(remaining) + "s";
-                age_color = g_theme.warn; // amber - approaching the deadline
-            } else {
-                age_str = age_str + "  SL OVERDUE";
-                age_color = g_theme.red; // red - 3-min rule breached
-            }
-        } else if (sl_miss) {
-            age_str = age_str + "  no SL";
-            age_color = g_theme.warn;
-        }
-        ObjectSetString(0, id + "_age", OBJPROP_TEXT, age_str);
-        ObjectSetInteger(0, id + "_age", OBJPROP_COLOR, age_color);
-
-        // Position status :
-        //   - Locked while age < quick_strike_seconds (closing now creates QS trade)
-        //   - WARN if SL missing and inside the 3-min grace
-        //   - RED  if SL missing AND grace expired (and rule applies)
-        //   - else OK
-        ENUM_RC_STATUS pos_status = RC_STATUS_OK;
-        if (age < g_profile.quick_strike_seconds)
-            pos_status = RC_STATUS_RED;
-        else if (sl_miss && g_profile.mandatory_sl_minutes > 0) {
-            const int deadline = g_profile.mandatory_sl_minutes * 60;
-            pos_status = (age < deadline ? RC_STATUS_WARN : RC_STATUS_RED);
-        }
-
-        // LOT A (mockup .pill) : record the LIVE status for the canvas pill tint, and
-        // colour the label with the SEMANTIC colour (the old _chip_bg solid rect is gone).
-        g_pos_status[i] = pos_status;
-        ObjectSetString(0, id + "_chip_txt", OBJPROP_TEXT,
-                        PositionStatusLabel(pos_status, age, sl_miss));
-        ObjectSetInteger(0, id + "_chip_txt", OBJPROP_COLOR, StatusColor(pos_status));
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Account strip refresh (cycle countdown live)                     |
-//+------------------------------------------------------------------+
-void RefreshAccountStrip(void) {
-    // FIX : Cycle / Payout countdown removed (too personal + required entering
-    // dates). Always show the date-free min-trading-days counter.
-    string right = "";
-    {
-        const int min_days = g_profile.min_trading_days;
-        if (min_days <= 0)
-            right = Tr("min_days_none");
-        else {
-            const int done = Live_TradingDaysCount();
-            StringConcatenate(right, Tr("days_traded"), " ", done, "/", min_days,
-                              (done >= min_days ? "  OK" : ""));
-        }
-    }
-    ObjectSetString(0, RC_PREFIX + "strip_right", OBJPROP_TEXT, right);
-}
-
 //+------------------------------------------------------------------+
 //| B5 : next HIGH-impact news + B4 : weekend-hold warning state      |
 //+------------------------------------------------------------------+
-datetime g_next_high_time = 0;     // server time of next news event (0 = none)
-string   g_next_high_ccy  = "";
-datetime g_next_high_scan = 0;     // last calendar scan timestamp
-bool     g_next_high_isHigh = false; // V1.29 P : true if the next event is HIGH (else MEDIUM)
 bool     g_weekend_warned = false; // weekend alert already fired this window
 
 // B5 : time of the next HIGH-impact event (any currency) within 24h, 0 if none.
 // V1.29 P/R : next HIGH **or** MEDIUM news (respecting the level toggles), and
 // reports whether it is HIGH via out_high. (Name kept for minimal churn.)
-datetime Live_NextHighImpactTime(string &out_ccy, bool &out_high) {
-    out_ccy = "";
-    out_high = false;
-    const datetime now = TimeCurrent();
-    // v2.03 : FF feed = primary here too (the footer strip must AGREE with row 8
-    // and the chart marks - three surfaces, one source). MT5 calendar = fallback.
-    if (g_ff_active) {
-        const int srv_off = (int)(TimeCurrent() - TimeGMT());
-        datetime fbest = 0;
-        for (int i = 0; i < ArraySize(g_ff_events); ++i) {
-            const datetime ts = g_ff_events[i].t_utc + srv_off;
-            if (ts <= now || ts > now + 24 * 60 * 60) continue;
-            if (g_ff_events[i].restricted  && !g_eff_news_high) continue; // level toggles
-            if (!g_ff_events[i].restricted && !g_eff_news_med)  continue;
-            if (fbest == 0 || ts < fbest) {
-                fbest = ts;
-                out_high = g_ff_events[i].restricted;
-                out_ccy  = g_ff_events[i].ccy;
-            }
-        }
-        return fbest;
-    }
-    MqlCalendarValue values[];
-    if (CalendarValueHistory(values, now, now + 24 * 60 * 60, NULL, NULL) <= 0)
-        return 0;
-    datetime best = 0;
-    for (int i = 0; i < ArraySize(values); ++i) {
-        if (values[i].time <= now) continue;
-        MqlCalendarEvent ev;
-        if (!CalendarEventById(values[i].event_id, ev)) continue;
-        const bool hi = (ev.importance == CALENDAR_IMPORTANCE_HIGH);
-        const bool md = (ev.importance == CALENDAR_IMPORTANCE_MODERATE);
-        if (!(hi && g_eff_news_high) && !(md && g_eff_news_med)) continue; // R : level filter
-        if (best == 0 || values[i].time < best) {
-            best = values[i].time;
-            out_high = hi;
-            MqlCalendarCountry c;
-            if (CalendarCountryById(ev.country_id, c)) out_ccy = c.currency;
-        }
-    }
-    return best;
-}
 
 // B4 : weekend-hold risk = weekend hold NOT allowed (funded) + Friday >= 22:00
 // UTC + at least one open position.
@@ -4349,85 +2124,6 @@ void FireWeekendAlert(void) {
 //| Live blinker for the title bar (substitute for popups)           |
 //| Priority : weekend-hold warning (B4) > news countdown (B5) > LIVE |
 //+------------------------------------------------------------------+
-int g_blink_state = 0;
-void UpdateClockBlinker(void) {
-    g_blink_state = 1 - g_blink_state;
-    const string cid = RC_PREFIX + "title_clock";
-
-    // B4 : weekend-hold risk has top priority.
-    if (IsWeekendHoldRisk()) {
-        ObjectSetString(0, cid, OBJPROP_TEXT, (g_blink_state == 0 ? Tr("weekend_hold") : Tr("flatten")));
-        ObjectSetInteger(0, cid, OBJPROP_COLOR, g_theme.red);
-        FireWeekendAlert();
-        return;
-    }
-    g_weekend_warned = false; // reset once out of the weekend window
-
-    // B5 : next HIGH-impact news countdown (rescanned every 30 s, ticks down live).
-    if (TimeCurrent() - g_next_high_scan >= 30) {
-        g_next_high_scan = TimeCurrent();
-        g_next_high_time = Live_NextHighImpactTime(g_next_high_ccy, g_next_high_isHigh);
-    }
-    if (g_next_high_time > TimeCurrent() && g_next_high_ccy != "") {
-        const int mn = (int)((g_next_high_time - TimeCurrent()) / 60);
-        if (mn <= 60) { // V1.29 P : counter starts only 1h before (was 120) ; includes MEDIUM
-            const string lvl = (g_next_high_isHigh ? "HIGH" : "MED");
-            ObjectSetString(0, cid, OBJPROP_TEXT, lvl + " " + g_next_high_ccy + " " + IntegerToString(mn) + "m");
-            ObjectSetInteger(0, cid, OBJPROP_COLOR, (g_next_high_isHigh ? g_theme.red : g_theme.warn));
-            return;
-        }
-    }
-    // FINAL state-machine (mockup .live) : weekend > news countdown > DEGRADED verdict
-    // (AT RISK / VIOLATION + score - a risk tool must surface trouble) > healthy default
-    // = green dot + LIVE. The dot is part of the label TEXT (U+25CF), so it rides the
-    // right-anchored dynamic zone with zero collision and zero canvas work.
-    VerdictResult v;
-    ComputeVerdict(v);
-    if (v.clr == g_theme.ok) {
-        // v2.01.03 : the healthy state now SAYS the health - "● SAIN 82/100" - instead
-        // of the mute "● LIVE". The dot keeps the live-heartbeat read, the word + /100
-        // make the score meaning obvious (mandate : "14 = quoi ?"). Same zone, same
-        // green, right-anchored (grows toward the title, never the gear).
-        ObjectSetString(0, cid, OBJPROP_TEXT, ShortToString((ushort)0x25CF) + " " + v.text);
-        ObjectSetInteger(0, cid, OBJPROP_COLOR, g_theme.ok);
-        return;
-    }
-    ObjectSetString(0, cid, OBJPROP_TEXT, v.text);
-    ObjectSetInteger(0, cid, OBJPROP_COLOR, v.clr);
-}
-
-//+------------------------------------------------------------------+
-//| LOT 6 : compute the headline verdict + safety score (0-100) from  |
-//| the live rule meters in g_rows. Score = 100 * (1 - max_ratio),    |
-//| max_ratio = the worst used/cap across all applicable risk rules.  |
-//| The profit-target row is excluded (it's a goal, not a risk).      |
-//+------------------------------------------------------------------+
-void ComputeVerdict(VerdictResult &out) {
-    double max_ratio = 0.0;
-    for (int i = 0; i < RC_RULE_COUNT; ++i) {
-        if (!g_rows[i].applies)              continue;
-        if (g_rows[i].max_pct <= 0.0)        continue;
-        if (g_rows[i].key == "rule_target")  continue; // goal, not risk
-        const double r = g_rows[i].value_pct / g_rows[i].max_pct;
-        if (r > max_ratio) max_ratio = r;
-    }
-    int score = (int)MathRound(100.0 * (1.0 - max_ratio));
-    if (score < 0)   score = 0;
-    if (score > 100) score = 100;
-    out.score = score;
-    // v2.01.03 : the score is the account HEALTH /100 (100 = safe, 0 = rule hit) -
-    // say it : "SAIN 82/100" / "PRUDENCE 14/100", the colour carrying the zone.
-    if (max_ratio >= 1.0) {
-        out.text = Tr("v_violation") + " " + IntegerToString(score) + "/100";
-        out.clr  = g_theme.red;
-    } else if (max_ratio >= 0.80) {
-        out.text = Tr("v_atrisk") + " " + IntegerToString(score) + "/100";
-        out.clr  = g_theme.warn;
-    } else {
-        out.text = Tr("v_ontrack") + " " + IntegerToString(score) + "/100";
-        out.clr  = g_theme.ok;
-    }
-}
 
 //+------------------------------------------------------------------+
 //| LOT 6 : persist UI prefs (language + BE toggle) via MT5            |
@@ -6667,231 +4363,6 @@ double CommissionPerLot(const string sym) {
 }
 
 //+------------------------------------------------------------------+
-//| V1.24 G3 B-COPY : a read-only OBJ_EDIT holding the raw lot number. |
-//| MT5 lets the user click into it + Ctrl+C the value (no DLL / no    |
-//| clipboard API). We overwrite the text each refresh ; READONLY      |
-//| means user edits never stick.                                     |
-//+------------------------------------------------------------------+
-void DrawCopyEdit(const string id, int x, int y, int w, int h, const string text, const string tip) {
-    const bool fresh = (ObjectFind(0, id) < 0);
-    if (fresh) ObjectCreate(0, id, OBJ_EDIT, 0, 0, 0);
-    ObjectSetInteger(0, id, OBJPROP_XDISTANCE, x);
-    ObjectSetInteger(0, id, OBJPROP_YDISTANCE, y);
-    ObjectSetInteger(0, id, OBJPROP_XSIZE, w);
-    ObjectSetInteger(0, id, OBJPROP_YSIZE, h);
-    // P4 : only rewrite the text when it actually changed, so re-typing the value
-    // every 500 ms doesn't wipe the user's selection mid-copy.
-    if (fresh || ObjectGetString(0, id, OBJPROP_TEXT) != text)
-        ObjectSetString(0, id, OBJPROP_TEXT, text);
-    ObjectSetString (0, id, OBJPROP_FONT, RC_FONT_UI);
-    ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
-    ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.accent);
-    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.bg_section);
-    ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.border);
-    // P4 : NOT read-only -> MT5 only lets you select + Ctrl+C an EDITABLE field.
-    // Typing is harmless (overwritten on the next value change).
-    ObjectSetInteger(0, id, OBJPROP_READONLY, false);
-    ObjectSetInteger(0, id, OBJPROP_ALIGN, ALIGN_CENTER);
-    ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, id, OBJPROP_ZORDER, 120);
-    ObjectSetString (0, id, OBJPROP_TOOLTIP, tip);
-}
-
-// P1 : sign colour (green >= 0, red < 0) for an individually-coloured value.
-color SignColor(double v) { return (v >= 0.0 ? g_theme.ok : g_theme.red); }
-
-// P1 : draw a row of individually-coloured text segments left-to-right, each
-// measured with TextGetSize so nothing overlaps and the line never runs off the
-// panel edge (the previous single label was clipped + one colour for everything).
-void DrawColoredSegments(const string idbase, int x, int y, string &txt[], color &clr[], int fsize) {
-    TextSetFont(RC_FONT, -fsize * 10);
-    int cx = x;
-    const int n = ArraySize(txt);
-    for (int i = 0; i < n; ++i) {
-        const string id = idbase + IntegerToString(i);
-        DrawLabel(id, cx, y, txt[i], clr[i], fsize);
-        uint tw = 0, th = 0;
-        TextGetSize(txt[i], tw, th);
-        cx += (int)tw;
-    }
-    for (int i = n; i < 24; ++i) { // clear any leftover segments from a longer render
-        const string id = idbase + IntegerToString(i);
-        if (ObjectFind(0, id) >= 0) ObjectDelete(0, id);
-    }
-}
-
-void DrawCopyFields(void) {
-    // P4 : copy-lot fields on the TF/control bar, LEFT of the BE button - no more
-    // overlap with Re-center / Auto-SL (which live on the recent-symbols bar).
-    const int x = g_anchor_x, w = InpPanelWidth;
-    const int y = g_tfbar_y;
-    const int h = InpRowHeight - 6;
-    const int bw = 54; // FINESSE 6b : still fits 6-7 lot digits ; frees ~7px air before the BE pill caption
-    // V1.29 F : visible caption (Sug / Max) before each box + localized tooltips
-    // (the two boxes used to be indistinguishable - only an EN-hardcoded tooltip).
-    // Reads "Sug [0.50]  Max [1.20]  BE". Leftmost caption (x+w-242 = x+378 @620)
-    // stays right of the TF buttons (~x+345).
-    const int box_max_x = x + w - 118; // just left of the BE button (x+w-52)
-    const int cap_max_x = x + w - 146;
-    const int box_sug_x = x + w - 214;
-    const int cap_sug_x = x + w - 242;
-    DrawLabel(RC_PREFIX + "cap_sug", cap_sug_x, y + 5, Tr("cap_sug"), g_theme.text_dim, RC_FONT_SIZE);
-    DrawCopyEdit(RC_PREFIX + "copy_sug", box_sug_x, y + 3, bw, h,
-                 DoubleToString(g_suglot_copy, g_maxlot_digits), Tr("copy_sug_tip"));
-    DrawLabel(RC_PREFIX + "cap_max", cap_max_x, y + 5, Tr("cap_max"), g_theme.text_dim, RC_FONT_SIZE);
-    DrawCopyEdit(RC_PREFIX + "copy_max", box_max_x, y + 3, bw, h,
-                 DoubleToString(g_maxlot_copy, g_maxlot_digits), Tr("copy_max_tip"));
-}
-
-//+------------------------------------------------------------------+
-//| Footer refresh - profit metrics + suggested lot                  |
-//+------------------------------------------------------------------+
-void RefreshFooterMetrics(void) {
-    const double total_pct = Live_TotalProfitPct();     // total P&L as % of account size
-    const int    days      = Live_TradingDaysCount();   // distinct days with >=1 trade
-    const double floating  = SumFloatingPnL();          // P&L of OPEN positions (JR's "Profit")
-    const double today_p   = Live_TodayProfit();        // FIX (LOT 3) : day P&L (cached realised + live floating)
-    const double today_pct = (g_profile.initial_balance > 0.0
-                                  ? 100.0 * today_p / g_profile.initial_balance
-                                  : 0.0);
-    const double per_cap = Live_PerTradeCap();  // 1.0 or 1.5
-    const double risk_cap_eff = EffectiveRiskCap();     // B7 : tightened cap if violation active
-    const double margin_cap_eff = EffectiveMarginCap(); // B7
-    const double used_risk = Live_CumulativeRiskPct();
-    const double used_margin = Live_CumulativeMarginPct();
-
-    // Row 1 (P1 + P2) : Bal | P&L% | Today $ (%) | days | Profit | Spread | Comm,
-    // EACH value coloured by its own sign (green >= 0, red < 0), full precision
-    // (2 decimals on money + %), laid out with TextGetSize so the line never
-    // clips. Slightly smaller font (RC_FONT_SIZE-1) to fit the extra precision.
-    // Row 1 = ACCOUNT stats only (Bal / P&L / Today / days / Profit). Spread +
-    // commission are SYMBOL info -> moved to the lot line (row 2) below.
-    string fseg[5]; color fclr[5];
-    fseg[0] = Tr("f_bal") + " $" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + "   ";
-    fclr[0] = g_theme.text;
-    fseg[1] = "P&L " + (total_pct >= 0 ? "+" : "") + DoubleToString(total_pct, 2) + "%   ";
-    fclr[1] = SignColor(total_pct);
-    fseg[2] = Tr("f_today") + " " + (today_p >= 0 ? "+$" : "-$") + DoubleToString(MathAbs(today_p), 2) +
-              " (" + (today_pct >= 0 ? "+" : "") + DoubleToString(today_pct, 2) + "%)   ";
-    fclr[2] = SignColor(today_p);
-    fseg[3] = IntegerToString(days) + "d   ";
-    fclr[3] = g_theme.text_dim;
-    fseg[4] = Tr("f_profit") + " " + (floating >= 0 ? "+$" : "-$") + DoubleToString(MathAbs(floating), 2);
-    fclr[4] = SignColor(floating);
-    DrawColoredSegments(RC_PREFIX + "fseg_", g_anchor_x + RC_PAD, g_footer_y + 5, fseg, fclr, RC_FONT_SIZE - 1);
-
-    // Row 3 : per-trade cap + risk / margin "left" indicators (was static
-    // brand line before - now dynamic with budget info AND add-ons summary).
-    // Cascade (2026-05-20) : show only the add-ons VALID for the selected plan;
-    // flag any ticked-but-invalid ones as ignored (MT5 can't grey out inputs).
-    const int valid_addons   = g_addons_mask & g_catalog.ValidAddonsMask(EffectivePlan());
-    const int ignored_addons = g_addons_mask & (~g_catalog.ValidAddonsMask(EffectivePlan()));
-    // V1.28 : clearer + non-clipping. Show "Add-ons: X" (localized "none"),
-    // and move the cryptic "[+N ign]" detail into the hover tooltip.
-    string addons_disp = Tr("addons_lbl") + " " +
-        (valid_addons == 0 ? Tr("addons_none") : g_catalog.DescribeAddons(valid_addons));
-    int nign = 0;
-    for (int b = 0; b < 16; ++b) if ((ignored_addons & (1 << b)) != 0) nign++;
-    string budget_line;
-    if (g_eff_risktools) {
-        StringConcatenate(budget_line,
-                          Tr("f_cap"), " ", DoubleToString(per_cap, 2), "%",
-                          "  ", Tr("f_risk"), " ", DoubleToString(used_risk, 2),
-                          "/", DoubleToString(risk_cap_eff, 1), "%",
-                          (g_risk_violation_active ? "!" : ""),
-                          "  ", Tr("f_margin"), " ", DoubleToString(used_margin, 2),
-                          "/", DoubleToString(margin_cap_eff, 1), "%",
-                          (g_margin_violation_active ? "!" : ""),
-                          " " + ShortToString((ushort)0x00B7) + " ", addons_disp); // FINAL : middledot separator (mockup typography)
-    } else {
-        budget_line = addons_disp; // V1.29 N : risk-tools OFF -> add-ons summary only (no Cap/Risk/Margin)
-    }
-    ObjectSetString(0, RC_PREFIX + "footer_l3", OBJPROP_TEXT, budget_line);
-    // P3 : explain this line on hover ; flag any ignored (input-enabled but
-    // plan-invalid) add-ons here instead of cluttering the visible line.
-    string l3_tip = "Cap = max risk per trade % | Risk = cumulative open risk used/cap | Margin = cumulative margin used/cap | active add-ons";
-    if (nign > 0)
-        l3_tip = l3_tip + "   (" + IntegerToString(nign) + " enabled add-on(s) ignored: not valid for this plan)";
-    ObjectSetString(0, RC_PREFIX + "footer_l3", OBJPROP_TOOLTIP, l3_tip);
-    color budget_clr = g_theme.text_dim;
-    if (used_risk >= risk_cap_eff * 0.9 || used_margin >= margin_cap_eff * 0.9)
-        budget_clr = g_theme.warn;
-    ObjectSetInteger(0, RC_PREFIX + "footer_l3", OBJPROP_COLOR, budget_clr);
-
-    // Pyramid advisor (D, art. 22187) - footer row 4, only when enabled.
-    if (InpEnablePyramidSafe)
-        {   string pline = ""; int pstat = 2;
-            BuildPyramidLine(pline, pstat);
-            const string plid = RC_PREFIX + "footer_l4";
-            if (ObjectFind(0, plid) >= 0) {
-                ObjectSetString(0, plid, OBJPROP_TEXT, "Pyramid: " + pline);
-                ObjectSetInteger(0, plid, OBJPROP_COLOR,
-                    (pstat == 0 ? g_theme.ok : (pstat == 1 ? g_theme.warn : g_theme.text_dim)));
-            }
-        }
-
-    // Row 2 : suggested-lot (P1, minimal). "Lot 0.18 | N6 0.50%/tr". Risk
-    // cumulative lives in the top bars; margin detail in the "Max lot allowed"
-    // row. The SL level is read off the chart line.
-    SuggestedLot s;
-    string sug_line = "";
-    if (g_eff_risktools) { // V1.29 N : the lot proposal is a risk-tool -> only when ON
-        if (Live_ComputeSuggestedLot(s)) {
-            const int sld = LotDigits(s.vol_step);  // B-LOTPRECISION
-            g_suglot_copy = s.broker_lot;           // V1.24 G3 copy
-            StringConcatenate(sug_line,
-                              Tr("f_lot"), " ", DoubleToString(s.broker_lot, sld),
-                              " " + ShortToString((ushort)0x00B7) + " N", s.n_planned, " ", DoubleToString(s.dd_per_trade_pct, 2), "%/tr", // FINAL : middledot
-                              "  ", Tr("f_free"), " ", DoubleToString(s.free_margin_pct, 0), "%");
-            // FIX 8 : free-margin awareness. Priority : insufficient (red, unexecutable)
-            // > risk-budget reduce > below-min > lot capped by free margin (info).
-            color l2_clr = g_theme.text;
-            string l2_flag = ""; // V1.29 D : the long [..] flag goes to the tooltip, not the clipping line
-            if (s.margin_insufficient) {
-                l2_flag = Tr("f_insuf");
-                l2_clr = g_theme.red;
-            } else if (s.floor_capped) { // v2.13 B1 : survival cap binds -> amber + explain ;
-                // ZERO room (limit hit) -> RED : the below-min bump-up may still print a
-                // broker-min lot, but nothing is tradeable on a breached/at-floor account.
-                l2_flag = Tr("f_floorcap");
-                l2_clr = (s.risk_budget_money <= 0.005 ? g_theme.red : g_theme.warn);
-            } else if (s.reduce_flag) {
-                l2_flag = Tr("f_reduce");
-                l2_clr = g_theme.warn;
-            } else if (s.below_min) {
-                l2_flag = Tr("f_belowmin");
-                l2_clr = g_theme.warn;
-            } else if (s.margin_bound) {
-                l2_flag = Tr("f_marginbound");
-            }
-            ObjectSetInteger(0, RC_PREFIX + "footer_l2", OBJPROP_COLOR, l2_clr);
-            ObjectSetString(0, RC_PREFIX + "footer_l2", OBJPROP_TOOLTIP, l2_flag);
-        } else {
-            sug_line = Tr("lot_unavail");
-            g_suglot_copy = 0.0;
-            ObjectSetInteger(0, RC_PREFIX + "footer_l2", OBJPROP_COLOR, g_theme.text_dim);
-            ObjectSetString(0, RC_PREFIX + "footer_l2", OBJPROP_TOOLTIP, "");
-        }
-    } else {
-        // V1.29 N : risk-tools OFF -> no lot proposal, just symbol spread + comm below.
-        g_suglot_copy = 0.0;
-        ObjectSetInteger(0, RC_PREFIX + "footer_l2", OBJPROP_COLOR, g_theme.text_dim);
-        ObjectSetString(0, RC_PREFIX + "footer_l2", OBJPROP_TOOLTIP, "");
-    }
-    // P-D : spread + commission belong to the SYMBOL -> always shown on row 2.
-    const long   spr_pts = (long)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-    const double comm_pl = CommissionPerLot(_Symbol);
-    const string symline = Tr("spread") + " " + IntegerToString((int)spr_pts) +
-               "  " + Tr("comm") + " " + (comm_pl >= 0.0 ? "$" + DoubleToString(comm_pl, 2) : "n/a"); // V1.29 D : drop "/lot"
-    sug_line = (StringLen(sug_line) > 0 ? sug_line + "   " : "") + symline; // no leading gap when OFF
-    ObjectSetString(0, RC_PREFIX + "footer_l2", OBJPROP_TEXT, sug_line);
-    if (g_eff_risktools)
-        DrawCopyFields(); // V1.29 N : copy-lot boxes only when risk-tools ON
-}
-
-//+------------------------------------------------------------------+
 //| Persist user's max-parallel choice across symbol/timeframe       |
 //| changes via MT5 GlobalVariable.                                  |
 //+------------------------------------------------------------------+
@@ -7014,102 +4485,6 @@ double MaxLotAllowed(const string sym, double cap_pct, double balance) {
 
 void PersistMaxParallel(void) {
     GlobalVariableSet("RC_max_parallel", (double)g_max_parallel);
-}
-
-//+------------------------------------------------------------------+
-//| B2 : drag-to-move helpers. MovePanelBy shifts ALL panel objects   |
-//| (RECTANGLE_LABEL / LABEL / BUTTON, screen-anchored) by a delta;   |
-//| chart price lines (SL/TP/NEWS) are left untouched.                |
-//+------------------------------------------------------------------+
-void MovePanelBy(int dx, int dy) {
-    { int nx = g_anchor_x + dx, ny = g_anchor_y + dy; ClampAnchor(nx, ny); dx = nx - g_anchor_x; dy = ny - g_anchor_y; } // B2 : bar cannot be dragged off-screen
-    if (dx == 0 && dy == 0)
-        return;
-    const int total = ObjectsTotal(0);
-    for (int i = 0; i < total; ++i) {
-        const string nm = ObjectName(0, i);
-        if (StringFind(nm, RC_PREFIX) != 0) continue;   // panel objects only
-        if (StringFind(nm, "RC_SL_") == 0) continue;    // chart price lines - skip
-        if (StringFind(nm, "RC_TP_") == 0) continue;
-        if (StringFind(nm, "RC_NEWS_") == 0) continue;
-        const long ot = ObjectGetInteger(0, nm, OBJPROP_TYPE);
-        // P2 : include the logo bitmap + the copy OBJ_EDITs so they drag with the panel.
-        if (ot != OBJ_RECTANGLE_LABEL && ot != OBJ_LABEL && ot != OBJ_BUTTON &&
-            ot != OBJ_BITMAP_LABEL && ot != OBJ_EDIT) continue;
-        const int ox = (int)ObjectGetInteger(0, nm, OBJPROP_XDISTANCE);
-        const int oy = (int)ObjectGetInteger(0, nm, OBJPROP_YDISTANCE);
-        ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, ox + dx);
-        ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, oy + dy);
-    }
-    g_anchor_x += dx;
-    g_anchor_y += dy;
-    // P2 fix : keep ALL stored layout-Y globals in sync with the drag, else the
-    // next refresh tick redraws these rows at a stale Y (X tracks via g_anchor_x,
-    // but Y snapped back). g_recbar_y was already handled ; g_tfbar_y drives the
-    // copy-lot boxes and g_footer_y drives the coloured info line.
-    g_recbar_y += dy;
-    g_tfbar_y  += dy;
-    g_footer_y += dy;
-}
-
-// B2 : clamp an anchor so the panel can NEVER leave the chart (fixes "dragged
-// off-screen, cannot grab it back"). v2.01 : the WHOLE panel stays visible
-// (was : >=120px of the title bar), left/top edges win when the chart is
-// smaller than the panel itself.
-void ClampAnchor(int &ax, int &ay) {
-    const int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-    const int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
-    if (cw <= 0 || ch <= 0) return;
-    if (ax > cw - InpPanelWidth) ax = cw - InpPanelWidth; // right edge fully on-screen
-    if (ax < 0)                  ax = 0;                  // left edge wins (chart narrower than panel -> 0)
-    const int ph = (g_panel_height > 0 ? g_panel_height : RC_TITLE_HEIGHT + InpRowHeight);
-    if (ay > ch - ph) ay = ch - ph;                       // bottom edge fully on-screen
-    if (ay < 0)       ay = 0;                             // top edge wins (chart shorter than panel -> 0)
-}
-
-void PersistAnchor(void) {
-    GlobalVariableSet("RC_anchor_x", (double)g_anchor_x);
-    GlobalVariableSet("RC_anchor_y", (double)g_anchor_y);
-}
-
-//+------------------------------------------------------------------+
-//| B8 : recent-symbols quick-switch bar                             |
-//|                                                                  |
-//| List = up to 4 most-recently-traded symbols, rebuilt from open   |
-//| positions + recent closed deals (newest first). The trade        |
-//| history is the persistent source, so a fresh 5th symbol pushes   |
-//| the oldest out automatically (FIFO). No GlobalVariable needed.   |
-//+------------------------------------------------------------------+
-void UpdateRecentSymbols(void) {
-    string col[];
-    ArrayResize(col, 0);
-    // 1. Open positions first (currently active = most relevant).
-    const int np = PositionsTotal();
-    for (int i = np - 1; i >= 0 && ArraySize(col) < RC_MAX_RECENT_SYMS; --i) {
-        const ulong t = PositionGetTicket(i);
-        if (t == 0 || !PositionSelectByTicket(t)) continue;
-        const string s = PositionGetString(POSITION_SYMBOL);
-        bool dup = false;
-        for (int k = 0; k < ArraySize(col); ++k) if (col[k] == s) { dup = true; break; }
-        if (!dup) { const int n = ArraySize(col); ArrayResize(col, n + 1); col[n] = s; }
-    }
-    // 2. Recent closed deals (last 30 days), newest first, until 4 unique.
-    if (HistorySelect(TimeCurrent() - 30 * 86400, TimeCurrent())) {
-        const int nd = HistoryDealsTotal();
-        for (int i = nd - 1; i >= 0 && ArraySize(col) < RC_MAX_RECENT_SYMS; --i) {
-            const ulong t = HistoryDealGetTicket(i);
-            if (t == 0) continue;
-            if ((ENUM_DEAL_ENTRY)HistoryDealGetInteger(t, DEAL_ENTRY) != DEAL_ENTRY_IN) continue;
-            const string s = HistoryDealGetString(t, DEAL_SYMBOL);
-            if (s == "") continue;
-            bool dup = false;
-            for (int k = 0; k < ArraySize(col); ++k) if (col[k] == s) { dup = true; break; }
-            if (!dup) { const int n = ArraySize(col); ArrayResize(col, n + 1); col[n] = s; }
-        }
-    }
-    const int keep = MathMin(ArraySize(col), RC_MAX_RECENT_SYMS);
-    ArrayResize(g_recent_syms, keep);
-    for (int i = 0; i < keep; ++i) g_recent_syms[i] = col[i];
 }
 
 //+------------------------------------------------------------------+
@@ -7596,57 +4971,6 @@ string Tr(const string key) {
 }
 
 //+------------------------------------------------------------------+
-//| LOT 4 : timeframe quick-switch bar (M1 / M5 / M15 / M30 / H1 /   |
-//| H4 / D1). Sits just above the recent-symbols bar. Click ->        |
-//| ChartSetSymbolPeriod(0, _Symbol, ...) on the active chart, which  |
-//| triggers OnDeinit + OnInit (chart-change re-init) - clean.        |
-//+------------------------------------------------------------------+
-void DrawTimeframeBar(int x, int y, int w) {
-    // BATCH 2 : TF-bar band now drawn on the canvas (RepaintCanvas) ; legacy tfbar_bg rect removed.
-    DrawLabel(RC_PREFIX + "tfbar_lbl", x + RC_PAD, y + 5, Tr("tf"), g_theme.text_dim, RC_FONT_SIZE - 1);
-    string tfs[9];
-    tfs[0]="M1"; tfs[1]="M5"; tfs[2]="M15"; tfs[3]="M30"; tfs[4]="H1";
-    tfs[5]="H4"; tfs[6]="D1"; tfs[7]="W1";  tfs[8]="MN1";              // P3 : + week + month
-    ENUM_TIMEFRAMES tfvals[9];
-    tfvals[0]=PERIOD_M1; tfvals[1]=PERIOD_M5; tfvals[2]=PERIOD_M15; tfvals[3]=PERIOD_M30; tfvals[4]=PERIOD_H1;
-    tfvals[5]=PERIOD_H4; tfvals[6]=PERIOD_D1; tfvals[7]=PERIOD_W1;  tfvals[8]=PERIOD_MN1;
-    const int btn_w = 33; // P3 : compact so 9 timeframes fit
-    const int btn_h = InpRowHeight - 6;
-    const int x0    = x + 32; // FINESSE 5a : LOCKSTEP with the canvas segment origin (px+32)
-    const ENUM_TIMEFRAMES cur = (ENUM_TIMEFRAMES)ChartPeriod(0);
-    for (int i = 0; i < 9; ++i) {
-        const int bx = x0 + i * (btn_w + 2);
-        const bool active = (tfvals[i] == cur);
-        // v1.4.1 R3 : the segment FACE is painted in RepaintCanvas ; here we place the
-        // centered text label on top + register the CLICK zone (absolute pixels).
-        const string bid = RC_PREFIX + "tf_" + tfs[i];
-        if (ObjectFind(0, bid) >= 0) ObjectDelete(0, bid); // drop any pre-R3 OBJ_BUTTON
-        const string lid = RC_PREFIX + "tflab_" + tfs[i];
-        DrawLabel(lid, bx + btn_w / 2, y + 3 + btn_h / 2, tfs[i],
-                  active ? g_theme.bg : g_theme.text, RC_CapFont(btn_h), RC_FONT_UI); // CAPSULE TEXT
-        ObjectSetInteger(0, lid, OBJPROP_ANCHOR, ANCHOR_CENTER);
-        HitAdd(bx, y + 3, bx + btn_w, y + 3 + btn_h, "tf", i);
-    }
-    // v1.4.1 R3 pass-2 (BE back on the TF row, right of "Max") : Break-even = a rounded
-    // TOGGLE button drawn EXACTLY like the gear / X - ONE rect (be_x/be_y/be_w/be_h)
-    // drives the hit-zone, the canvas FACE (PaintFaces) AND a CENTER-anchored "BE" label.
-    // WYSIWYG : the letters sit ON the click zone. (Earlier desync bug = the label was
-    // right-anchored OUTSIDE the rect, so text and zone were in different places.)
-    ObjectDelete(0, RC_PREFIX + "be"); // drop any pre-R3 OBJ_BUTTON
-    // E5 : Break-even = a sliding PILL (mockup .sw) with a compact dim "BE" caption on
-    // its LEFT (the full "Break-even" word would collide with the Max copy field, which
-    // ends ~x+w-58). Pill 34x18, right edge x+w-7 ; caption right-anchored at pill-3px,
-    // clear of the Max edit. Zone = face rect (single source) ; act "be" unchanged.
-    const int be_w = 30, be_h = 16; // FIX SQUARES 3 : slimmer capsule (r=8, knob kr=r-2 follows)
-    const int be_x = x + w - 7 - be_w, be_y = y + 3 + (btn_h - be_h) / 2;
-    HitAdd(be_x, be_y, be_x + be_w, be_y + be_h, "be", -1, g_be_visible ? RCF_PILL_ON : RCF_PILL_OFF);
-    DrawLabel(RC_PREFIX + "be_l", be_x - 3, be_y + be_h / 2, "BE",
-              g_theme.text_dim, RC_FONT_SIZE - 1, RC_FONT_UI);
-    ObjectSetInteger(0, RC_PREFIX + "be_l", OBJPROP_ANCHOR, ANCHOR_RIGHT);
-    ObjectSetString (0, RC_PREFIX + "be_l", OBJPROP_TOOLTIP, "Show / hide breakeven lines");
-}
-
-//+------------------------------------------------------------------+
 //| LOT 5 : Breakeven lines = OBJ_HLINE at each open position's       |
 //| price_open on the CURRENT chart symbol. Lines are SELECTABLE so   |
 //| the user can drag them manually ; the companion EA (V2) executes  |
@@ -7761,14 +5085,6 @@ int CountPositionSymbols(void) {
 // Phase 3 (b) : reflect BE = OFF on its canvas face + label WITHOUT a full rebuild
 // (the auto-disarm path fires from OnTradeTransaction, which must stay cheap). Flips the
 // registry face style so the next PaintFaces shows it off, recolours the label, repaints.
-void SetBeFaceOff(void) {
-    // E5 : BE is a sliding pill now - OFF face = RCF_PILL_OFF (the caption stays a
-    // static dim label ; state is carried by the knob/gradient, not the text colour).
-    for (int i = 0; i < g_nhits; ++i)
-        if (g_hits[i].act == "be") { g_hits[i].style = RCF_PILL_OFF; break; }
-    ObjectSetInteger(0, RC_PREFIX + "be_l", OBJPROP_COLOR, g_theme.text_dim);
-    RepaintCanvas(g_anchor_x, g_anchor_y, InpPanelWidth);
-}
 
 void DrawBreakevenLines(void) {
     ClearBreakevenLines();
@@ -7831,64 +5147,6 @@ void DrawBreakevenLines(void) {
     // else : empty basket -> nothing drawn (no positions on this symbol).
 }
 
-void DrawRecentSymbolsBar(int x, int y, int w) {
-    // BATCH 2 : recent-symbols band now drawn on the canvas (RepaintCanvas) ; legacy recbar_bg rect removed.
-    DrawLabel(RC_PREFIX + "recbar_lbl", x + RC_PAD, y + 5, Tr("recent"), g_theme.text_dim, RC_FONT_SIZE - 1);
-    const int btn_w = (g_eff_comfort ? 72 : 96); // FIX 6 : narrower when the Re-center button is shown
-    const int btn_h = InpRowHeight - 6;
-    const int x0 = x + 62;
-    for (int i = 0; i < RC_MAX_RECENT_SYMS; ++i) {
-        const string id  = RC_PREFIX + "recsym_" + IntegerToString(i);
-        const string lid = RC_PREFIX + "recsym_l_" + IntegerToString(i);
-        if (i < ArraySize(g_recent_syms)) {
-            const int bx = x0 + i * (btn_w + 6);
-            // v1.4.1 R3 : recent-symbol chips = canvas rounded buttons (faces via
-            // PaintFaces) + click zones + centered labels ; DispatchHit routes "recsym"
-            // idx. Drop the pre-R3 OBJ_BUTTON.
-            ObjectDelete(0, id);
-            HitAdd(bx, y + 3, bx + btn_w, y + 3 + btn_h, "recsym", i, RCF_BTN);
-            DrawLabel(lid, bx + btn_w / 2, y + 3 + btn_h / 2, g_recent_syms[i], g_theme.text, RC_FONT_SIZE - 1, RC_FONT_UI);
-            ObjectSetInteger(0, lid, OBJPROP_ANCHOR, ANCHOR_CENTER);
-            ObjectSetString (0, lid, OBJPROP_TOOLTIP, "Switch chart to " + g_recent_syms[i]);
-        } else {
-            ObjectDelete(0, id);    // pre-R3 button
-            ObjectDelete(0, lid);   // empty slot label
-            HitRemove("recsym", i); // v1.4.1 R3 : drop the vacated slot's zone -> no ghost face
-        }
-    }
-    // FIX 6 : "Re-center" button (shown only with the comfort scale on) - re-applies
-    // the padded CHART_FIXED_MIN/MAX on demand. Sits just left of the Auto-SL button.
-    const string rc_id  = RC_PREFIX + "recenter";
-    const string rc_lid = RC_PREFIX + "recenter_l";
-    if (g_eff_comfort) {
-        // v1.4.1 R3 : Re-center = canvas rounded button + click zone + centered label ;
-        // DispatchHit routes "recenter". Drop the pre-R3 OBJ_BUTTON.
-        ObjectDelete(0, rc_id);
-        const int rcx = x + w - 172, rcw = 74, rch = InpRowHeight - 6;
-        HitAdd(rcx, y + 3, rcx + rcw, y + 3 + rch, "recenter", -1, RCF_BTN_GHOST); // E5 : outline ghost (mockup secondary button)
-        DrawLabel(rc_lid, rcx + rcw / 2, y + 3 + rch / 2, Tr("recenter"), g_theme.text, RC_FONT_SIZE - 2, RC_FONT_UI);
-        ObjectSetInteger(0, rc_lid, OBJPROP_ANCHOR, ANCHOR_CENTER);
-        ObjectSetString (0, rc_lid, OBJPROP_TOOLTIP, "Re-center the chart with comfort padding");
-    } else {
-        ObjectDelete(0, rc_id);
-        ObjectDelete(0, rc_lid);
-    }
-
-    // B10 : DISABLED "Auto-SL" stub - an indicator CANNOT place/modify orders (the real
-    // auto-SL ships with the companion RiskCockpit EA). E5 : converted to a DISCREET
-    // idle canvas button (RCF_BTN, deliberately NOT the accent style - never promise an
-    // action that no-ops) + centered dim label + a no-op hit-zone ("autosl" has no
-    // DispatchHit branch). Tooltip keeps the full reason.
-    const string asl_id = RC_PREFIX + "autosl";
-    ObjectDelete(0, asl_id); // drop the legacy native OBJ_BUTTON
-    const int asl_x = x + w - 92, asl_h = InpRowHeight - 6;
-    HitAdd(asl_x, y + 3, asl_x + 84, y + 3 + asl_h, "autosl", -1, RCF_BTN);
-    DrawLabel(RC_PREFIX + "autosl_l", asl_x + 42, y + 3 + asl_h / 2, "Auto-SL OFF",
-              g_theme.text_dim, RC_FONT_SIZE - 2, RC_FONT_UI);
-    ObjectSetInteger(0, RC_PREFIX + "autosl_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
-    ObjectSetString (0, RC_PREFIX + "autosl_l", OBJPROP_TOOLTIP,
-                    "Requires RiskCockpit EA (coming soon) - an indicator cannot place orders.");
-}
 
 //+------------------------------------------------------------------+
 //| Post-violation effective caps (B7)                               |
@@ -7937,115 +5195,19 @@ void PersistViolationFlags(void) {
     GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0);
 }
 
-//+------------------------------------------------------------------+
-//| G3 settings popup : in-panel switcher for language / theme / prop |
-//|                                                                  |
-//| Click the [S] button next to the title -> a translucent overlay   |
-//| floats on top of the panel with rows of buttons. Changes apply    |
-//| immediately + are persisted in GlobalVariable (survive reattach). |
-//| Rationale : the user wanted these without re-opening MT5 Inputs.  |
-//+------------------------------------------------------------------+
-// D-FULL step 2 : ONE shared helper = ALL modal controls converted at once. The
-// rounded face is painted into the OPEN modal canvas (DrawSettingsOverlay holds a
-// single Begin..Commit around the whole build), a centered label sits on top, and
-// the click zone shares the SAME rect (single geometry source - the BE lesson).
-// act = the object id minus "RC_" (e.g. "set_lang_fr", "set_sl_up"), routed by
-// DispatchModalHit -> HandleModalControl. No native OBJ_BUTTON is created anymore.
-void DrawSetButton(const string id, int x, int y, int w, int h, const string text) {
-    ObjectDelete(0, id); // drop the stale native OBJ_BUTTON from any previous build
-    if (g_modal_kit.Ready()) {
-        const int SM = RC_KIT_MARGIN;
-        const int blx = (x - g_anchor_x) + SM, bly = (y - g_anchor_y) + SM;
-        g_modal_kit.Capsule(blx, bly, w, h, ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255)); // soft ring
-        g_modal_kit.CapsuleGradient(blx + 1, bly + 1, w - 2, h - 2, // v2.01 RELIEF : raise->surface, same language as Card/Button
-                                    ColorToARGB(g_theme.raise, 255), ColorToARGB(g_theme.surface, 255));
-    }
-    SetLbl(id + "_l", x + w / 2, y + h / 2, text, g_theme.text);
-    ObjectSetInteger(0, id + "_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
-    HitAdd(x, y, x + w, y + h, StringSubstr(id, StringLen(RC_PREFIX)), -1, RCF_NONE);
-}
-
 // D-FULL step 2 : the ACTIVE state repaints the face in the accent gradient + a dark
 // label. Geometry comes from the hit registry (the zone DrawSetButton just added for
 // this id) = the same single source, so face/zone/label can never drift.
-void HighlightSetButton(const string id, bool active) {
-    if (!active) return; // idle face already painted by DrawSetButton
-    const string act = StringSubstr(id, StringLen(RC_PREFIX));
-    for (int i = g_nhits - 1; i >= MathMax(0, g_modal_hit_base); --i)
-        if (g_hits[i].act == act) {
-            if (g_modal_kit.Ready()) {
-                const int SM = RC_KIT_MARGIN;
-                const int hx = g_hits[i].x1 + SM, hy = g_hits[i].y1 + SM;
-                const int hww = g_hits[i].x2 - g_hits[i].x1, hhh = g_hits[i].y2 - g_hits[i].y1;
-                g_modal_kit.Capsule(hx, hy, hww, hhh, ColorToARGB(g_theme.accent, 255)); // accent rim
-                g_modal_kit.CapsuleGradient(hx + 1, hy + 1, hww - 2, hhh - 2, // v2.01 RELIEF : accent->deep, same language as BTN_ON
-                                            ColorToARGB(g_theme.accent, 255),
-                                            ColorToARGB(g_theme.accent_deep, 255));
-            }
-            ObjectSetInteger(0, id + "_l", OBJPROP_COLOR, g_theme.bg);
-            return;
-        }
-}
 
 // G2/G4 : an overlay label at ZORDER 250 (between the modal cover 240 and the
 // buttons 260). Free-standing helper so every row stays one call.
-void SetLbl(const string id, int x, int y, const string t, color c) {
-    // POLISH E1 : modal prose in the UI face (Segoe UI) - the type hierarchy is
-    // SB 11 titles > Segoe 9 labels > Consolas numbers ; the modal was the one
-    // surface still setting its LABELS in mono. Numeric stepper values keep mono
-    // via an explicit override in SetStepper.
-    DrawLabel(id, x, y, t, c, RC_FONT_SIZE, RC_FONT_UI);
-    ObjectSetInteger(0, id, OBJPROP_ZORDER, 250);
-}
 // A labelled ON/OFF toggle button (60 px). The id encodes the setting.
 // D-FULL step 2 : ON/OFF = a sliding PILL (mockup .sw), state carried by the knob
 // position + accent gradient - no more 60px ON/OFF text button.
-void SetToggleBtn(const string id, int x, int y, bool on) {
-    ObjectDelete(0, id); // drop the stale native OBJ_BUTTON from any previous build
-    const int w = 42, h = 20;
-    if (g_modal_kit.Ready()) {
-        const int SM = RC_KIT_MARGIN;
-        const int lx = (x - g_anchor_x) + SM, ly = (y - g_anchor_y) + SM;
-        g_modal_kit.Capsule(lx - 1, ly - 1, w + 2, h + 2, // CAPSULE REWRITE : outline (track covers interior)
-                            ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255));
-        g_modal_kit.PillToggle(lx, ly, w, h, on,
-                               FilmOver(g_theme.bg, 0.09),
-                               g_theme.accent_deep, g_theme.accent,
-                               (on ? C'255,255,255' : C'203,213,225'));
-    }
-    HitAdd(x, y, x + w, y + h, StringSubstr(id, StringLen(RC_PREFIX)), -1, RCF_NONE);
-}
 // E7 : two-cell SEGMENT toggle (A | B) painted into the OPEN modal canvas (no
 // Begin/Commit here - the single Commit stays at the END of DrawSettingsOverlay).
 // ONE hit-zone over the whole rect : the existing cycle dispatch stays unchanged.
-void DrawSetSeg2(const string id, int x, int y, int w, int h,
-                 const string labelA, const string labelB, const int activeIdx) {
-    ObjectDelete(0, id); // stale native button from a previous build
-    const int cw = w / 2;
-    if (g_modal_kit.Ready()) {
-        const int SM = RC_KIT_MARGIN;
-        const int lx = (x - g_anchor_x) + SM, ly = (y - g_anchor_y) + SM;
-        g_modal_kit.CapsuleStroke(lx - 1, ly - 1, w + 2, h + 2, // CAPSULE REWRITE : uniform seg track
-                                  ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255),
-                                  ColorToARGB(FilmOver(g_theme.bg, 0.05), 255), 1);
-        g_modal_kit.Segment(lx + (activeIdx == 0 ? 1 : cw), ly + 1, cw - 1, h - 2, (h - 2) / 2, true, // POLISH A1 : r=h/2 exact
-                            g_theme.accent, g_theme.accent_deep, g_theme.surface);
-    }
-    SetLbl(id + "_la", x + cw / 2, y + h / 2, labelA, (activeIdx == 0 ? g_theme.bg : g_theme.label));
-    ObjectSetInteger(0, id + "_la", OBJPROP_ANCHOR, ANCHOR_CENTER);
-    ObjectSetInteger(0, id + "_la", OBJPROP_FONTSIZE, RC_FONT_SIZE_LABEL); // CAPSULE TEXT : seg labels 8pt (fit the 20px capsule halves)
-    SetLbl(id + "_lb", x + cw + cw / 2, y + h / 2, labelB, (activeIdx == 1 ? g_theme.bg : g_theme.label));
-    ObjectSetInteger(0, id + "_lb", OBJPROP_ANCHOR, ANCHOR_CENTER);
-    ObjectSetInteger(0, id + "_lb", OBJPROP_FONTSIZE, RC_FONT_SIZE_LABEL); // CAPSULE TEXT
-    HitAdd(x, y, x + w, y + h, StringSubstr(id, StringLen(RC_PREFIX)), -1, RCF_NONE);
-}
 // A [-] value [+] stepper. id_base+"_dn" / id_base+"_up" are the click targets.
-void SetStepper(const string id_base, int x, int y, const string value_text) {
-    DrawSetButton(id_base + "_dn", x, y, 22, 20, "-");
-    SetLbl(id_base + "_val", x + 28, y + 3, value_text, g_theme.accent);
-    ObjectSetString(0, id_base + "_val", OBJPROP_FONT, RC_FONT); // POLISH E1 : numeric values stay mono/tabular
-    DrawSetButton(id_base + "_up", x + 96, y, 22, 20, "+");
-}
 // Context-aware helpers : which option groups are relevant for the plan/broker.
 bool PlanIsPersonal(void)  { return EffectivePlan() == FN_PLAN_PERSONAL; }
 bool PlanIsFundedNext(void) {
@@ -8225,410 +5387,13 @@ string PhaseLabelLocal(int ph) {
     }
     return "?";
 }
-
-//+------------------------------------------------------------------+
-//| G1/G2 : the settings centre. A full-panel OPAQUE modal cover at   |
-//| ZORDER 240 masks the live panel (no row bleeds through), with a   |
-//| tabbed body (Account / Risk / Display / Alerts) on top. Every     |
-//| control writes its g_eff_* shadow + a GlobalVariable and triggers |
-//| ApplySettingsChange() so the change is live + survives restart.   |
-//| Context-aware : prop-only groups hide on a Personal account, and  |
-//| only the add-ons valid for the selected firm are shown.           |
-//+------------------------------------------------------------------+
-// v1.4 : the app must EXPLAIN its elements (JR's father's UX note). Attach an
-// "what it does + unit" tooltip (translation key) to a settings control on hover.
-// SetTip1 = a single control (toggle / button) ; SetTip3 = a [-] value [+] stepper.
-void SetTip1(const string id, const string tipkey) {
-    ObjectSetString(0, RC_PREFIX + id, OBJPROP_TOOLTIP, Tr(tipkey));
-}
 // v2.02 MULTI-THEMES : display name + tooltip key of a brand palette. The names
 // are BRAND names (same in every language) ; the taglines go through Tr().
-string PaletteName(const ENUM_RC_PALETTE p) {
-    if (p == RC_PAL_INDIGO) return "Indigo Royal";
-    if (p == RC_PAL_MONO)   return "Ardoise Mono";
-    return "Émeraude Nuit";
-}
-string PaletteTipKey(const ENUM_RC_PALETTE p) {
-    if (p == RC_PAL_INDIGO) return "pal_tip_indigo";
-    if (p == RC_PAL_MONO)   return "pal_tip_mono";
-    return "pal_tip_emerald";
-}
-void SetTip3(const string id_base, const string tipkey) {
-    // D-FULL step 2 : the -/+ native buttons are gone ; the hover carriers are now the
-    // centered glyph LABELS DrawSetButton creates (id + "_l") plus the value label.
-    const string t = Tr(tipkey);
-    ObjectSetString(0, RC_PREFIX + id_base + "_dn_l", OBJPROP_TOOLTIP, t);
-    ObjectSetString(0, RC_PREFIX + id_base + "_val",  OBJPROP_TOOLTIP, t);
-    ObjectSetString(0, RC_PREFIX + id_base + "_up_l", OBJPROP_TOOLTIP, t);
-}
 
 // Phase 4 (B) : remove every settings-modal object (all "RC_set_*") WITHOUT touching the
 // base panel or its canvas. The title-bar gear glyph is "RC_gearlbl" (renamed off the
 // "set_" prefix), so it is never caught here. Used by the light tab-switch re-render.
-void DestroySettingsOverlay(void) {
-    g_modal_kit.Destroy(); // LOT D STEP 0 : free the shell bitmap resource first (the
-                           // object itself also matches the "set_" prefix below)
-    ObjectsDeleteAll(0, RC_PREFIX + "set_");
-    // D-FULL step 1 : drop the modal hit-zones - they are always the registry TAIL
-    // (DrawSettingsOverlay runs after the panel sections), so truncate to the base.
-    // Guarded : -1 = modal was never drawn ; base can never exceed the current count.
-    if (g_modal_hit_base >= 0 && g_modal_hit_base <= g_nhits)
-        g_nhits = g_modal_hit_base;
-    g_modal_hit_base = -1;
-}
 
-void DrawSettingsOverlay(int panel_x, int panel_y, int panel_w) {
-    const int ox = panel_x;
-    const int oy = panel_y;
-    const int ow = panel_w;
-    const int oh = (g_panel_height > 120 ? g_panel_height : 240);
-
-    // D-FULL step 1 : modal hit-zones start here (truncated by DestroySettingsOverlay).
-    g_modal_hit_base = g_nhits;
-    // Full-modal SWALLOW zone, registered FIRST : HitTest scans last-registered-first,
-    // so every real modal control zone (registered after) wins ; any in-modal click
-    // that misses a control lands here and DispatchModalHit ignores it -> it can never
-    // fall through to a panel zone underneath (incl. the trailing CHARTEVENT_CLICK the
-    // remaining native modal buttons still emit).
-    HitAdd(ox, oy, ox + ow, oy + oh, "set_noop", -1, RCF_NONE);
-
-    // Modal cover : opaque, ZORDER 240 -> masks every panel object (rows are <= 100)
-    // AND swallows stray clicks meant for the panel behind. Kept as the input-capture
-    // layer UNDER the shell canvas - INSET 6px so its square corners stay hidden under
-    // the shell Card's opaque rounded interior (the shell's corner band is translucent
-    // glow/shadow ; a full-size rect would peek square through the 4 rounded corners).
-    const string modal_id = RC_PREFIX + "set_modal";
-    DrawRect(modal_id, ox + 6, oy + 6, ow - 12, oh - 12, g_theme.bg_lift, g_theme.bg_lift, 0);
-    ObjectSetInteger(0, modal_id, OBJPROP_ZORDER, 240);
-
-    // D-FULL step 1 : tab-bar + X-close geometry, shared by faces, zones AND labels
-    // (ONE source - the BE lesson : face, zone and text derive from the same rect).
-    const int ty  = oy + 32;
-    const int tw  = (ow - 24) / 5;
-    const int cxx = ox + ow - 32;   // X-close rect (24x20 at oy+6)
-
-    // LOT D : rounded modal SHELL + (step 1) tab track/segment + X face - ONE paint pass.
-    {
-        const int SM = RC_KIT_MARGIN;
-        g_modal_kit.Create(RC_PREFIX + "set_shell", ox - SM, oy - SM, ow + 2 * SM, oh + 2 * SM);
-        if (g_modal_kit.Ready()) {
-            const color mline = TintOver(g_theme.bg, C'148,163,184', 0.14);
-            g_modal_kit.Begin();
-            g_modal_kit.SoftShadow(SM, SM, ow, oh, RC_R_PANEL, g_theme.bg_deep, 9, 95);
-            g_modal_kit.EdgeGlow(SM, SM, ow, oh, RC_R_PANEL, g_theme.accent, 6, 56);
-            g_modal_kit.Card(SM, SM, ow, oh, RC_R_PANEL, g_theme.bg_lift, g_theme.bg,
-                             FilmOver(g_theme.bg_lift, 0.08));
-            // title zone gradient + hairline under the tab bar (mockup .title / .divider)
-            g_modal_kit.GradientVFill(SM + 1, SM + 1, ow - 2, 30, RC_R_PANEL - 1,
-                                      ColorToARGB(TintOver(g_theme.bg_lift, g_theme.raise, 0.85), 255),
-                                      ColorToARGB(TintOver(g_theme.bg_lift, g_theme.surface, 0.70), 255));
-            g_modal_kit.Hairline(SM + 12, SM + 58, SM + ow - 12, mline);
-            // step 1 : CONTENT card behind the tab body rows (mockup card stack)
-            g_modal_kit.Card(SM + 10, SM + 62, ow - 20, oh - 74, RC_R_CARD,
-                             TintOver(g_theme.bg, g_theme.surface_hi, 0.45),
-                             TintOver(g_theme.bg, g_theme.surface, 0.20), mline);
-            // step 1 : segmented TAB control (mockup .seg) - light track + soft ring ;
-            // idle tabs are transparent (labels only), ACTIVE tab = cyan gradient segment
-            g_modal_kit.CapsuleStroke(SM + 10, SM + 30, ow - 20, 26, ColorToARGB(mline, 255),
-                                      ColorToARGB(FilmOver(g_theme.bg, 0.05), 255), 1); // CAPSULE REWRITE : uniform tab track
-            g_modal_kit.Segment(SM + 12 + tw * g_settings_tab, SM + 32, tw - 4, 22, 11, true, // POLISH A1 : r=h/2 exact = true capsule
-                                g_theme.accent, g_theme.accent_deep, g_theme.surface);
-            // step 1 : X-close face = red-edged rounded button (same language as the panel X)
-            // POLISH D : modal X UNIFIED with the header X/gear - same 22x20 capsule,
-            // same soft slate ring (all-discreet decision, no red ; readable both themes).
-            g_modal_kit.Capsule((cxx - ox) + SM, SM + 6, 22, 20, // soft ring, same as DrawSetButton
-                                ColorToARGB(TintOver(g_theme.bg, C'148,163,184', 0.25), 255));
-            g_modal_kit.CapsuleGradient((cxx - ox) + SM + 1, SM + 7, 20, 18, // v2.01 RELIEF : raise->surface
-                                        ColorToARGB(g_theme.raise, 255), ColorToARGB(g_theme.surface, 255));
-            // D-FULL step 2 : NO Commit here - the canvas stays OPEN so the body's
-            // DrawSetButton / SetToggleBtn / SetStepper calls paint their faces into
-            // it ; the single Commit lives at the END of DrawSettingsOverlay.
-        }
-    }
-
-    // D-FULL step 1 : the close X + the 5 tabs are HIT-TESTING now - retire their
-    // native OBJ_BUTTONs (drop any stale ones from a previous build).
-    ObjectDelete(0, RC_PREFIX + "set_close");
-    ObjectDelete(0, RC_PREFIX + "set_tab_acct");
-    ObjectDelete(0, RC_PREFIX + "set_tab_risk");
-    ObjectDelete(0, RC_PREFIX + "set_tab_disp");
-    ObjectDelete(0, RC_PREFIX + "set_tab_alert");
-    ObjectDelete(0, RC_PREFIX + "set_tab_adv");
-    ObjectDelete(0, RC_PREFIX + "set_divider"); // pre-D-full leftover
-
-    // Title + close (centered label + zone on the SAME rect as the face).
-    SetLbl(RC_PREFIX + "set_title", ox + 16, oy + 9, Tr("settings"), g_theme.accent);
-    ObjectSetInteger(0, RC_PREFIX + "set_title", OBJPROP_FONTSIZE, RC_FONT_SIZE_TITLE);
-    SetLbl(RC_PREFIX + "set_close_l", cxx + 11, oy + 16, ShortToString((ushort)0x2190), g_theme.label); // v2.01 : BACK arrow (was the 0x00D7 X - read "leave settings", NOT "kill the indicator")
-    ObjectSetInteger(0, RC_PREFIX + "set_close_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
-    HitAdd(cxx, oy + 6, cxx + 22, oy + 26, "set_close", -1, RCF_NONE);
-
-    // Tab bar : centered labels + click zones on the SAME rects as the faces.
-    {
-        string tabs[5];
-        tabs[0] = Tr("tab_account"); tabs[1] = Tr("tab_risk"); tabs[2] = Tr("tab_display");
-        tabs[3] = Tr("tab_alerts");  tabs[4] = Tr("tab_advanced");
-        for (int t = 0; t < 5; ++t) {
-            const int tx = ox + 12 + tw * t;
-            const string tl = RC_PREFIX + "set_tab_l" + IntegerToString(t);
-            SetLbl(tl, tx + (tw - 4) / 2, ty + 11, tabs[t],
-                   (t == g_settings_tab ? g_theme.bg : g_theme.label));
-            ObjectSetInteger(0, tl, OBJPROP_ANCHOR, ANCHOR_CENTER);
-            HitAdd(tx, ty, tx + tw - 4, ty + 22, "set_tab", t, RCF_NONE);
-        }
-    }
-
-    const int lx = ox + 16;   // label column
-    const int cx = ox + 172;  // control column - POLISH C2 : constant air after long labels ("Max margin/trade % :")
-    const int rx = ox + ow - 40; // E7 : shared RIGHT edge (matches the steppers' ">"/"+" column)
-    int by = oy + 74;         // body cursor - POLISH C1 : breathe below the tab divider
-    const int step = 26;
-
-    if (g_settings_tab == 0) {
-        // ===== Account ===== (V1.27 cascade : broker -> type -> size)
-        SetLbl(RC_PREFIX + "set_br_lbl", lx, by + 3, Tr("set_broker_sel"), g_theme.text);
-        DrawSetButton(RC_PREFIX + "set_vendor_prev", cx, by, 24, 20, "<");
-        SetLbl(RC_PREFIX + "set_vendor_val", cx + 30, by + 3, VendorName(VendorOfPlan(EffectivePlan())), g_theme.accent);
-        DrawSetButton(RC_PREFIX + "set_vendor_next", ox + ow - 40, by, 24, 20, ">");
-        by += step;
-        SetLbl(RC_PREFIX + "set_pl_lbl", lx, by + 3, Tr("set_type"), g_theme.text);
-        DrawSetButton(RC_PREFIX + "set_plan_prev", cx, by, 24, 20, "<");
-        SetLbl(RC_PREFIX + "set_plan_val", cx + 30, by + 3, g_catalog.ModelLabel(EffectivePlan()), g_theme.accent);
-        DrawSetButton(RC_PREFIX + "set_plan_next", ox + ow - 40, by, 24, 20, ">");
-        by += step;
-
-        if (PlanIsPersonal()) {
-            SetLbl(RC_PREFIX + "set_personal_note", lx, by + 3, Tr("set_personal_note"), g_theme.text_dim);
-            by += step;
-            // V1.29 I : Personal account TYPE (Real / Demo). Labeling only - the
-            // catalogue profile and the prop rules are unchanged (already off on
-            // Personal). Auto-detected from ACCOUNT_TRADE_MODE, override here.
-            SetLbl(RC_PREFIX + "set_pt_lbl", lx, by + 3, Tr("set_personal_type"), g_theme.text);
-            // E7 : REAL | DEMO segment toggle (mockup .seg), right-aligned on rx
-            DrawSetSeg2(RC_PREFIX + "set_perso_type", rx - 110, by, 110, 20,
-                        "REAL", "DEMO", g_eff_personal_demo);
-            by += step;
-            // V1.29 M : risk-tools master toggle - PERSONAL-ONLY, in the Account
-            // tab so it's discoverable in the Personal context (prop = always ON).
-            SetLbl(RC_PREFIX + "set_rt_lbl", lx, by + 3, Tr("set_risktools"), g_theme.text);
-            SetToggleBtn(RC_PREFIX + "set_risktools", rx - 42, by, g_eff_risktools); // E7 : right-aligned on rx
-            by += step;
-            // V1.28 : Personal can pick a demo size OR "Auto" (= the real account
-            // balance, item 7). The size stepper walks the Personal list.
-            SetLbl(RC_PREFIX + "set_sz_lbl", lx, by + 3, Tr("set_size"), g_theme.text);
-            DrawSetButton(RC_PREFIX + "set_size_prev", cx, by, 24, 20, "<");
-            SetLbl(RC_PREFIX + "set_size_val", cx + 30, by + 3, SizeLabel(), g_theme.accent);
-            DrawSetButton(RC_PREFIX + "set_size_next", ox + ow - 40, by, 24, 20, ">");
-            by += step;
-        } else {
-            if (PlanHasPhases()) {
-                SetLbl(RC_PREFIX + "set_ph_lbl", lx, by + 3, Tr("set_phase"), g_theme.text);
-                DrawSetButton(RC_PREFIX + "set_phase_prev", cx, by, 24, 20, "<");
-                SetLbl(RC_PREFIX + "set_phase_val", cx + 30, by + 3, PhaseLabelLocal(g_eff_phase), g_theme.accent);
-                DrawSetButton(RC_PREFIX + "set_phase_next", ox + ow - 40, by, 24, 20, ">");
-                by += step;
-            }
-            SetLbl(RC_PREFIX + "set_sz_lbl", lx, by + 3, Tr("set_size"), g_theme.text);
-            DrawSetButton(RC_PREFIX + "set_size_prev", cx, by, 24, 20, "<");
-            SetLbl(RC_PREFIX + "set_size_val", cx + 30, by + 3, SizeLabel(), g_theme.accent);
-            DrawSetButton(RC_PREFIX + "set_size_next", ox + ow - 40, by, 24, 20, ">");
-            by += step;
-
-            if (PlanIsFundedNext()) {
-                SetLbl(RC_PREFIX + "set_at_lbl", lx, by + 3, Tr("set_acct_type"), g_theme.text);
-                // E7 : SWAP | SWAP-FREE segment toggle (mockup .seg), right-aligned on rx
-                DrawSetSeg2(RC_PREFIX + "set_acct_type", rx - 150, by, 150, 20, // CAPSULE TEXT : "SWAP-FREE" needs the room at 8pt
-                            "SWAP", "SWAP-FREE", g_eff_acct_type);
-                by += step;
-
-                // Add-ons : only the ones valid for this firm (context-aware).
-                const int valid = g_catalog.ValidAddonsMask(EffectivePlan());
-                if (valid != FN_ADDON_NONE) {
-                    SetLbl(RC_PREFIX + "set_ad_lbl", lx, by + 3, Tr("set_addons"), g_theme.text);
-                    by += step - 4;
-                    int flags[7];  string names[7];
-                    flags[0] = FN_ADDON_LIFETIME_95; names[0] = "Lifetime 95%";
-                    flags[1] = FN_ADDON_NO_MIN_DAYS; names[1] = "No Min Days";
-                    flags[2] = FN_ADDON_SWAP_FREE;   names[2] = "Swap-Free";
-                    flags[3] = FN_ADDON_10PCT_DD;    names[3] = "10% Total DD";
-                    flags[4] = FN_ADDON_DOUBLE_UP;   names[4] = "Double Up";
-                    flags[5] = FN_ADDON_BI_WEEKLY;   names[5] = "Bi-Weekly";
-                    flags[6] = FN_ADDON_150_REWARD;  names[6] = "150% Reward";
-                    for (int a = 0; a < 7; ++a) {
-                        if ((valid & flags[a]) == 0) continue;
-                        SetLbl(RC_PREFIX + "set_adn_" + IntegerToString(flags[a]), lx + 12, by + 3,
-                               names[a], g_theme.text);
-                        SetToggleBtn(RC_PREFIX + "set_addon_" + IntegerToString(flags[a]),
-                                     rx - 42, by, (g_addons_mask & flags[a]) != 0); // E7 : shared right edge
-                        by += step - 2;
-                    }
-                }
-            }
-            // V1.27 : profit-split override (Auto = the firm's default split).
-            SetLbl(RC_PREFIX + "set_sp_lbl", lx, by + 3, Tr("set_split_sel"), g_theme.text);
-            SetStepper(RC_PREFIX + "set_split", cx, by,
-                       (g_eff_split < 0 ? "Auto" : DoubleToString(g_eff_split, 0) + "%"));
-            by += step;
-        }
-    } else if (g_settings_tab == 1) {
-        // ===== Risk =====
-        SetLbl(RC_PREFIX + "set_n_lbl", lx, by + 3, Tr("set_maxparallel"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_n", cx, by, IntegerToString(g_max_parallel));
-        SetTip3("set_n", "tip_maxparallel");
-        by += step;
-        SetLbl(RC_PREFIX + "set_sl_lbl", lx, by + 3, Tr("set_sl"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_sl", cx, by, DoubleToString(g_eff_sl_pct, 2) + "%");
-        SetTip3("set_sl", "tip_sl");
-        by += step;
-        SetLbl(RC_PREFIX + "set_tp_lbl", lx, by + 3, Tr("set_tp"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_tp", cx, by, DoubleToString(g_eff_tp_pct, 2) + "%");
-        SetTip3("set_tp", "tip_tp");
-        by += step;
-        SetLbl(RC_PREFIX + "set_mm_lbl", lx, by + 3, Tr("set_maxmargin"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_mm", cx, by, DoubleToString(g_eff_max_margin_pt, 1) + "%");
-        SetTip3("set_mm", "tip_maxmargin");
-        by += step;
-        SetLbl(RC_PREFIX + "set_mr_lbl", lx, by + 3, Tr("set_maxrisk"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_mr", cx, by, DoubleToString(g_eff_max_risk_pt, 2) + "%");
-        SetTip3("set_mr", "tip_maxrisk");
-        by += step;
-        // V1.27 : post-violation tightening (mirror of the on-chart toggles + the
-        // tightened caps that EffectiveMarginCap / EffectiveRiskCap apply). Only
-        // relevant for a restrictable (funded prop) profile -> same guard as the
-        // on-chart toggles, so they don't snap back on a demo / Personal account.
-        if (ProfileCanBeRestricted()) {
-            SetLbl(RC_PREFIX + "set_mviol_lbl", lx, by + 3, Tr("set_mviol"), g_theme.text);
-            SetToggleBtn(RC_PREFIX + "set_mviol", cx, by, g_margin_violation_active);
-            SetTip1("set_mviol_lbl", "tip_mviol"); // D-FULL : tip rides the caption (the pill has no object)
-            by += step;
-            SetLbl(RC_PREFIX + "set_mcv_lbl", lx, by + 3, Tr("set_mcapviol"), g_theme.text);
-            SetStepper(RC_PREFIX + "set_mcv", cx, by, DoubleToString(g_eff_margin_cap_viol, 0) + "%");
-            SetTip3("set_mcv", "tip_mcapviol");
-            by += step;
-            SetLbl(RC_PREFIX + "set_rviol_lbl", lx, by + 3, Tr("set_rviol"), g_theme.text);
-            SetToggleBtn(RC_PREFIX + "set_rviol", cx, by, g_risk_violation_active);
-            SetTip1("set_rviol_lbl", "tip_rviol"); // D-FULL : tip rides the caption
-            by += step;
-            SetLbl(RC_PREFIX + "set_rcv_lbl", lx, by + 3, Tr("set_rcapviol"), g_theme.text);
-            SetStepper(RC_PREFIX + "set_rcv", cx, by, DoubleToString(g_eff_risk_cap_viol, 2) + "%");
-            SetTip3("set_rcv", "tip_rcapviol");
-            by += step;
-        }
-    } else if (g_settings_tab == 2) {
-        // ===== Display =====
-        // v2.02 MULTI-THEMES : brand palette cycle < name > (plan-cascade pattern) +
-        // hover tagline on the name. Click -> HandleModalControl set_pal_prev/next.
-        SetLbl(RC_PREFIX + "set_pal_lbl", lx, by + 3, Tr("set_palette"), g_theme.text);
-        DrawSetButton(RC_PREFIX + "set_pal_prev", cx, by, 24, 20, "<");
-        SetLbl(RC_PREFIX + "set_pal_val", cx + 30, by + 3, PaletteName(EffectivePalette()), g_theme.accent);
-        DrawSetButton(RC_PREFIX + "set_pal_next", ox + ow - 40, by, 24, 20, ">");
-        SetTip1("set_pal_val", PaletteTipKey(EffectivePalette()));
-        by += step;
-        SetLbl(RC_PREFIX + "set_th_lbl", lx, by + 3, Tr("set_mode"), g_theme.text); // v2.02 : the dark/light axis is now the MODE
-        DrawSetButton(RC_PREFIX + "set_theme_dark",  cx, by, 78, 20, "DARK");
-        DrawSetButton(RC_PREFIX + "set_theme_light", cx + 84, by, 78, 20, "LIGHT");
-        HighlightSetButton(RC_PREFIX + "set_theme_dark",  EffectiveTheme() == RC_THEME_GLASS_DARK);
-        HighlightSetButton(RC_PREFIX + "set_theme_light", EffectiveTheme() == RC_THEME_GLASS_LIGHT);
-        by += step;
-        SetLbl(RC_PREFIX + "set_lg_lbl", lx, by + 3, Tr("set_language"), g_theme.text);
-        DrawSetButton(RC_PREFIX + "set_lang_en", cx,       by, 50, 20, "EN");
-        DrawSetButton(RC_PREFIX + "set_lang_fr", cx + 56,  by, 50, 20, "FR");
-        DrawSetButton(RC_PREFIX + "set_lang_es", cx + 112, by, 50, 20, "ES");
-        HighlightSetButton(RC_PREFIX + "set_lang_en", g_lang == 0);
-        HighlightSetButton(RC_PREFIX + "set_lang_fr", g_lang == 1);
-        HighlightSetButton(RC_PREFIX + "set_lang_es", g_lang == 2);
-        by += step;
-        SetLbl(RC_PREFIX + "set_nw_lbl", lx, by + 3, Tr("set_news"), g_theme.text);
-        SetToggleBtn(RC_PREFIX + "set_news", cx, by, g_eff_show_news);
-        by += step;
-        // V1.29 R : news LEVEL selector - HIGH / MEDIUM (both default ON ; FN counts MEDIUM too).
-        SetLbl(RC_PREFIX + "set_nh_lbl", lx, by + 3, Tr("set_news_high"), g_theme.text);
-        SetToggleBtn(RC_PREFIX + "set_news_high", cx, by, g_eff_news_high);
-        SetTip1("set_nh_lbl", "tip_news_high"); // D-FULL : tip rides the caption
-        by += step;
-        SetLbl(RC_PREFIX + "set_nm_lbl", lx, by + 3, Tr("set_news_med"), g_theme.text);
-        SetToggleBtn(RC_PREFIX + "set_news_med", cx, by, g_eff_news_med);
-        SetTip1("set_nm_lbl", "tip_news_med"); // D-FULL : tip rides the caption
-        by += step;
-        SetLbl(RC_PREFIX + "set_cf_lbl", lx, by + 3, Tr("set_comfort"), g_theme.text);
-        SetToggleBtn(RC_PREFIX + "set_comfort", cx, by, g_eff_comfort);
-        by += step;
-        SetLbl(RC_PREFIX + "set_dl_lbl", lx, by + 3, Tr("set_discipline"), g_theme.text);
-        SetToggleBtn(RC_PREFIX + "set_discipline", cx, by, g_eff_discipline);
-        by += step;
-        // V1.29 M : the risk-tools toggle moved to the Account tab (Personal context)
-        // - prop accounts are always-ON so it doesn't belong in the global Display tab.
-    } else if (g_settings_tab == 3) {
-        // ===== Alerts =====
-        SetLbl(RC_PREFIX + "set_sd_lbl", lx, by + 3, Tr("set_sound"), g_theme.text);
-        SetToggleBtn(RC_PREFIX + "set_sound", cx, by, g_eff_sound);
-        by += step;
-        SetLbl(RC_PREFIX + "set_tg_lbl", lx, by + 3, Tr("set_telegram"), g_theme.text);
-        SetToggleBtn(RC_PREFIX + "set_telegram", cx, by, g_eff_telegram);
-        by += step;
-        // V1.24 G1 : self-lock (Ulysses pact). One click arms a full-panel STOP
-        // for InpSelfLockHours ; unlocking needs a double-confirm on the overlay.
-        SetLbl(RC_PREFIX + "set_sl_lbl2", lx, by + 3, Tr("set_selflock"), g_theme.text);
-        DrawSetButton(RC_PREFIX + "set_selflock", cx, by, 150, 20,
-                      Tr("set_selflock") + " " + IntegerToString(g_eff_selflock_h) + "h");
-        by += step;
-        SetLbl(RC_PREFIX + "set_strings_note", lx, by + 3, Tr("set_strings_note"), g_theme.text_dim);
-        by += step;
-    } else {
-        // ===== Advanced : discipline + comfort tunables (V1.26) =====
-        SetLbl(RC_PREFIX + "set_tn_lbl", lx, by + 3, Tr("set_tiltn"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_tn", cx, by, IntegerToString(g_eff_tilt_n));
-        by += step;
-        SetLbl(RC_PREFIX + "set_tw_lbl", lx, by + 3, Tr("set_tiltwin"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_tw", cx, by, IntegerToString(g_eff_tilt_win) + "m");
-        by += step;
-        SetLbl(RC_PREFIX + "set_cn_lbl", lx, by + 3, Tr("set_cooldownn"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_cn", cx, by, IntegerToString(g_eff_cooldown_n));
-        by += step;
-        SetLbl(RC_PREFIX + "set_cm_lbl", lx, by + 3, Tr("set_cooldownm"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_cm", cx, by, IntegerToString(g_eff_cooldown_m) + "m");
-        by += step;
-        SetLbl(RC_PREFIX + "set_sh_lbl", lx, by + 3, Tr("set_selflockh"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_sh", cx, by, IntegerToString(g_eff_selflock_h) + "h");
-        by += step;
-        SetLbl(RC_PREFIX + "set_cp_lbl", lx, by + 3, Tr("set_comfortpct"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_cp", cx, by, DoubleToString(g_eff_comfort_pct, 0) + "%");
-        by += step;
-        // V1.27 : cycle start date (drives the "Days traded" counter) + refresh.
-        // V1.28 (item 4) : "chic" agenda header (assembled date in accent colour)
-        // above day / month-name / year steppers.
-        const double cyc_ymd = (g_eff_cycle_ymd > 0 ? g_eff_cycle_ymd : IsoToYmd(InpCycleStartIso));
-        const int cyc_y = (int)cyc_ymd / 10000, cyc_mo = ((int)cyc_ymd / 100) % 100, cyc_d = (int)cyc_ymd % 100;
-        SetLbl(RC_PREFIX + "set_cyc_lbl", lx, by + 3, Tr("set_cycle"), g_theme.text);
-        SetLbl(RC_PREFIX + "set_cyc_val", cx + 30, by + 3,
-               StringFormat("%02d %s %04d", cyc_d, MonthShort(cyc_mo), cyc_y), g_theme.accent);
-        by += step;
-        SetLbl(RC_PREFIX + "set_cdd_lbl", lx, by + 3, Tr("set_cycday"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_cdd", cx, by, IntegerToString(cyc_d));
-        by += step;
-        SetLbl(RC_PREFIX + "set_cmm_lbl", lx, by + 3, Tr("set_cycmonth"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_cmm", cx, by, MonthShort(cyc_mo));
-        by += step;
-        SetLbl(RC_PREFIX + "set_cyy_lbl", lx, by + 3, Tr("set_cycyear"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_cyy", cx, by, IntegerToString(cyc_y));
-        by += step;
-        SetLbl(RC_PREFIX + "set_rm_lbl", lx, by + 3, Tr("set_refreshms"), g_theme.text);
-        SetStepper(RC_PREFIX + "set_rm", cx, by, IntegerToString(g_eff_refresh_ms) + "ms");
-        by += step;
-    }
-
-    // Footer note + auto-detected broker (always shown, bottom of the modal).
-    SetLbl(RC_PREFIX + "set_note", lx, oy + oh - 40, Tr("set_note"), g_theme.text_dim);
-    SetLbl(RC_PREFIX + "set_broker", lx, oy + oh - 22,
-           Tr("set_broker") + " " + AccountInfoString(ACCOUNT_SERVER), g_theme.text_dim);
-    // V1.24 fix : hide the panel's own controls (TF / BE / N / violation toggles
-    // / copy edits / logo) while the modal is up - they'd render on top of the
-    // rectangle overlay otherwise. Keep the settings controls (set_*) visible.
-    SetPanelControlsHidden(true, "set");
-    // D-FULL step 2 : single Commit - every face (shell + tabs + X + all the body
-    // controls painted by the helpers above) lands in ONE bitmap update.
-    if (g_modal_kit.Ready()) g_modal_kit.Commit();
-}
 
 // G3 : after a settings popup change, rebuild theme + (optionally) re-resolve
 // the profile + redraw the whole panel + restore the popup if it was open.
@@ -8648,11 +5413,7 @@ void ApplySettingsChange(void) {
     // v3 SHELL : DestroyAllObjects wipes the WHOLE "RC_" namespace - the shell's
     // canvases included (RC_V3_*). Recreate them here or the rail would vanish
     // until the next chart change (seen on the lock -> clear transition).
-    if (InpShellV2 && g_shell.Created()) g_shell.OnChartChange();
-    BuildPanel();
-    MovePanelBy(0, 0); // v2.01 : geometry may have GROWN (risktools ON = +264px) -
-                       // re-clamp against the fresh g_panel_height so the panel
-                       // never ends below the chart. No-op when already legal.
+    if (g_shell.Created()) g_shell.OnChartChange();
     // V1.29 S : CHART elements live on the price area (NOT the panel), so a popup
     // change must reflect on them IMMEDIATELY - refresh them ALWAYS (no modal
     // bleed-through, they're off-panel). Only RefreshPanel (the panel rows) stays
@@ -8662,60 +5423,10 @@ void ApplySettingsChange(void) {
     if (g_be_visible) DrawBreakevenLines(); // basket BE line
     ApplyComfortScale(false);               // comfort padding (self-guards on g_eff_comfort)
     g_news_stats_scan = 0;                  // V1.29 : bust the news-card 60 s cache -> a cycle-date (or any) popup change recomputes the card instantly
-    if (!g_settings_open)
-        RefreshPanel();
+    RefreshPanel();
     ChartRedraw(0);
 }
 
-//+------------------------------------------------------------------+
-//| Max-parallel control - clickable [-] N [+] near footer line 2    |
-//|                                                                  |
-//| AUDIT 2026-06-07 fix #4 : mp_minus / mp_plus were OBJ_RECTANGLE_  |
-//| LABEL + overlay OBJ_LABEL, which DO NOT emit CHARTEVENT_OBJECT_   |
-//| CLICK -> the +/- buttons were silently DEAD. The whole V1.1       |
-//| "trader picks N" feature (and the SL-line-per-trade allocation    |
-//| that follows from it) was broken. Convert both to OBJ_BUTTON so   |
-//| MT5 actually emits the click event, drop the _txt overlays.       |
-//+------------------------------------------------------------------+
-void DrawMpButton(const string id, int x, int y, int w, int h, const string text) {
-    if (ObjectFind(0, id) < 0)
-        ObjectCreate(0, id, OBJ_BUTTON, 0, 0, 0);
-    ObjectSetInteger(0, id, OBJPROP_XDISTANCE, x);
-    ObjectSetInteger(0, id, OBJPROP_YDISTANCE, y);
-    ObjectSetInteger(0, id, OBJPROP_XSIZE, w);
-    ObjectSetInteger(0, id, OBJPROP_YSIZE, h);
-    ObjectSetString(0, id, OBJPROP_TEXT, text);
-    ObjectSetString(0, id, OBJPROP_FONT, RC_FONT_UI);
-    ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
-    ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.text);
-    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_theme.bg_section);
-    ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_theme.border);
-    ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, id, OBJPROP_STATE, false);
-    ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, id, OBJPROP_ZORDER, 100); // LOT B : wins click routing
-}
-
-void DrawMaxParallelControl(int x, int y) {
-    const int btn_w = 20;
-    const int btn_h = InpRowHeight - 4;
-    // v1.4.1 R3 : − / + are canvas rounded buttons (faces via PaintFaces) + click zones
-    // + centered glyph labels ; DispatchHit routes "mp_dn" / "mp_up". Drop pre-R3 OBJ_BUTTONs.
-    ObjectDelete(0, RC_PREFIX + "mp_minus");
-    ObjectDelete(0, RC_PREFIX + "mp_plus");
-    HitAdd(x, y, x + btn_w, y + btn_h, "mp_dn", -1, RCF_BTN);
-    DrawLabel(RC_PREFIX + "mp_dn_l", x + btn_w / 2, y + btn_h / 2, "-", g_theme.text, RC_FONT_SIZE + 1, RC_FONT_UI);
-    ObjectSetInteger(0, RC_PREFIX + "mp_dn_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
-
-    DrawLabel(RC_PREFIX + "mp_value", x + btn_w + 8, y + 2,
-              IntegerToString(g_max_parallel), g_theme.accent, RC_FONT_SIZE);
-
-    const int up_x = x + btn_w + 30;
-    HitAdd(up_x, y, up_x + btn_w, y + btn_h, "mp_up", -1, RCF_BTN);
-    DrawLabel(RC_PREFIX + "mp_up_l", up_x + btn_w / 2, y + btn_h / 2, "+", g_theme.text, RC_FONT_SIZE + 1, RC_FONT_UI);
-    ObjectSetInteger(0, RC_PREFIX + "mp_up_l", OBJPROP_ANCHOR, ANCHOR_CENTER);
-}
 
 //+------------------------------------------------------------------+
 //| RefreshPyramidLine -- compute next safe-pyramid step on the      |

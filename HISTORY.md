@@ -86,6 +86,38 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.06.18 - suppression de l'ancien shell (ordre JR)
+
+> "si tu as tout recupere de toute facon on a l'ancienne version dans le git
+> donc supprime l'ancien shell"
+
+La parite ayant ete retablie en v3.06.17, l'ancien panneau est retire.
+
+- **70 fonctions supprimees** : canvas panel (`BuildPanel`, `RepaintCanvas`,
+  `DrawTitleBar`, `DrawAccountStrip`, `DrawRuleRow`, `DrawFooter`...), modal
+  de reglages (`DrawSettingsOverlay` et ses 12 helpers), moteur de hit-test
+  legacy (`HitAdd`/`HitTest`/`DrawFace`/`PaintFaces`), drag du panneau,
+  overlays (`DrawHardLock`, `DrawTiltBanner`), FX canvas, barres TF et
+  symboles recents, `UpdateRow`/`ComputeVerdict`/`UpdateClockBlinker`.
+- **26 globales mortes** retirees (ancre du panneau, etat du modal, tableau de
+  hit-test, canvases `g_kit`/`g_modal_kit`/`g_fx`, blinker...).
+- **4 inputs supprimes** : `InpShellV2` (l'interrupteur v2/v3 n'a plus de sens),
+  `InpAnchorX`, `InpAnchorY`, `InpPanelWidth` - un reglage qui ne fait plus rien
+  est un bug du point de vue de l'utilisateur.
+- `RefreshPanel()` ne fait plus que deleguer a `ShellRefresh()` : **un seul
+  chemin de rendu**, plus de garde `if (InpShellV2)` nulle part.
+- `CHARTEVENT_OBJECT_CLICK` n'a plus rien a router : le shell est 100 %
+  hit-testing, aucun controle natif ne subsiste (hors les 2 champs de copie).
+
+**Bilan : 8847 -> 5561 lignes (-3286, -37 %)**, `.ex5` 551 ko -> 406 ko (-26 %),
+compilation 14,0 s -> 6,8 s.
+
+Audits statiques apres purge : **119/119 zones cliquables gerees (0 orpheline)**,
+**124/124 champs du modele remplis**, 11/11 bascules de config avec leur branche
+hote, `Result: 0 errors, 0 warnings`.
+
+⚠️ Reste a valider par l'usage (JR) avant merge sur `main`.
+
 ### v3.06.17 - parite : ce que la bascule v3 avait rendu MUET
 
 Audit demande par JR ("verifie que tu as bien ajoute tous les outils de
