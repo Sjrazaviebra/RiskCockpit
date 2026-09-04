@@ -57,6 +57,24 @@ The compiled `RiskCockpit.ex5` in `Indicators/` matches the version in
 
 Published **free** on the MQL5 Market. More at **[javadrazavi.fr](https://javadrazavi.fr)**.
 
+## Checks
+
+Eleven static checks answer what the MQL5 compiler cannot: a click zone nobody
+handles, a label that can never be translated, a setting that no longer does
+anything, a personal account number left in a public file. None of those break
+a build.
+
+```
+python tools/audit.py           # one command, one verdict (exit 0 / 1)
+python tools/gate_selftest.py   # proves the gate can still say NO
+```
+
+The self-test injects one defect at a time into a throw-away copy and requires
+the matching line to turn FAIL — an audit nobody ever saw fail is a decoration.
+Checks that read a binary run a positive control first: if the instrument
+cannot see a value the file is known to contain, the check reports UNKNOWN
+rather than "clean".
+
 ## Author
 
 **Javad Razavi** — *The Solution Maker* · [javadrazavi.fr](https://javadrazavi.fr)
