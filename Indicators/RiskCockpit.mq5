@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.06"
+#property version "3.07"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1695,6 +1695,95 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_CPT_SPLIT, Tr("shl_split"));
     g_shell.SetLabel(RCL_CPT_DAYS,  Tr("shl_mindays"));
     g_shell.SetLabel(RCL_CLOSE_EA,  Tr("shl_closeea"));
+    g_shell.SetLabel(RCL_LIM_QS,        Tr("shl_qs"));
+    g_shell.SetLabel(RCL_LOT_COPY,      Tr("shl_copy"));
+    g_shell.SetLabel(RCL_TAG_MARG,      Tr("shl_tag_marg"));
+    g_shell.SetLabel(RCL_TAG_ROOM,      Tr("shl_tag_room"));
+    g_shell.SetLabel(RCL_TAG_FREE,      Tr("shl_tag_free"));
+    g_shell.SetLabel(RCL_LOT_MAX,       Tr("shl_lotmax"));
+    g_shell.SetLabel(RCL_NEWSTRADES,    Tr("shl_newstrades"));
+    g_shell.SetLabel(RCL_ELIG,          Tr("shl_elig"));
+    g_shell.SetLabel(RCL_DISC_VIOL,     Tr("shl_afterviol"));
+    g_shell.SetLabel(RCL_VIOL_M,        Tr("shl_violm"));
+    g_shell.SetLabel(RCL_VIOL_R,        Tr("shl_violr"));
+    g_shell.SetLabel(RCL_LOCK_ON,       Tr("shl_lockon"));
+    g_shell.SetLabel(RCL_LOCK_ASK,      Tr("shl_lockask"));
+    g_shell.SetLabel(RCL_LOCK_ARM,      Tr("shl_lockarm"));
+    g_shell.SetLabel(RCL_HYPER,         Tr("shl_hyper"));
+    g_shell.SetLabel(RCL_MSGS,          Tr("shl_msgs"));
+    g_shell.SetLabel(RCL_CPT_PROFILE,   Tr("shl_profile"));
+    g_shell.SetLabel(RCL_CYCLE,         Tr("shl_cycle"));
+    g_shell.SetLabel(RCL_YEAR,          Tr("shl_year"));
+    g_shell.SetLabel(RCL_MONTH,         Tr("shl_month"));
+    g_shell.SetLabel(RCL_DAY,           Tr("shl_day"));
+    g_shell.SetLabel(RCL_TAB_RISK,      Tr("shl_tabrisk"));
+    g_shell.SetLabel(RCL_TAB_DISC,      Tr("shl_tabdisc"));
+    g_shell.SetLabel(RCL_TAB_ADV,       Tr("shl_tabadv"));
+    g_shell.SetLabel(RCL_TAB_DISP,      Tr("shl_tabdisp"));
+    g_shell.SetLabel(RCL_BE,            Tr("shl_belines"));
+    g_shell.SetLabel(RCL_POS_MORE,      Tr("shl_more"));
+    g_shell.SetLabel(RCL_RAIL_CPT,      Tr("shl_r_cpt"));
+    g_shell.SetLabel(RCL_RAIL_HELP,     Tr("shl_r_help"));
+    g_shell.SetLabel(RCL_FLOOR_HINT,    Tr("shl_floorhint"));
+    g_shell.SetLabel(RCL_MORE_RESIZE,   Tr("shl_moresize"));
+    g_shell.SetLabel(RCL_PYRAMID,       Tr("shl_pyramid"));
+    g_shell.SetLabel(RCL_LOT_NOROOM,    Tr("shl_lotnoroom"));
+    g_shell.SetLabel(RCL_LOT_CAP80,     Tr("shl_lotcap80"));
+    g_shell.SetLabel(RCL_SRC_MT,        Tr("shl_srcmt"));
+    g_shell.SetLabel(RCL_INACTIVE,      Tr("shl_inactive"));
+    g_shell.SetLabel(RCL_NEWS_ACT_EL,   Tr("shl_newsactel"));
+    g_shell.SetLabel(RCL_IN_MIN,        Tr("shl_inmin"));
+    g_shell.SetLabel(RCL_NEWS_NONE24,   Tr("shl_none24"));
+    g_shell.SetLabel(RCL_RULE40,        Tr("shl_rule40"));
+    g_shell.SetLabel(RCL_CHECKFN,       Tr("shl_checkfn"));
+    g_shell.SetLabel(RCL_SLG_ON,        Tr("shl_slgon"));
+    g_shell.SetLabel(RCL_TILT_ON,       Tr("shl_tilton"));
+    g_shell.SetLabel(RCL_ALLCLEAR,      Tr("shl_allclear"));
+    g_shell.SetLabel(RCL_SELFLOCK_T,    Tr("shl_selflockt"));
+    g_shell.SetLabel(RCL_DAILYLOCK,     Tr("shl_dailylock"));
+    g_shell.SetLabel(RCL_ON_NOW,        Tr("shl_onnow"));
+    g_shell.SetLabel(RCL_RAISE_SL,      Tr("shl_raisesl"));
+    g_shell.SetLabel(RCL_NOSL_POS,      Tr("shl_noslpos"));
+    g_shell.SetLabel(RCL_KEEP20,        Tr("shl_keep20"));
+    g_shell.SetLabel(RCL_TRADES_N,      Tr("shl_tradesn"));
+    g_shell.SetLabel(RCL_TILT_WIN,      Tr("shl_tiltwin"));
+    g_shell.SetLabel(RCL_ACCOUNT_N,     Tr("shl_accountn"));
+    g_shell.SetLabel(RCL_CFG_THEME,     Tr("shl_cfgtheme"));
+    g_shell.SetLabel(RCL_CFG_MODE_L,    Tr("shl_cfgmode"));
+    g_shell.SetLabel(RCL_LIGHT,         Tr("shl_light"));
+    g_shell.SetLabel(RCL_DARK,          Tr("shl_dark"));
+    g_shell.SetLabel(RCL_CFG_LANG_L,    Tr("shl_cfglang"));
+    g_shell.SetLabel(RCL_ALERTS,        Tr("shl_alerts"));
+    g_shell.SetLabel(RCL_SOUND,         Tr("shl_sound"));
+    g_shell.SetLabel(RCL_COMFORT_H,     Tr("shl_comforth"));
+    g_shell.SetLabel(RCL_COMFORT_S,     Tr("shl_comforts"));
+    g_shell.SetLabel(RCL_DISC_LOCK_T,   Tr("shl_disclockt"));
+    g_shell.SetLabel(RCL_RTOOLS,        Tr("shl_rtools"));
+    g_shell.SetLabel(RCL_HELP_SAFE,     Tr("shl_hsafe"));
+    g_shell.SetLabel(RCL_HELP_WATCH,    Tr("shl_hwatch"));
+    g_shell.SetLabel(RCL_HELP_BREACH,   Tr("shl_hbreach"));
+    g_shell.SetLabel(RCL_HELP_R40,      Tr("shl_hr40"));
+    g_shell.SetLabel(RCL_HELP_R40A,     Tr("shl_hr40a"));
+    g_shell.SetLabel(RCL_HELP_R40B,     Tr("shl_hr40b"));
+    g_shell.SetLabel(RCL_HELP_SURV,     Tr("shl_hsurv"));
+    g_shell.SetLabel(RCL_HELP_SURVA,    Tr("shl_hsurva"));
+    g_shell.SetLabel(RCL_HELP_SURVB,    Tr("shl_hsurvb"));
+    g_shell.SetLabel(RCL_HELP_ABOUT,    Tr("shl_habout"));
+    g_shell.SetLabel(RCL_VERSION,       Tr("shl_version"));
+    g_shell.SetLabel(RCL_NEWS_SOURCE,   Tr("shl_newssrc"));
+    g_shell.SetLabel(RCL_HELP_RO1,      Tr("shl_hro1"));
+    g_shell.SetLabel(RCL_HELP_RO2,      Tr("shl_hro2"));
+    g_shell.SetLabel(RCL_SECS_RESIZE,   Tr("shl_secsize"));
+    g_shell.SetLabel(RCL_RTOOLS_OFF,    Tr("shl_rtoolsoff"));
+    g_shell.SetLabel(RCL_BAND_WKND,     Tr("shl_bandwknd"));
+    g_shell.SetLabel(RCL_MINS_LEFT,     Tr("shl_minsleft"));
+    g_shell.SetLabel(RCL_BAND_RAISE,    Tr("shl_bandraise"));
+    g_shell.SetLabel(RCL_BAND_SLLOW,    Tr("shl_bandsllow"));
+    g_shell.SetLabel(RCL_BAND_LOCKED,   Tr("shl_bandlocked"));
+    g_shell.SetLabel(RCL_BAND_TRADES,   Tr("shl_bandtrades"));
+    g_shell.SetLabel(RCL_BAND_SLOW,     Tr("shl_bandslow"));
+    g_shell.SetLabel(RCL_NEWS_HI,       Tr("shl_newshi"));
+    g_shell.SetLabel(RCL_NEWS_MED,      Tr("shl_newsmed"));
     // --- tooltips : "title|description" packed in ONE i18n entry each --------
     for (int i = 0; i < 8; ++i) g_shell.SetTip(g_shell.ZidRail(i),
         Tr("tipr_" + IntegerToString(i)));
@@ -4674,6 +4763,362 @@ void InitI18n(void) {
     AddTr("shl_closeea",   "Closing : EA version",
                            "Fermeture : version EA",
                            "Cierre : version EA");
+    AddTr("shl_qs",
+        "Quick Strike",
+        "Quick Strike",
+        "Quick Strike");
+    AddTr("shl_copy",
+        "copy",
+        "copier",
+        "copiar");
+    AddTr("shl_tag_marg",
+        "margin",
+        "marge",
+        "margen");
+    AddTr("shl_tag_room",
+        "room",
+        "reste",
+        "resto");
+    AddTr("shl_tag_free",
+        "free",
+        "libre",
+        "libre");
+    AddTr("shl_lotmax",
+        "Max allowed lot",
+        "Lot max autorise",
+        "Lote max permitido");
+    AddTr("shl_newstrades",
+        "News trades",
+        "Trades news",
+        "Trades noticias");
+    AddTr("shl_elig",
+        "elig",
+        "elig",
+        "eleg");
+    AddTr("shl_afterviol",
+        "AFTER A VIOLATION",
+        "APRES VIOLATION",
+        "TRAS UNA VIOLACION");
+    AddTr("shl_violm",
+        "Margin violation",
+        "Violation marge",
+        "Violacion margen");
+    AddTr("shl_violr",
+        "Risk violation",
+        "Violation risque",
+        "Violacion riesgo");
+    AddTr("shl_lockon",
+        "LOCK ACTIVE",
+        "VERROU ACTIF",
+        "BLOQUEO ACTIVO");
+    AddTr("shl_lockask",
+        "CONFIRM ?",
+        "CONFIRMER ?",
+        "CONFIRMAR ?");
+    AddTr("shl_lockarm",
+        "ARM THE LOCK",
+        "ARMER LE VERROU",
+        "ARMAR EL BLOQUEO");
+    AddTr("shl_hyper",
+        "Hyperactivity",
+        "Hyperactivite",
+        "Hiperactividad");
+    AddTr("shl_msgs",
+        "Server msgs (orders)",
+        "Msgs serveur (ordres)",
+        "Msgs servidor (ordenes)");
+    AddTr("shl_profile",
+        "PROFILE",
+        "PROFIL",
+        "PERFIL");
+    AddTr("shl_cycle",
+        "CYCLE START",
+        "DEBUT DE CYCLE",
+        "INICIO DE CICLO");
+    AddTr("shl_year",
+        "Year",
+        "Annee",
+        "Ano");
+    AddTr("shl_month",
+        "Month",
+        "Mois",
+        "Mes");
+    AddTr("shl_day",
+        "Day",
+        "Jour",
+        "Dia");
+    AddTr("shl_tabrisk",
+        "RISK",
+        "RISQUE",
+        "RIESGO");
+    AddTr("shl_tabdisc",
+        "DISCIPLINE",
+        "DISCIPLINE",
+        "DISCIPLINA");
+    AddTr("shl_tabadv",
+        "ADVANCED",
+        "AVANCE",
+        "AVANZADO");
+    AddTr("shl_tabdisp",
+        "DISPLAY",
+        "AFFICHAGE",
+        "PANTALLA");
+    AddTr("shl_belines",
+        "Break-even lines",
+        "Lignes break-even",
+        "Lineas break-even");
+    AddTr("shl_more",
+        "more",
+        "autres",
+        "mas");
+    AddTr("shl_r_cpt",
+        "ACCT",
+        "CPT",
+        "CTA");
+    AddTr("shl_r_help",
+        "HELP",
+        "AIDE",
+        "AYUDA");
+    AddTr("shl_floorhint",
+        "Equity below this level = account lost.",
+        "Equity sous ce niveau = compte perdu.",
+        "Equity bajo este nivel = cuenta perdida.");
+    AddTr("shl_moresize",
+        "more : enlarge the window",
+        "autres : agrandis la fenetre",
+        "mas : agranda la ventana");
+    AddTr("shl_pyramid",
+        "PYRAMID",
+        "PYRAMIDE",
+        "PIRAMIDE");
+    AddTr("shl_lotnoroom",
+        "No room left : do not take this trade.",
+        "Aucune marge : ne prends pas ce trade.",
+        "Sin margen : no tomes esta operacion.");
+    AddTr("shl_lotcap80",
+        "Capped at 80% of the survival margin.",
+        "Plafonne a 80% de la marge de survie.",
+        "Limitado al 80% del margen de supervivencia.");
+    AddTr("shl_srcmt",
+        "MT5 calendar [MT]",
+        "Calendrier MT5 [MT]",
+        "Calendario MT5 [MT]");
+    AddTr("shl_inactive",
+        "inactive",
+        "inactive",
+        "inactiva");
+    AddTr("shl_newsactel",
+        "ACTIVE - eligible profit ",
+        "ACTIVE - profit eligible ",
+        "ACTIVA - beneficio elegible ");
+    AddTr("shl_inmin",
+        "in ",
+        "dans ",
+        "en ");
+    AddTr("shl_none24",
+        "Nothing in the next 24 h.",
+        "Rien dans les 24 h.",
+        "Nada en las proximas 24 h.");
+    AddTr("shl_rule40",
+        "40% rule",
+        "regle 40%",
+        "regla 40%");
+    AddTr("shl_checkfn",
+        "check FN",
+        "verifier FN",
+        "revisar FN");
+    AddTr("shl_slgon",
+        "SL GUARD TRIGGERED",
+        "GARDE SL DECLENCHEE",
+        "GUARDIA SL ACTIVADA");
+    AddTr("shl_tilton",
+        "TILT DETECTED",
+        "TILT DETECTE",
+        "TILT DETECTADO");
+    AddTr("shl_allclear",
+        "ALL CLEAR",
+        "RAS",
+        "TODO OK");
+    AddTr("shl_selflockt",
+        "Self-lock (Ulysses)",
+        "Self-lock (Ulysse)",
+        "Auto-bloqueo (Ulises)");
+    AddTr("shl_dailylock",
+        "Daily lock",
+        "Verrou journalier",
+        "Bloqueo diario");
+    AddTr("shl_onnow",
+        "active",
+        "actif",
+        "activo");
+    AddTr("shl_raisesl",
+        "Raise the SL",
+        "Remonte la SL",
+        "Sube el SL");
+    AddTr("shl_noslpos",
+        "position without SL",
+        "position sans SL",
+        "posicion sin SL");
+    AddTr("shl_keep20",
+        "Goal : keep 20% of room.",
+        "Objectif : garder 20% de marge.",
+        "Objetivo : conservar 20% de margen.");
+    AddTr("shl_tradesn",
+        "Trades",
+        "Trades",
+        "Operaciones");
+    AddTr("shl_tiltwin",
+        "Tilt window",
+        "Fenetre tilt",
+        "Ventana tilt");
+    AddTr("shl_accountn",
+        "Account",
+        "Compte",
+        "Cuenta");
+    AddTr("shl_cfgtheme",
+        "Theme",
+        "Theme",
+        "Tema");
+    AddTr("shl_cfgmode",
+        "Mode",
+        "Mode",
+        "Modo");
+    AddTr("shl_light",
+        "light",
+        "clair",
+        "claro");
+    AddTr("shl_dark",
+        "dark",
+        "sombre",
+        "oscuro");
+    AddTr("shl_cfglang",
+        "Language",
+        "Langue",
+        "Idioma");
+    AddTr("shl_alerts",
+        "ALERTS",
+        "ALERTES",
+        "ALERTAS");
+    AddTr("shl_sound",
+        "Sound",
+        "Son",
+        "Sonido");
+    AddTr("shl_comforth",
+        "COMFORT",
+        "CONFORT",
+        "CONFORT");
+    AddTr("shl_comforts",
+        "Comfort scale",
+        "Echelle confort",
+        "Escala de confort");
+    AddTr("shl_disclockt",
+        "Discipline lock",
+        "Verrou discipline",
+        "Bloqueo disciplina");
+    AddTr("shl_rtools",
+        "Risk toolkit",
+        "Outils de risque",
+        "Herramientas de riesgo");
+    AddTr("shl_hsafe",
+        "SAFE - below 80% of the limit",
+        "SAFE - sous 80% de la limite",
+        "SAFE - por debajo del 80% del limite");
+    AddTr("shl_hwatch",
+        "WATCH - 80% used, be careful",
+        "WATCH - 80% consomme, prudence",
+        "WATCH - 80% consumido, prudencia");
+    AddTr("shl_hbreach",
+        "BREACH - limit reached",
+        "BREACH - limite atteinte",
+        "BREACH - limite alcanzado");
+    AddTr("shl_hr40",
+        "40% RULE",
+        "REGLE 40%",
+        "REGLA 40%");
+    AddTr("shl_hr40a",
+        "News window : only ",
+        "Fenetre news : seuls ",
+        "Ventana news : solo ");
+    AddTr("shl_hr40b",
+        "of the profit counts ; losses count 100%.",
+        "du profit comptent ; les pertes comptent 100%.",
+        "del beneficio cuenta ; las perdidas 100%.");
+    AddTr("shl_hsurv",
+        "SURVIVAL MARGIN",
+        "MARGE DE SURVIE",
+        "MARGEN DE SUPERVIVENCIA");
+    AddTr("shl_hsurva",
+        "A trade never risks more than 80% of",
+        "Un trade ne risque jamais plus de 80% de",
+        "Una operacion nunca arriesga mas del 80%");
+    AddTr("shl_hsurvb",
+        "the room : 20% are kept to survive.",
+        "la marge : 20% restent pour survivre.",
+        "del margen : el 20% queda para sobrevivir.");
+    AddTr("shl_habout",
+        "ABOUT",
+        "A PROPOS",
+        "ACERCA DE");
+    AddTr("shl_version",
+        "Version",
+        "Version",
+        "Version");
+    AddTr("shl_newssrc",
+        "News source",
+        "Source news",
+        "Fuente noticias");
+    AddTr("shl_hro1",
+        "MONITORING tool : it never opens, changes",
+        "Outil de SUIVI : il n ouvre, ne modifie et",
+        "Herramienta de SEGUIMIENTO : no abre, no");
+    AddTr("shl_hro2",
+        "or closes ANY trade. No signal.",
+        "ne ferme AUCUN trade. Aucun signal.",
+        "modifica ni cierra NINGUNA operacion. Sin senal.");
+    AddTr("shl_secsize",
+        "sections : enlarge the window",
+        "sections : agrandis la fenetre",
+        "secciones : agranda la ventana");
+    AddTr("shl_rtoolsoff",
+        "Risk toolkit OFF (personal account).",
+        "Outils de risque OFF (compte perso).",
+        "Herramientas OFF (cuenta personal).");
+    AddTr("shl_bandwknd",
+        "OPEN POSITIONS INTO THE WEEKLY CLOSE - consider flattening",
+        "POSITIONS OUVERTES AVANT LA CLOTURE HEBDO - envisage de solder",
+        "POSICIONES ABIERTAS ANTES DEL CIERRE SEMANAL - considera cerrar");
+    AddTr("shl_minsleft",
+        "min left",
+        "min restantes",
+        "min restantes");
+    AddTr("shl_bandraise",
+        "raise ",
+        "remonte ",
+        "sube ");
+    AddTr("shl_bandsllow",
+        "SL TOO LOW - breach risk",
+        "SL TROP BAS - risque de breche",
+        "SL DEMASIADO BAJO - riesgo de brecha");
+    AddTr("shl_bandlocked",
+        "DISCIPLINE LOCK ACTIVE",
+        "VERROU DISCIPLINE ACTIF",
+        "BLOQUEO DE DISCIPLINA ACTIVO");
+    AddTr("shl_bandtrades",
+        "trades in",
+        "trades en",
+        "operaciones en");
+    AddTr("shl_bandslow",
+        "min : slow down",
+        "min : ralentis",
+        "min : reduce el ritmo");
+    AddTr("shl_newshi",
+        "News HIGH",
+        "News HIGH",
+        "News HIGH");
+    AddTr("shl_newsmed",
+        "News MEDIUM",
+        "News MEDIUM",
+        "News MEDIUM");
     // --- v3 SHELL tooltips : ONE entry per bubble, "title|description" -------
     AddTr("tipr_0", "Limits|Usage of the NEAREST active limit. Marker = 80%.",
                     "Limites|Conso de la limite la plus proche. Repere = 80%.",

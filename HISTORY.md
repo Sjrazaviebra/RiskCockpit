@@ -86,6 +86,37 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.07.19 - i18n : tout ce que l'utilisateur lit devient traduisible
+
+Deux plafonds silencieux expliquaient l'essentiel du francais residuel :
+
+- **`RCS_L_MAX` valait 64 pour 95 identifiants de libelles** : `SetLabel()`
+  jetait sans un mot tout id >= 64, donc **31 libelles ne pouvaient PAS etre
+  traduits** et affichaient leur defaut francais dans les trois langues.
+- **`RCS_TIP_MAX` valait 96 pour 149 zones** : meme mecanique sur les
+  infobulles. Les deux gardes etaient des `if` sans `else` - un controle qui
+  echoue en silence n'est pas un controle. Plafonds portes a 192 **et** un
+  `Print` explicite si un id depasse.
+
+Ensuite le contenu :
+
+- **42 chaines codees en dur** passent par `L(id, "...")` : titres de sections,
+  etat discipline, section news, aide (legende, regle 40%, marge de survie,
+  mention read-only), reglages, messages du bandeau, cellules du rail.
+- **89 libelles pousses par l'hote en EN / FR / ES** (`AddTr`) - 62 nouveaux
+  identifiants + 27 qui existaient mais que l'hote n'avait jamais cables.
+- **Tous les defauts du code sont desormais en ANGLAIS** (regle JR : le code en
+  anglais), y compris les 58 infobulles de repli : l'anglais est la bonne
+  langue de repli pour un produit vendu surtout en anglais, et les traductions
+  arrivent de la table i18n de l'hote.
+- Deux infobulles mentaient encore ("selection : lot 2", promesse d'un lot
+  precedent) : les chips SYMBOLE et UNITE DE TEMPS ouvrent bien un menu.
+- `SecSoon` (placeholder mort depuis que chaque section a un corps) supprime.
+
+Audits : **157 ids <= 192**, **149 zones <= 192**, **0 id utilise sans
+traduction**, 0 cle `Tr()` sans `AddTr`, 0 langue vide, 1 seule chaine
+francaise restante corrigee. `Result: 0 errors, 0 warnings`.
+
 ### v3.06.18 - suppression de l'ancien shell (ordre JR)
 
 > "si tu as tout recupere de toute facon on a l'ancienne version dans le git
