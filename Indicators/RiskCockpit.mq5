@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.08"
+#property version "3.09"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1126,7 +1126,6 @@ int OnInit(void) {
 
     ApplyComfortScale(true); // FIX 6 : comfortable padded scale on attach (and on symbol switch via re-init)
     EventSetMillisecondTimer(g_eff_refresh_ms); // V1.27 : honor the persisted refresh period
-    Print("RiskCockpit: i18n encoding check -> ", Tr("rules"), " / ", Tr("shl_pyramid"), " / ", Tr("shl_news"));
     ChartRedraw(0);
     return (INIT_SUCCEEDED);
 }

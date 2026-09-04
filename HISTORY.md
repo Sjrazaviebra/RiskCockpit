@@ -86,6 +86,31 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.09.21 - les accents sont PROUVÉS, sans allumer le terminal
+
+La v3.08 laissait un doute assumé : impossible de vérifier que les accents
+survivaient au compilateur, faute d'instrument. Il en existait un.
+
+- **Les `#property` sont stockées EN CLAIR (UTF-16LE, non compressées) dans
+  l'en-tête du `.ex5`** — contrairement aux chaînes du corps, qui sont
+  compressées et rendaient ma première sonde muette dans les deux sens.
+- Protocole : `#property copyright` porte temporairement
+  `ENCPROBE RÈGLES Année señal boîte à outils`, compilation, puis recherche de
+  la chaîne dans le binaire **et** de sa variante mojibake (`utf-8` relu en
+  `latin-1`).
+- **Contrôle positif d'abord** : `ENCPROBE` doit être trouvé, sinon
+  l'instrument ne mesure rien et on ne conclut pas. Ce garde-fou a servi : la
+  1re tentative passait par `#property description`, qui **n'est pas** stockée
+  en clair → verdict INDÉTERMINÉ, aucune conclusion tirée.
+- **Résultat : chaîne accentuée trouvée telle quelle · variante mojibake
+  absente ⇒ MetaEditor lit bien la source en UTF-8 grâce au BOM.**
+- Les deux sondes sont retirées (`copyright` restauré à l'identique, `Print`
+  d'`OnInit` supprimé : la preuve statique vaut mieux qu'une ligne de journal
+  qui attend un rechargement).
+
+⚠️ Ce que cela ne prouve pas : le RENDU à l'écran (police, largeur des
+capsules). Ça, seule une capture de JR le dira.
+
 ### v3.08.20 - les vrais accents en FR et en ES
 
 - **98 entrées de la table i18n ré-accentuées** (FR + ES) par table de mots +
