@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.00"
+#property version "3.02"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -3282,7 +3282,16 @@ void BuildDeckData(RCDeckData &d) {
     d.cfgComfort    = g_eff_comfort;
     d.cfgDiscipline = g_eff_discipline;
     d.lang          = g_lang;
-    d.version       = "3.00 shell (2.13 core)";
+    d.version       = "3.02";
+    // v3.02 : the settings rows of the ACTIVE tab + the plan cascade
+    {
+        string lab[], val[];
+        d.stepN = ShellStepRows(g_shell.CfgTab(), lab, val);
+        for (int i = 0; i < d.stepN && i < 10; ++i) { d.stepLabel[i] = lab[i]; d.stepValue[i] = val[i]; }
+        string clab[], cval[];
+        d.casN = ShellCascadeRows(clab, cval);
+        for (int i = 0; i < d.casN && i < 5; ++i) { d.casLabel[i] = clab[i]; d.casValue[i] = cval[i]; }
+    }
     // --- clocks -------------------------------------------------------------
     d.clockSrv = TimeToString(TimeCurrent(), TIME_MINUTES);
     d.clockGmt = TimeToString(TimeGMT(),     TIME_MINUTES);
@@ -3426,9 +3435,150 @@ void ShellSyncLotEdit(const double lot, const int digits) {
     ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_shell.EditLineColor());
     ObjectSetString (0, id, OBJPROP_TEXT, DoubleToString(lot, digits));
 }
+//+------------------------------------------------------------------+
+//| v3.02 : the settings MODEL for the shell.                         |
+//|                                                                   |
+//| One table per sub-tab : label, current value, and the step. The    |
+//| shell only draws rows and reports "row N, +1/-1" ; every write     |
+//| lands on the SAME globals and the SAME GlobalVariables the legacy  |
+//| modal uses, so both UIs configure one product, not two.            |
+//+------------------------------------------------------------------+
+int ShellStepRows(const int tab, string &lab[], string &val[]) {
+    ArrayResize(lab, 10); ArrayResize(val, 10);
+    int n = 0;
+    if (tab == 0) {          // RISK
+        lab[n] = Tr("set_sl");   val[n] = DoubleToString(g_eff_sl_pct, 2) + " %";        n++;
+        lab[n] = Tr("set_tp");   val[n] = DoubleToString(g_eff_tp_pct, 2) + " %";        n++;
+        lab[n] = Tr("set_maxmargin");val[n] = DoubleToString(g_eff_max_margin_pt, 1) + " %"; n++;
+        lab[n] = Tr("set_maxrisk"); val[n] = DoubleToString(g_eff_max_risk_pt, 2) + " %";   n++;
+        lab[n] = Tr("set_maxparallel");val[n] = IntegerToString(g_max_parallel);              n++;
+        lab[n] = Tr("shl_split");   val[n] = (g_eff_split >= 0.0 ? DoubleToString(g_eff_split, 0) + " %" : "auto"); n++;
+    } else if (tab == 1) {   // DISCIPLINE
+        lab[n] = Tr("set_tiltn");   val[n] = IntegerToString(g_eff_tilt_n);                 n++;
+        lab[n] = Tr("set_tiltwin"); val[n] = IntegerToString(g_eff_tilt_win) + " min";      n++;
+        lab[n] = Tr("set_cooldownn");   val[n] = IntegerToString(g_eff_cooldown_n);             n++;
+        lab[n] = Tr("set_cooldownm");   val[n] = IntegerToString(g_eff_cooldown_m) + " min";    n++;
+        lab[n] = Tr("set_selflockh");val[n] = IntegerToString(g_eff_selflock_h) + " h";      n++;
+    } else if (tab == 2) {   // ADVANCED
+        lab[n] = Tr("set_comfortpct"); val[n] = DoubleToString(g_eff_comfort_pct, 0) + " %"; n++;
+        lab[n] = Tr("set_refreshms");  val[n] = IntegerToString(g_eff_refresh_ms) + " ms";   n++;
+        lab[n] = Tr("set_mcapviol");   val[n] = DoubleToString(g_eff_margin_cap_viol, 0) + " %"; n++;
+        lab[n] = Tr("set_rcapviol");   val[n] = DoubleToString(g_eff_risk_cap_viol, 2) + " %";   n++;
+    }
+    return n;                // tab 3 (display) is toggles only
+}
+// apply one stepper click. Same clamps as the modal ; persistence identical.
+void ShellApplyStep(const int tab, const int row, const int dir) {
+    const double d = (double)dir;
+    if (tab == 0) {
+        if (row == 0) { g_eff_sl_pct = MathMax(0.1, MathMin(10.0, MathRound((g_eff_sl_pct + d * 0.1) * 100.0) / 100.0));
+                        GlobalVariableSet("RC_sl_pct", g_eff_sl_pct); }
+        else if (row == 1) { g_eff_tp_pct = MathMax(0.1, MathMin(50.0, MathRound((g_eff_tp_pct + d * 0.1) * 100.0) / 100.0));
+                        GlobalVariableSet("RC_tp_pct", g_eff_tp_pct); }
+        else if (row == 2) { g_eff_max_margin_pt = MathMax(1.0, MathMin(100.0, g_eff_max_margin_pt + d));
+                        GlobalVariableSet("RC_mm_pt", g_eff_max_margin_pt); }
+        else if (row == 3) { g_eff_max_risk_pt = MathMax(0.1, MathMin(10.0, MathRound((g_eff_max_risk_pt + d * 0.1) * 100.0) / 100.0));
+                        GlobalVariableSet("RC_mr_pt", g_eff_max_risk_pt); }
+        else if (row == 4) { g_max_parallel = (int)MathMax(1.0, MathMin(50.0, (double)g_max_parallel + d));
+                        PersistMaxParallel(); }
+        else if (row == 5) { g_eff_split = (g_eff_split < 0.0 ? 80.0 : g_eff_split + d * 5.0);
+                        if (g_eff_split > 100.0) g_eff_split = 100.0;
+                        if (g_eff_split < 0.0)   g_eff_split = -1.0;      // back to the catalog value
+                        GVSetLogin("RC_split", g_eff_split); }
+    } else if (tab == 1) {
+        if (row == 0) { g_eff_tilt_n = (int)MathMax(0.0, MathMin(50.0, (double)g_eff_tilt_n + d));
+                        GlobalVariableSet("RC_tilt_n", (double)g_eff_tilt_n); }
+        else if (row == 1) { g_eff_tilt_win = (int)MathMax(5.0, MathMin(480.0, (double)g_eff_tilt_win + d * 5.0));
+                        GlobalVariableSet("RC_tilt_win", (double)g_eff_tilt_win); }
+        else if (row == 2) { g_eff_cooldown_n = (int)MathMax(0.0, MathMin(20.0, (double)g_eff_cooldown_n + d));
+                        GlobalVariableSet("RC_cool_n", (double)g_eff_cooldown_n); }
+        else if (row == 3) { g_eff_cooldown_m = (int)MathMax(0.0, MathMin(480.0, (double)g_eff_cooldown_m + d * 5.0));
+                        GlobalVariableSet("RC_cool_m", (double)g_eff_cooldown_m); }
+        else if (row == 4) { g_eff_selflock_h = (int)MathMax(1.0, MathMin(72.0, (double)g_eff_selflock_h + d));
+                        GlobalVariableSet("RC_selflock_h", (double)g_eff_selflock_h); }
+    } else if (tab == 2) {
+        if (row == 0) { g_eff_comfort_pct = MathMax(0.0, MathMin(90.0, g_eff_comfort_pct + d * 5.0));
+                        GlobalVariableSet("RC_comfort_pct", g_eff_comfort_pct); ApplyComfortScale(true); }
+        else if (row == 1) { g_eff_refresh_ms = (int)MathMax(100.0, MathMin(2000.0, (double)g_eff_refresh_ms + d * 100.0));
+                        GlobalVariableSet("RC_refresh_ms", (double)g_eff_refresh_ms);
+                        EventKillTimer(); EventSetMillisecondTimer(g_eff_refresh_ms); }
+        else if (row == 2) { g_eff_margin_cap_viol = MathMax(1.0, MathMin(100.0, g_eff_margin_cap_viol + d));
+                        GlobalVariableSet("RC_mcap_viol", g_eff_margin_cap_viol); }
+        else if (row == 3) { g_eff_risk_cap_viol = MathMax(0.1, MathMin(10.0, MathRound((g_eff_risk_cap_viol + d * 0.1) * 100.0) / 100.0));
+                        GlobalVariableSet("RC_rcap_viol", g_eff_risk_cap_viol); }
+    }
+}
+// the plan cascade, editable from the shell : broker -> type -> phase -> size
+// -> account type. Same snapping rules as the modal (a plan can never end up
+// with an illegal size or phase), then a full re-resolve of the profile.
+int ShellCascadeRows(string &lab[], string &val[]) {
+    ArrayResize(lab, 5); ArrayResize(val, 5);
+    lab[0] = Tr("set_broker_sel"); val[0] = VendorName(VendorOfPlan(EffectivePlan()));
+    lab[1] = Tr("set_type");       val[1] = g_catalog.ModelLabel(EffectivePlan());
+    lab[2] = Tr("set_phase");      val[2] = PhaseLabelLocal(g_eff_phase);
+    lab[3] = Tr("set_size");       val[3] = SizeLabel();
+    lab[4] = Tr("set_acct_type");  val[4] = (EffectivePlan() == FN_PLAN_PERSONAL
+                                             ? (g_eff_personal_demo == 1 ? "DEMO" : "REAL")
+                                             : (g_eff_acct_type == 1 ? "SWAP-FREE" : "SWAP"));
+    return 5;
+}
+void ShellApplyCascade(const int row, const int dir) {
+    if (row == 0) {                                   // BROKER : snap to its first plan
+        ENUM_FN_PLAN vp[];
+        int v = VendorOfPlan(EffectivePlan());
+        v = ((v + dir) % 6 + 6) % 6;
+        if (PlansForVendor(v, vp) > 0) {
+            g_active_plan_idx = (int)vp[0];
+            GVSetLogin("RC_plan_override", (double)g_active_plan_idx);
+            SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
+            SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
+        }
+    } else if (row == 1) {                            // TYPE : within the current broker
+        ENUM_FN_PLAN plans[];
+        const int np = PlansForVendor(VendorOfPlan(EffectivePlan()), plans);
+        int pidx = 0;
+        for (int i = 0; i < np; ++i) if ((int)plans[i] == (int)EffectivePlan()) { pidx = i; break; }
+        if (np > 0) {
+            pidx = ((pidx + dir) % np + np) % np;
+            g_active_plan_idx = (int)plans[pidx];
+            GVSetLogin("RC_plan_override", (double)g_active_plan_idx);
+            SnapSizeToPlan((ENUM_FN_PLAN)g_active_plan_idx);
+            SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
+        }
+    } else if (row == 2) {                            // PHASE
+        g_eff_phase = ((g_eff_phase + dir) % 4 + 4) % 4;
+        SnapPhaseToPlan(EffectivePlan());
+        GVSetLogin("RC_phase", (double)g_eff_phase);
+    } else if (row == 3) {                            // SIZE : only what the plan allows
+        double sizes[];
+        const int ns = ValidSizesForPlan(EffectivePlan(), sizes);
+        int sidx = 0;
+        for (int i = 0; i < ns; ++i)
+            if ((int)MathRound(g_eff_size) == (int)MathRound(sizes[i])) { sidx = i; break; }
+        if (ns > 0) {
+            sidx = ((sidx + dir) % ns + ns) % ns;
+            g_eff_size = sizes[sidx];
+            GVSetLogin("RC_size", g_eff_size);
+        }
+    } else if (row == 4) {                            // ACCOUNT TYPE (or Real/Demo on Personal)
+        if (EffectivePlan() == FN_PLAN_PERSONAL) {
+            g_eff_personal_demo = (g_eff_personal_demo == 0 ? 1 : 0);
+            GVSetLogin("RC_perso_demo", (double)g_eff_personal_demo);
+        } else {
+            g_eff_acct_type = (g_eff_acct_type == 0 ? 1 : 0);
+            GVSetLogin("RC_acct_type", (double)g_eff_acct_type);
+        }
+    }
+    ApplySettingsChange();      // re-resolve the profile : every limit follows
+}
 void ShellRefresh(void) {
     if (!InpShellV2) return;
     ShellApplyCfg(g_shell.PendCfgTake());  // consume a toggle click before rendering
+    {   // steppers + cascade : the shell asked, the host writes
+        int row = 0, dir = 0;
+        if (g_shell.PendStepTake(row, dir)) ShellApplyStep(g_shell.CfgTab(), row, dir);
+        if (g_shell.PendCasTake(row, dir))  ShellApplyCascade(row, dir);
+    }
     RCDeckData d;
     BuildDeckData(d);
     g_shell.SetData(d);

@@ -86,6 +86,28 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.02.13 — 2026-09-04 — settings steppers and the plan cascade
+
+The last thing the shell could not do that the legacy modal could: **change a setting**. Both are
+in now, and both write to the *same* globals and GlobalVariables the modal writes — one product,
+one configuration.
+
+- **SETTINGS**, four sub-tabs so the tunables fit without scrolling: *Risk* (SL %, TP %,
+  margin/trade, risk/trade, planned trades N, profit split), *Discipline* (tilt N, tilt window,
+  cooldown N, cooldown minutes, self-lock hours), *Advanced* (comfort %, refresh ms, post-violation
+  margin and risk caps), *Display* (the toggles, unchanged). Same clamps as the modal; the refresh
+  stepper re-arms the timer, the comfort stepper re-applies the padding.
+- **ACCOUNT**, the plan cascade is editable at the top of the section: broker → type → phase →
+  size → account type, each as a `< value >` cycler, with the modal's snapping rules (a plan can
+  never end up on an illegal size or phase) and a full profile re-resolve on every click.
+- The shell **asks**, the host **writes**: a click only records "row N, +1/-1"; every mutation and
+  every persistence call lives on the host side.
+- Sections carrying controls (settings, account) get a taller panel, the way StrategyDeck gives its
+  copilot more room.
+
+Static audit after the change: **0 orphan zones** (every drawn zone is handled), model fields all
+filled. Compiled `0 errors, 0 warnings`.
+
 ### v3.01.12 — 2026-09-04 — rule parity: the 7 legacy rows the shell was missing
 
 The legacy panel showed eleven rule rows; the shell showed four. The seven that were missing are

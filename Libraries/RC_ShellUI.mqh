@@ -127,6 +127,11 @@ struct RCDeckData {
    int    newsTrades;                   // trades opened inside a news window
    double newsPnl, newsEligible;        // their P&L and the eligible share
    double newsMeterPct;                 // news-window meter fill 0..100
+   // --- v3.02 : the host fills the CURRENT settings tab and the cascade ---
+   int    stepN;                        // rows in the active settings tab (0..10)
+   string stepLabel[10], stepValue[10];
+   int    casN;                         // plan cascade rows (broker/type/phase/size/type)
+   string casLabel[5], casValue[5];
 };
 
 //--- click-zone ids. Ranges used in arithmetic stay CONTIGUOUS ; new ids are
@@ -163,7 +168,15 @@ enum ERCZone {
    // --- floating positions table (appears as soon as a trade is open) ---
    RZ_FLT_GRIP, RZ_FLT_HIDE,
    RZ_FLT_ROW0, RZ_FLT_ROW1, RZ_FLT_ROW2, RZ_FLT_ROW3,
-   RZ_FLT_ROW4, RZ_FLT_ROW5, RZ_FLT_ROW6, RZ_FLT_ROW7
+   RZ_FLT_ROW4, RZ_FLT_ROW5, RZ_FLT_ROW6, RZ_FLT_ROW7,
+   // --- v3.02 : settings tabs + steppers + plan cascade -----------------
+   RZ_CFG_TAB0, RZ_CFG_TAB1, RZ_CFG_TAB2, RZ_CFG_TAB3,
+   RZ_STEP_DEC0, RZ_STEP_DEC1, RZ_STEP_DEC2, RZ_STEP_DEC3, RZ_STEP_DEC4,
+   RZ_STEP_DEC5, RZ_STEP_DEC6, RZ_STEP_DEC7, RZ_STEP_DEC8, RZ_STEP_DEC9,
+   RZ_STEP_INC0, RZ_STEP_INC1, RZ_STEP_INC2, RZ_STEP_INC3, RZ_STEP_INC4,
+   RZ_STEP_INC5, RZ_STEP_INC6, RZ_STEP_INC7, RZ_STEP_INC8, RZ_STEP_INC9,
+   RZ_CAS_PREV0, RZ_CAS_PREV1, RZ_CAS_PREV2, RZ_CAS_PREV3, RZ_CAS_PREV4,
+   RZ_CAS_NEXT0, RZ_CAS_NEXT1, RZ_CAS_NEXT2, RZ_CAS_NEXT3, RZ_CAS_NEXT4
 };
 //--- label slots : the shell ships FR defaults ; the host overrides them with
 //--- its own i18n (Tr) so one translation table serves the whole product.
@@ -186,7 +199,8 @@ enum ERCLabel {
    RCL_CPT_PLAN, RCL_CPT_PHASE, RCL_CPT_SIZE, RCL_CPT_TYPE, RCL_CPT_ADDONS,
    RCL_CPT_SPLIT, RCL_CPT_DAYS, RCL_LOT_COPY,
    RCL_LIM_QS, RCL_LOT_MAX, RCL_TARGET, RCL_MSGS, RCL_NEWSTRADES,
-   RCL_PAYOUT, RCL_HYPER, RCL_ELIG, RCL_TAG_MARG, RCL_TAG_ROOM, RCL_TAG_FREE
+   RCL_PAYOUT, RCL_HYPER, RCL_ELIG, RCL_TAG_MARG, RCL_TAG_ROOM, RCL_TAG_FREE,
+   RCL_CPT_PROFILE, RCL_TAB_RISK, RCL_TAB_DISC, RCL_TAB_ADV, RCL_TAB_DISP
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -200,6 +214,7 @@ struct RCZone { int x, y, w, h, id; };
 #define RCS_NAV_H       34
 #define RCS_SIDE_W     340
 #define RCS_SIDE_SECH  480
+#define RCS_SIDE_TALLH 620      // sections with controls (settings / account)
 #define RCS_SIDE_FULLH 740
 #define RCS_TIP_W      236
 #define RCS_TIP_H       44
@@ -247,6 +262,9 @@ private:
    int        m_zn;
    bool       m_pendKill;        // host consumes : remove the indicator
    int        m_pendCfg;         // host consumes : a config toggle was clicked (RZ_CFG_* id, 0 = none)
+   int        m_cfgTab;          // settings sub-tab : 0 risk, 1 discipline, 2 advanced, 3 display
+   int        m_pendStepRow, m_pendStepDir;   // host consumes : stepper row + direction
+   int        m_pendCas;         // host consumes : cascade row * 10 + (0 prev / 1 next), -1 = none
    string     m_L[RCS_L_MAX];    // i18n slots (empty = the built-in FR default is used)
    string     m_tipT[RCS_TIP_MAX], m_tipD[RCS_TIP_MAX];   // translated tooltips, indexed by zone id
    // dropdown menu (symbol / timeframe)
@@ -376,7 +394,11 @@ private:
       m_menuY = m_navY + RCS_NAV_H + 2;
       if(m_menuY + m_menuH > m_chH - 4) m_menuY = MathMax(0, m_chH - 4 - m_menuH);
       // deployed panel : anchored IN FRONT of its cell, clamped inside the chart
-      m_sideH = (m_state == 2 ? RCS_SIDE_FULLH : RCS_SIDE_SECH);
+      // the settings and account sections carry steppers / cyclers : they need
+      // more room than a reading section, exactly like StrategyDeck's copilot.
+      m_sideH = (m_state == 2 ? RCS_SIDE_FULLH
+                 : ((m_state == 1 && (m_sec == RZ_RAIL_CFG || m_sec == RZ_RAIL_CPT))
+                    ? RCS_SIDE_TALLH : RCS_SIDE_SECH));
       if(m_sideH > m_chH - 24) m_sideH = m_chH - 24;
       if(m_state == 2) m_sideY = (m_chH - m_sideH) / 2;
       else {
@@ -816,14 +838,46 @@ private:
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 20, zid);
       return y + 22;
    }
+   //--- [-] value [+] : the shell only ASKS, the host owns every setting -----
+   int Stepper(int y, const string k, const string v, const int row) {
+      m_side.Text(18, y + 3, k, A(m_t.text), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+      const int bw = 22, vx = RCS_SIDE_W - 18 - bw, dx = RCS_SIDE_W - 18 - bw - 66 - bw;
+      m_side.CapsuleStroke(dx, y, bw, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.08));
+      m_side.Text(dx + bw / 2, y + 3, "-", A(m_t.text), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      ZAdd(m_sideX + dx, m_sideY + y, bw, 20, RZ_STEP_DEC0 + row);
+      m_side.Text(dx + bw + 33, y + 3, v, A(m_t.accent), RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
+      m_side.CapsuleStroke(vx, y, bw, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.08));
+      m_side.Text(vx + bw / 2, y + 3, "+", A(m_t.text), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      ZAdd(m_sideX + vx, m_sideY + y, bw, 20, RZ_STEP_INC0 + row);
+      return y + 24;
+   }
+   //--- < value > : one step of the plan cascade ----------------------------
+   int Cycler(int y, const string k, const string v, const int row) {
+      m_side.Text(18, y + 3, k, A(m_t.text), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+      const int bw = 20, nx = RCS_SIDE_W - 18 - bw, px = 150;
+      m_side.CapsuleStroke(px, y, bw, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.08));
+      m_side.Text(px + bw / 2, y + 3, "<", A(m_t.text), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      ZAdd(m_sideX + px, m_sideY + y, bw, 20, RZ_CAS_PREV0 + row);
+      string vv = v;
+      if(StringLen(vv) > 14) vv = StringSubstr(vv, 0, 13) + "..";
+      m_side.Text((px + bw + nx) / 2, y + 3, vv, A(m_t.accent), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      m_side.CapsuleStroke(nx, y, bw, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.08));
+      m_side.Text(nx + bw / 2, y + 3, ">", A(m_t.text), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      ZAdd(m_sideX + nx, m_sideY + y, bw, 20, RZ_CAS_NEXT0 + row);
+      return y + 24;
+   }
+
    //--- COMPTE : the profile the whole risk model is resolved from ----------
    int SecAccount(int y) {
+      // v3.02 : the CASCADE is editable here - broker -> type -> phase -> size
+      // -> account type. Every limit in the product is resolved from it, so it
+      // sits at the TOP of the section and drives a full re-resolve on click.
+      SecHead(L(RCL_CPT_PROFILE, "PROFIL"), y);
+      for(int i = 0; i < m_d.casN && i < 5; i++)
+         y = Cycler(y, m_d.casLabel[i], m_d.casValue[i], i);
+      y += 6;
       SecHead(L(RCL_SEC_CPT, "COMPTE"), y);
-      y = KV(y, L(RCL_CPT_PLAN, "Plan"),   m_d.planLabel,     m_t.accent, RZ_TIP_CPT);
-      y = KV(y, L(RCL_CPT_PHASE, "Phase"), m_d.phaseLabel,    m_t.text);
-      y = KV(y, L(RCL_CPT_SIZE, "Taille"), m_d.sizeLabelFull, m_t.text);
-      y = KV(y, L(RCL_CPT_TYPE, "Type"),   m_d.acctTypeLabel, m_t.text);
-      y = KV(y, L(RCL_CPT_SPLIT, "Split"), IntegerToString(m_d.splitPct) + "%", m_t.text);
+      y = KV(y, L(RCL_CPT_SPLIT, "Split"), IntegerToString(m_d.splitPct) + "%", m_t.text, RZ_TIP_CPT);
       if(m_d.minDays > 0)
          y = KV(y, L(RCL_CPT_DAYS, "Jours mini"),
                 IntegerToString(m_d.minDaysDone) + " / " + IntegerToString(m_d.minDays),
@@ -856,7 +910,28 @@ private:
    }
    //--- REGLAGES : the toggles that matter day to day ----------------------
    int SecConfig(int y) {
-      SecHead(L(RCL_SEC_CFG, "REGLAGES"), y);
+      // v3.02 : four sub-tabs so the 18 tunables fit without scrolling. The
+      // shell only draws them : the host owns the keys, the steps and the
+      // persistence (the same ones the legacy modal writes).
+      {
+         const int tw = (RCS_SIDE_W - 36) / 4;
+         string tabs[4]; tabs[0] = L(RCL_TAB_RISK, "RISQUE"); tabs[1] = L(RCL_TAB_DISC, "DISCIPLINE");
+         tabs[2] = L(RCL_TAB_ADV, "AVANCE");  tabs[3] = L(RCL_TAB_DISP, "AFFICHAGE");
+         m_side.CapsuleStroke(18, y, RCS_SIDE_W - 36, 22, A(LineC()), Mix(m_t.surface, clrBlack, 0.06));
+         for(int t = 0; t < 4; t++) {
+            const bool on = (m_cfgTab == t);
+            if(on) m_side.CapsuleGradient(20 + t * tw, y + 2, tw - 4, 18, A(m_t.accent), A(m_t.accent2));
+            m_side.Text(20 + t * tw + tw / 2, y + 4, tabs[t],
+                        (on ? Mix(m_t.bg, clrBlack, 0.5) : A(m_t.dim)), RCS_F_SMALL, "Segoe UI",
+                        TA_CENTER | TA_TOP, FW_BOLD);
+            ZAdd(m_sideX + 20 + t * tw, m_sideY + y, tw - 4, 20, RZ_CFG_TAB0 + t);
+         }
+         y += 30;
+      }
+      for(int i = 0; i < m_d.stepN && i < 10; i++)
+         y = Stepper(y, m_d.stepLabel[i], m_d.stepValue[i], i);
+      if(m_cfgTab != 3) return y + 6;            // toggles live on the display tab
+      y += 4;
       y = KV(y, "Theme", m_t.name, m_t.accent, RZ_CFG_PAL);
       y = KV(y, "Mode", (m_themeIdx % 2 == 1 ? "clair" : "sombre"), m_t.text, RZ_CFG_MODE);
       y = KV(y, "Langue", (m_d.lang == 0 ? "EN" : (m_d.lang == 2 ? "ES" : "FR")), m_t.text, RZ_CFG_LANG);
@@ -1015,6 +1090,10 @@ private:
          case RZ_TIP_DISC_TILT:t = "Tilt";        d = "Trades dans la fenetre / seuil configure.";        return true;
          case RZ_BAND:         t = "Alerte";      d = "Etat bloquant : lis la ligne, agis, elle part.";   return true;
          case RZ_TIP_CPT:      t = "Profil";     d = "Le plan dont TOUTES les limites sont deduites.";   return true;
+         case RZ_CFG_TAB0:     t = "Risque";     d = "SL, TP, marge et risque par trade, trades prevus."; return true;
+         case RZ_CFG_TAB1:     t = "Discipline"; d = "Tilt, cooldown, duree du self-lock.";              return true;
+         case RZ_CFG_TAB2:     t = "Avance";     d = "Confort, rafraichissement, caps apres violation."; return true;
+         case RZ_CFG_TAB3:     t = "Affichage";  d = "Theme, langue, news, alertes.";                    return true;
          case RZ_TIP_HELP:     t = "Version";    d = "Build en cours + source des news active.";         return true;
          case RZ_CFG_PAL:      t = "Palette";    d = "Emeraude / Indigo / Ardoise.";                     return true;
          case RZ_CFG_MODE:     t = "Mode";       d = "Sombre / clair.";                                  return true;
@@ -1254,7 +1333,10 @@ public:
       m_lotEditOn = false; m_lotEditX = 0; m_lotEditY = 0; m_lotEditW = 0; m_lotEditH = 0;
       m_fltX = 0; m_fltY = 0; m_fltW = RCS_FLT_W; m_fltH = RCS_FLT_HEAD + 40;
       m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
-      m_pendCfg = 0;
+      m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
+      m_d.stepN = 0; m_d.casN = 0;
+      for(int si = 0; si < 10; si++) { m_d.stepLabel[si] = ""; m_d.stepValue[si] = ""; }
+      for(int ci = 0; ci < 5; ci++)  { m_d.casLabel[ci] = "";  m_d.casValue[ci] = ""; }
       m_menuOpen = false; m_menuMode = 0; m_menuX = 0; m_menuY = 0; m_menuH = 40; m_menuN = 0;
       for(int mi = 0; mi < 12; mi++) m_menuItem[mi] = "";
       for(int li = 0; li < RCS_L_MAX; li++) m_L[li] = "";
@@ -1274,6 +1356,17 @@ public:
    void SetTipDelay(const int ms) { m_tipDelayMs = (ms < 0 ? 0 : (ms > 5000 ? 5000 : ms)); }
    bool PendKillTake(void) { const bool r = m_pendKill; m_pendKill = false; return r; }
    int  PendCfgTake(void)  { const int  r = m_pendCfg;  m_pendCfg  = 0;     return r; }
+   int  CfgTab(void) const { return m_cfgTab; }
+   //--- a stepper was clicked : row + direction (-1 / +1). false = nothing.
+   bool PendStepTake(int &row, int &dir) {
+      if(m_pendStepRow < 0) return false;
+      row = m_pendStepRow; dir = m_pendStepDir; m_pendStepRow = -1; return true;
+   }
+   //--- a cascade cycler was clicked : row + direction. false = nothing.
+   bool PendCasTake(int &row, int &dir) {
+      if(m_pendCas < 0) return false;
+      row = m_pendCas / 10; dir = ((m_pendCas % 10) == 1 ? 1 : -1); m_pendCas = -1; return true;
+   }
    //--- i18n : slot ids are ERCLabel ; empty string = keep the FR default ---
    void SetLabel(const int id, const string s) { if(id >= 0 && id < RCS_L_MAX) m_L[id] = s; }
    //--- translated tooltip for a zone id ("title|description" packed by the host)
@@ -1432,6 +1525,21 @@ public:
       if(hit >= RZ_POS_ROW0 && hit <= RZ_BAND) return true;   // info rows + safety band
       if(hit == RZ_TIP_CPT || hit == RZ_TIP_HELP) return true;
       if(hit == RZ_LOT_EDIT) return true;      // native edit sits here : NEVER collapse the section
+      if(hit >= RZ_CFG_TAB0 && hit <= RZ_CFG_TAB3) {          // settings sub-tab
+         m_cfgTab = hit - RZ_CFG_TAB0; RenderAll(); return true;
+      }
+      if(hit >= RZ_STEP_DEC0 && hit <= RZ_STEP_DEC9) {        // stepper : the HOST applies
+         m_pendStepRow = hit - RZ_STEP_DEC0; m_pendStepDir = -1; return true;
+      }
+      if(hit >= RZ_STEP_INC0 && hit <= RZ_STEP_INC9) {
+         m_pendStepRow = hit - RZ_STEP_INC0; m_pendStepDir = 1;  return true;
+      }
+      if(hit >= RZ_CAS_PREV0 && hit <= RZ_CAS_PREV4) {        // cascade : the HOST re-resolves
+         m_pendCas = (hit - RZ_CAS_PREV0) * 10 + 0; return true;
+      }
+      if(hit >= RZ_CAS_NEXT0 && hit <= RZ_CAS_NEXT4) {
+         m_pendCas = (hit - RZ_CAS_NEXT0) * 10 + 1; return true;
+      }
       if(hit >= RZ_FLT_ROW0 && hit <= RZ_FLT_ROW7) return true;   // position rows : read-only
       if(hit == RZ_FLT_HIDE) { m_fltHidden = true; OnChartChange(); return true; }
       if(hit == RZ_FLT_GRIP) return true;      // the drag itself runs on mouse-move
