@@ -86,6 +86,34 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.14.26 - trois réglages qui ne faisaient plus rien, et des infobulles muettes
+
+**Réglages morts** (un réglage qui n'agit pas est un bug vu du siège de
+l'utilisateur — même famille que `InpAnchorX` retiré avec l'ancien panneau) :
+
+- **`InpEnablePyramidSafe` — régression de ma part** : en v3.06 j'ai ramené le
+  conseiller pyramide dans le shell **sans redemander si l'utilisateur l'avait
+  activé**. Il s'affichait donc même désactivé. L'interrupteur est réhonoré.
+- **`InpSoundOK`** : le fichier son « retour à OK » était réglable et n'a
+  **jamais** été joué — `TryFireSoundAlert` ne connaissait que WARN et RED. Il
+  sonne maintenant quand une règle repasse sous sa limite (jamais au démarrage :
+  l'armement des alertes garde sa temporisation).
+- **`InpRowHeight`** : géométrie d'un panneau qui n'existe plus → retiré.
+  Audit : **45 inputs, 0 mort.**
+
+**Infobulles de famille muettes** : `SetTip` est indexé par zone, donc une aide
+poussée sur le premier membre (`tip_posrow` sur `RZ_POS_ROW0`) laissait les
+rangs 1..7 **silencieux** — survoler la 1re position expliquait, survoler la 2e
+n'affichait rien. `TipText` normalise désormais les familles (positions,
+lignes flottantes, boutons CLOSE) sur leur premier membre. Cinq zones qui
+n'avaient **aucune** aide en ont une (champ de copie du lot, poignée de
+déplacement, croix de masquage, objectif de payout, msgs serveur).
+
+Restent sans aide **60 zones qui n'en ont pas besoin** : items de menu (le nom
+*est* l'aide), `+`/`−` des steppers et des cyclers, add-ons nommés en clair.
+
+Le service compagnon `RCNewsFeeder` a été recompilé au passage : `0 errors`.
+
 ### v3.13.25 - ménage post-purge, et un trou i18n que le rituel a débusqué
 
 Nettoyage de ce que la suppression de l'ancien shell avait laissé derrière :

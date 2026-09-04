@@ -1224,11 +1224,18 @@ private:
    bool TipText(const int id, string &t, string &d) const {
       // i18n first : the host pushes translated bubbles through SetTip() ; the FR
       // defaults below are the fallback (and the reference wording).
-      if(id >= 0 && id < RCS_TIP_MAX && StringLen(m_tipT[id]) > 0) {
-         t = m_tipT[id]; d = m_tipD[id];
+      // a family shares ONE tooltip, pushed on its first member : rows 1..n
+      // used to hover silent while row 0 explained itself.
+      int q = id;
+      if(q >= RZ_POS_ROW0  && q <= RZ_POS_ROW7)  q = RZ_POS_ROW0;
+      if(q >= RZ_FLT_ROW0  && q <= RZ_FLT_ROW7)  q = RZ_FLT_ROW0;
+      if(q >= RZ_FLT_CLOSE0 && q <= RZ_FLT_CLOSE7) q = RZ_FLT_CLOSE0;
+      if(q >= 0 && q < RCS_TIP_MAX && StringLen(m_tipT[q]) > 0) {
+         t = m_tipT[q]; d = m_tipD[q];
          return true;
       }
-      switch(id) {
+
+      switch(q) {
          case RZ_RAIL_LIM:   t = "Limits";      d = "Use of the nearest limit. Marker = 80%."; return true;
          case RZ_RAIL_POS:   t = "Positions";    d = "Open positions + worst row status.";       return true;
          case RZ_RAIL_LOT:   t = "Advised lot";d = "Lot advisor. Amber = capped at 80%, red = 0.";    return true;
@@ -1275,6 +1282,11 @@ private:
          case RZ_CFG_RVIOL:    t = "Risk violation"; d = "Tightened risk cap after a violation.";  return true;
          case RZ_CFG_BE:       t = "Break-even";  d = "Draws the basket break-even line.";           return true;
          case RZ_MAXLOT_EDIT:  t = "Max lot";     d = "Select it then Ctrl+C to paste it.";           return true;
+         case RZ_LOT_EDIT:     t = "Advised lot";  d = "Select it then Ctrl+C to paste it.";  return true;
+         case RZ_FLT_GRIP:     t = "Move";         d = "Drag the header ; the chart stays put.";  return true;
+         case RZ_FLT_HIDE:     t = "Hide";         d = "Hides the table ; the POS rail cell brings it back."; return true;
+         case RZ_TIP_TARGET:   t = "Target";       d = "Progress toward the payout / profit threshold."; return true;
+         case RZ_TIP_MSGS:     t = "Server msgs";  d = "Orders sent today / the plan's daily cap."; return true;
          case RZ_TIP_HELP:     t = "Version";    d = "Current build + active news source.";         return true;
          case RZ_CFG_PAL:      t = "Palette";    d = "Emerald / Indigo / Slate.";                     return true;
          case RZ_CFG_MODE:     t = "Mode";       d = "Dark / light.";                                  return true;
@@ -1646,6 +1658,11 @@ public:
    int ZidBand(void) const { return RZ_BAND; }
    int ZidPosRow(void) const { return RZ_POS_ROW0; }
    int ZidFltClose(void) const { return RZ_FLT_CLOSE0; }
+   int ZidLotEdit(void) const { return RZ_LOT_EDIT; }
+   int ZidFltGrip(void) const { return RZ_FLT_GRIP; }
+   int ZidFltHide(void) const { return RZ_FLT_HIDE; }
+   int ZidTarget(void)  const { return RZ_TIP_TARGET; }
+   int ZidMsgs(void)    const { return RZ_TIP_MSGS; }
    int ZidFltQuick(const int i) const {
       return (i == 0 ? RZ_FLT_QLIM : (i == 1 ? RZ_FLT_QLOT : RZ_FLT_QNEWS));
    }

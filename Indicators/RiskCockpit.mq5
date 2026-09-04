@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.13"
+#property version "3.14"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -175,7 +175,6 @@ input ENUM_RC_THEME InpTheme                 = RC_THEME_GLASS_DARK; // Panel mod
 input ENUM_RC_PALETTE InpPalette             = RC_PAL_EMERALD;      // Brand palette (Emeraude / Indigo / Ardoise) - v2.02
 input ENUM_RC_LANG  InpLang                  = RC_LANG_EN;          // UI language (EN / FR / ES)
 input int           InpShellTipMs            = 600;                 // v3 SHELL : hover delay before a tooltip shows (ms)
-input int           InpRowHeight             = 22;                  // Panel row height (px)
 input int           InpRefreshMs             = 500;                 // Panel refresh interval (ms)
 input bool          InpComfortScale          = true;                // Keep padding above/below candles (never glued)
 input double        InpComfortMarginPct      = 15.0;                // Comfort padding (% of visible range, top & bottom)
@@ -1435,7 +1434,7 @@ void BuildDeckData(RCDeckData &d) {
     d.tradesToday = Live_TradesToday();
     d.tradesCap   = g_profile.hyperactivity_trades_per_day;
     d.posWorst    = (d.posCount <= 0 ? 3 : (d.posNoSl ? 2 : (d.slGuard ? 1 : 0)));
-    d.pyrOn       = BuildPyramidLine(d.pyrText, d.pyrStat);
+    d.pyrOn       = (InpEnablePyramidSafe && BuildPyramidLine(d.pyrText, d.pyrStat));
     // v3.06 : week-end hold. The legacy clock blinked it AND fired the alert ;
     // the shell had neither. The alert keeps its own once-per-window latch.
     d.weekendHold = IsWeekendHoldRisk();
@@ -1789,6 +1788,11 @@ void ShellPushLabels(void) {
     g_shell.SetTip(g_shell.ZidBand(),    Tr("tip_band"));
     g_shell.SetTip(g_shell.ZidPosRow(),  Tr("tip_posrow"));
     g_shell.SetTip(g_shell.ZidFltClose(), Tr("tip_fltclose"));
+    g_shell.SetTip(g_shell.ZidLotEdit(),  Tr("tip_lotedit"));
+    g_shell.SetTip(g_shell.ZidFltGrip(),  Tr("tip_fltgrip"));
+    g_shell.SetTip(g_shell.ZidFltHide(),  Tr("tip_flthide"));
+    g_shell.SetTip(g_shell.ZidTarget(),   Tr("tip_target"));
+    g_shell.SetTip(g_shell.ZidMsgs(),     Tr("tip_msgs"));
     for (int i = 0; i < 3; ++i) g_shell.SetTip(g_shell.ZidFltQuick(i),
         Tr("tipq_" + IntegerToString(i)));
     g_shell.SetTip(g_shell.ZidCptTip(),  Tr("tip_cpt"));
@@ -3506,6 +3510,9 @@ void TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status) {
             PlaySound(InpSoundWarn);
         if (new_status == RC_STATUS_RED)
             PlaySound(InpSoundRed);
+        // back under the limit : the setting existed but nothing ever played it
+        if (new_status == RC_STATUS_OK && (prev == RC_STATUS_WARN || prev == RC_STATUS_RED))
+            PlaySound(InpSoundOK);
     }
 
     // --- Telegram (remote, rate-limited per rule) ---
@@ -5164,6 +5171,26 @@ void InitI18n(void) {
     AddTr("tip_posrow", "Position|Symbol, side, volume, P&L, age, stop present.",
                         "Position|Symbole, sens, volume, P&L, âge, présence de SL.",
                         "Posición|Símbolo, sentido, volumen, P&L, edad, SL.");
+    AddTr("tip_lotedit",
+        "Advised lot|Select it then Ctrl+C to paste it into the ticket.",
+        "Lot conseillé|Sélectionne puis Ctrl+C pour le coller dans l'ordre.",
+        "Lote aconsejado|Selecciona y Ctrl+C para pegarlo en la orden.");
+    AddTr("tip_fltgrip",
+        "Move|Drag the header ; the chart stays put.",
+        "Déplacer|Glisse l'en-tête ; le graphique ne bouge pas.",
+        "Mover|Arrastra la cabecera ; el gráfico no se mueve.");
+    AddTr("tip_flthide",
+        "Hide|Hides the table ; the POS rail cell brings it back.",
+        "Masquer|Masque le tableau ; la cellule POS du rail le ramène.",
+        "Ocultar|Oculta la tabla ; la celda POS del carril la devuelve.");
+    AddTr("tip_target",
+        "Target|Progress toward the payout / profit threshold.",
+        "Objectif|Progression vers le seuil de payout / profit.",
+        "Objetivo|Progreso hacia el umbral de pago / beneficio.");
+    AddTr("tip_msgs",
+        "Server msgs|Orders sent today / the plan's daily cap.",
+        "Msgs serveur|Ordres envoyés aujourd'hui / plafond du plan.",
+        "Msgs servidor|Órdenes enviadas hoy / tope diario del plan.");
     AddTr("tip_fltclose",
         "Closing|Disabled : an indicator cannot send orders. Closing lives in the EA version.",
         "Fermeture|Désactivé : un indicateur ne passe pas d'ordre. La fermeture est dans la version EA.",
