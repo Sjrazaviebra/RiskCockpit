@@ -86,6 +86,29 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.15.27 - un numéro de compte MT5 traînait dans le dépôt PUBLIC
+
+Contrôle déclenché par l'ajout du `.ex5` au dépôt en v3.13 : un binaire est
+décompilable, donc il fallait savoir ce qu'il embarque. Scan des sources **et**
+du binaire (ASCII + UTF-16), avec contrôle positif préalable — sans lui, un
+verdict « propre » ne vaut rien.
+
+- **Trouvé** : `// (login 11986032, Instant 2K) : peak 2003.28 -> floor
+  1883.28` — un **numéro de compte MT5 en clair**, avec la taille du compte et
+  son equity, dans un commentaire du dépôt public. Le mandat l'interdit
+  explicitement. Retiré ; l'information utile (l'oracle de calcul du plancher)
+  reste, l'identifiant part.
+- **Rien dans le `.ex5`** : les commentaires ne sont pas compilés, et le scan
+  binaire ne remonte aucun jeton, chemin local, e-mail ni identifiant.
+- Les 12 autres nombres à 8 chiffres sont des **numéros d'articles
+  `help.fundednext.com`** cités en source des règles — pas des secrets.
+
+⚠️ **L'historique git contient toujours ce numéro** (commits antérieurs). Le
+retirer demanderait une réécriture d'historique + `push --force` sur un dépôt
+public, ce qui casse les clones existants : **décision de JR, pas la mienne.**
+Portée réelle : un login MT5 seul n'ouvre aucun accès (il faut le mot de passe
+et le serveur), mais il identifie un compte prop et n'a rien à faire là.
+
 ### v3.14.26 - trois réglages qui ne faisaient plus rien, et des infobulles muettes
 
 **Réglages morts** (un réglage qui n'agit pas est un bug vu du siège de

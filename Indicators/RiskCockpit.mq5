@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.14"
+#property version "3.15"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -2587,7 +2587,7 @@ double Live_OverallDdPct(void) {
         // on 2K - NOT 6% of a growing peak) ; floor = (realized balance high) -
         // permitted, CAPPED at the initial balance (breakeven lock) ; breach when
         // EQUITY crosses the floor ; losses never lower the floor. Live oracle
-        // (login 11986032, Instant 2K) : peak 2003.28 -> floor 1883.28, permitted 120.
+        // (a live Instant 2K account) : peak 2003.28 -> floor 1883.28, permitted 120.
         const double init = g_profile.initial_balance;
         if (init <= 0.0)
             return 0.0;
