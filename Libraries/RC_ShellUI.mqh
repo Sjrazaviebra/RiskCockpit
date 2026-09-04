@@ -176,7 +176,10 @@ enum ERCZone {
    // --- floating positions table (appears as soon as a trade is open) ---
    RZ_FLT_GRIP, RZ_FLT_HIDE,
    RZ_FLT_ROW0, RZ_FLT_ROW1, RZ_FLT_ROW2, RZ_FLT_ROW3,
-   RZ_FLT_ROW4, RZ_FLT_ROW5, RZ_FLT_ROW6, RZ_FLT_ROW7,
+   RZ_FLT_ROW4, RZ_FLT_ROW5, RZ_FLT_ROW6, RZ_FLT_ROW7,
+   RZ_FLT_CLOSE0, RZ_FLT_CLOSE1, RZ_FLT_CLOSE2, RZ_FLT_CLOSE3,
+   RZ_FLT_CLOSE4, RZ_FLT_CLOSE5, RZ_FLT_CLOSE6, RZ_FLT_CLOSE7,
+   RZ_FLT_QLIM, RZ_FLT_QLOT, RZ_FLT_QNEWS,
    // --- v3.02 : settings tabs + steppers + plan cascade -----------------
    RZ_CFG_TAB0, RZ_CFG_TAB1, RZ_CFG_TAB2, RZ_CFG_TAB3,
    RZ_STEP_DEC0, RZ_STEP_DEC1, RZ_STEP_DEC2, RZ_STEP_DEC3, RZ_STEP_DEC4,
@@ -217,7 +220,7 @@ enum ERCLabel {
    RCL_PAYOUT, RCL_HYPER, RCL_ELIG, RCL_TAG_MARG, RCL_TAG_ROOM, RCL_TAG_FREE,
    RCL_CPT_PROFILE, RCL_TAB_RISK, RCL_TAB_DISC, RCL_TAB_ADV, RCL_TAB_DISP,
    RCL_CYCLE, RCL_YEAR, RCL_MONTH, RCL_DAY, RCL_DISC_VIOL, RCL_VIOL_M, RCL_VIOL_R,
-   RCL_LOCK_ARM, RCL_LOCK_ASK, RCL_LOCK_ON, RCL_BE
+   RCL_LOCK_ARM, RCL_LOCK_ASK, RCL_LOCK_ON, RCL_BE, RCL_CLOSE_EA
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -239,7 +242,8 @@ struct RCZone { int x, y, w, h, id; };
 #define RCS_BAND_H      26      // full-width blocking banner (hard lock / SL guard / tilt)
 #define RCS_FLT_W      256      // floating positions table (shown while trades are open)
 #define RCS_FLT_HEAD    24
-#define RCS_FLT_ROW     30
+#define RCS_FLT_ROW     30
+#define RCS_FLT_QUICK   28      // quick-access strip (room / lot / news)
 
 //--- font scale (POINTS) ----------------------------------------------------
 #define RCS_F_TITLE 10
@@ -272,7 +276,8 @@ private:
    int        m_lotEditX, m_lotEditY, m_lotEditW, m_lotEditH;
    // floating positions table : draggable, position persisted by the host
    int        m_fltX, m_fltY, m_fltW, m_fltH;
-   bool       m_fltOn, m_fltHidden, m_drag;
+   bool       m_fltOn, m_fltHidden, m_drag;
+   bool       m_closeNotice;     // a disabled CLOSE was clicked : highlight the EA line
    int        m_dragOffX, m_dragOffY;
    int        m_sideX, m_sideY, m_sideH;
    RCZone     m_z[96];
@@ -399,11 +404,10 @@ private:
       // the navbar slides UNDER it (the alert is never the thing that gets hidden).
       m_bandOn = (m_d.discLocked || m_d.slGuard || m_d.discTilt);
       m_navY   = (m_bandOn ? RCS_BAND_H + 2 : 0);
-      // floating positions table : sized on the rows it holds, clamped in-chart
-      const int fltRows = (m_d.posN > 8 ? 8 : m_d.posN);
-      m_fltOn = (!m_fltHidden && m_d.posCount > 0 && fltRows > 0);
+      // floating positions table : always on (v3.05), sized on the rows it holds
+      m_fltOn = !m_fltHidden;                            // v3.05 : always there, even flat
       m_fltW  = RCS_FLT_W;
-      m_fltH  = RCS_FLT_HEAD + 6 + fltRows * RCS_FLT_ROW + (m_d.posCount > m_d.posN ? 16 : 0) + 6;
+      m_fltH  = FloatWantH();
       if(m_fltX <= 0 && m_fltY <= 0) { m_fltX = 12; m_fltY = m_navY + RCS_NAV_H + 12; }   // first run
       if(m_fltX > m_chW - m_fltW) m_fltX = m_chW - m_fltW;
       if(m_fltX < 0) m_fltX = 0;
@@ -1288,14 +1292,15 @@ private:
    }
 
    //================= FLOATING POSITIONS TABLE ==============================
-   //--- Appears BY ITSELF as soon as a trade is open and disappears when the
-   //--- last one closes : while you hold something, the numbers that decide
-   //--- what you do next must be on screen without opening anything. Draggable
-   //--- by its header, clamped inside the chart, hideable for the session.
+   //--- ALWAYS on screen (JR, v3.05) : flat, it still carries the three numbers
+   //--- that decide the next click - room to the limit, advised lot, next news.
+   //--- With trades open it lists them. Draggable by its header (the chart does
+   //--- NOT pan underneath), clamped inside the chart, hideable via the cross
+   //--- and brought back by the POS rail cell.
    void RenderFloat(void) {
       if(!m_float.Ready()) return;
       m_float.Begin();
-      if(!m_fltOn) { m_float.Commit(); return; }         // no trade open = invisible
+      if(!m_fltOn) { m_float.Commit(); return; }         // hidden by the user
       const int W = m_fltW, H = m_fltH;
       m_float.SoftShadow(4, 4, W - 8, H - 8, 12, clrBlack, 6, 75);
       m_float.Card(0, 0, W, H, 12, MixC(m_t.surface, clrWhite, 0.05), m_t.surface, LineC());
@@ -1304,15 +1309,46 @@ private:
                             Mix(m_t.surface, m_t.accent, 0.16), Mix(m_t.surface, clrBlack, 0.05));
       m_float.Text(12, 5, ShortToString((ushort)0x2261), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       m_float.Text(28, 5, IntegerToString(m_d.posCount) + " " + L(RCL_SEC_POS, "POSITIONS"),
-                   A(m_t.accent), RCS_F_LABEL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
+                   A(m_d.posCount > 0 ? m_t.accent : m_t.dim), RCS_F_LABEL, "Segoe UI",
+                   TA_LEFT | TA_TOP, FW_BOLD);
       const color tc = (m_d.posPnl >= 0.0 ? m_t.ok : m_t.red);
       m_float.Text(W - 30, 5, (m_d.posPnl >= 0.0 ? "+" : "") + DoubleToString(m_d.posPnl, 2),
                    A(tc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, FW_BOLD);
       m_float.Text(W - 13, 4, ShortToString((ushort)0x00D7), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP);
       ZAdd(m_fltX, m_fltY, W - 24, RCS_FLT_HEAD, RZ_FLT_GRIP);      // drag surface
       ZAdd(m_fltX + W - 24, m_fltY, 24, RCS_FLT_HEAD, RZ_FLT_HIDE);
+      // QUICK ACCESS (JR) : the three numbers worth a glance without opening
+      // anything - room to the nearest limit, advised lot, next binding news.
+      {
+         const int qy = RCS_FLT_HEAD + 3, cw = (W - 16) / 3;
+         const color rc2 = (m_d.limRatio >= 1.0 ? m_t.red : (m_d.limRatio >= 0.80 ? m_t.warn : m_t.ok));
+         m_float.Text(8 + cw / 2, qy, L(RCL_ROOM, "MARGE"), A(m_t.dim), RCS_F_SMALL,
+                      "Segoe UI", TA_CENTER | TA_TOP);
+         m_float.Text(8 + cw / 2, qy + 11,
+                      (m_d.roomMoney >= 0.0 ? DoubleToString(m_d.roomMoney, 0) + " $" : "--"),
+                      A(rc2), RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
+         m_float.Text(8 + cw + cw / 2, qy, "LOT", A(m_t.dim), RCS_F_SMALL,
+                      "Segoe UI", TA_CENTER | TA_TOP);
+         m_float.Text(8 + cw + cw / 2, qy + 11,
+                      (m_d.sugLot > 0.0 ? DoubleToString(m_d.sugLot, m_d.lotDigits) : "--"),
+                      A(m_d.lotZero ? m_t.red : (m_d.lotCapped ? m_t.warn : m_t.accent)),
+                      RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
+         m_float.Text(8 + 2 * cw + cw / 2, qy, "NEWS", A(m_t.dim), RCS_F_SMALL,
+                      "Segoe UI", TA_CENTER | TA_TOP);
+         m_float.Text(8 + 2 * cw + cw / 2, qy + 11,
+                      (m_d.newsHasEvt ? (m_d.newsActive ? "ON" : IntegerToString(m_d.newsMins) + "m") : "--"),
+                      A(m_d.newsHasEvt ? (m_d.newsHigh ? m_t.red : m_t.warn) : m_t.dim),
+                      RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
+         m_float.Hairline(8, RCS_FLT_HEAD + RCS_FLT_QUICK - 3, W - 8, LineC());
+         ZAdd(m_fltX + 8, m_fltY + RCS_FLT_HEAD, cw, RCS_FLT_QUICK - 4, RZ_FLT_QLIM);
+         ZAdd(m_fltX + 8 + cw, m_fltY + RCS_FLT_HEAD, cw, RCS_FLT_QUICK - 4, RZ_FLT_QLOT);
+         ZAdd(m_fltX + 8 + 2 * cw, m_fltY + RCS_FLT_HEAD, cw, RCS_FLT_QUICK - 4, RZ_FLT_QNEWS);
+      }
       // rows : symbol / side / volume, then P&L, age and the SL flag
-      int y = RCS_FLT_HEAD + 6;
+      int y = RCS_FLT_HEAD + RCS_FLT_QUICK + 2;
+      if(m_d.posN <= 0)                                    // flat : say so, keep the frame
+         m_float.Text(W / 2, y + 2, L(RCL_POS_NONE, "Aucune position ouverte"),
+                      A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
       for(int i = 0; i < m_d.posN && i < 8; i++) {
          const color st = StatC(m_d.posStat[i]);
          m_float.Capsule(10, y + 5, 5, 5, A(st));
@@ -1325,12 +1361,24 @@ private:
          string sub = IntegerToString(m_d.posAge[i] / 60) + " min";
          if(!m_d.posHasSl[i]) sub += "   " + L(RCL_NOSL, "SANS SL");
          m_float.Text(22, y, sub, A(m_d.posHasSl[i] ? m_t.dim : m_t.red), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
-         ZAdd(m_fltX + 8, m_fltY + y - 14, W - 16, RCS_FLT_ROW - 4, RZ_FLT_ROW0 + i);
+         // CLOSE, drawn DISABLED (JR) : an indicator cannot send an order, and
+         // this product never will. The button says where closing lives - it is
+         // wired to a message, never to a trade call.
+         m_float.CapsuleStroke(W - 60, y - 3, 48, 15, Mix(m_t.surface, m_t.dim, 0.22),
+                               Mix(m_t.surface, clrBlack, 0.12));
+         m_float.Text(W - 36, y - 2, "CLOSE " + ShortToString((ushort)0x00D7), A(m_t.dim),
+                      RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
+         ZAdd(m_fltX + W - 60, m_fltY + y - 3, 48, 15, RZ_FLT_CLOSE0 + i);
+         ZAdd(m_fltX + 8, m_fltY + y - 14, W - 70, RCS_FLT_ROW - 4, RZ_FLT_ROW0 + i);
          y += 16;
       }
       if(m_d.posCount > m_d.posN)
          m_float.Text(12, y, "+" + IntegerToString(m_d.posCount - m_d.posN) + " " + L(RCL_POS_MORE, "autres"),
                       A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+      m_float.Hairline(8, H - 19, W - 8, LineC());
+      m_float.Text(W / 2, H - 16, L(RCL_CLOSE_EA, "Fermeture : version EA"),
+                   A(m_closeNotice ? m_t.warn : m_t.dim), RCS_F_SMALL, "Segoe UI",
+                   TA_CENTER | TA_TOP, (m_closeNotice ? FW_BOLD : 0));
       m_float.Commit();
    }
 
@@ -1417,7 +1465,8 @@ public:
       m_navY = 0; m_bandOn = false;
       m_lotEditOn = false; m_lotEditX = 0; m_lotEditY = 0; m_lotEditW = 0; m_lotEditH = 0;
       m_fltX = 0; m_fltY = 0; m_fltW = RCS_FLT_W; m_fltH = RCS_FLT_HEAD + 40;
-      m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
+      m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
+      m_closeNotice = false;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
       m_maxEditOn = false; m_maxEditX = 0; m_maxEditY = 0;
@@ -1490,6 +1539,10 @@ public:
    int ZidDiscTip(const int i) const { return RZ_TIP_DISC_LOCK + i; } // 0..2
    int ZidBand(void) const { return RZ_BAND; }
    int ZidPosRow(void) const { return RZ_POS_ROW0; }
+   int ZidFltClose(void) const { return RZ_FLT_CLOSE0; }
+   int ZidFltQuick(const int i) const {
+      return (i == 0 ? RZ_FLT_QLIM : (i == 1 ? RZ_FLT_QLOT : RZ_FLT_QNEWS));
+   }
    int ZidCfg(const int i)   const { return RZ_CFG_PAL + i; }         // 0..9
    int ZidCptTip(void) const { return RZ_TIP_CPT; }
    int ZidHelpTip(void) const { return RZ_TIP_HELP; }
@@ -1553,6 +1606,9 @@ public:
       // or disappears, otherwise the navbar would sit under it.
       const bool wantBand = (m_d.discLocked || m_d.slGuard || m_d.discTilt);
       if(wantBand != m_bandOn) { OnChartChange(); return; }
+      // a position opened or closed : the floating table changes SIZE, and a
+      // bitmap cannot grow in place - re-create the surfaces before drawing.
+      if(m_fltOn && FloatWantH() != m_fltH) { OnChartChange(); return; }
       ZReset();
       RenderNavbar(); RenderRail(); RenderSide(); RenderFloat(); RenderMenu(); RenderBand(); RenderTip();
       TipPendCheck();                                      // idle cursor : the 1 Hz tick promotes it
@@ -1566,6 +1622,18 @@ public:
       m_float.Destroy(); m_menu.Destroy(); m_band.Destroy(); m_tip.Destroy();
       CreateSurfaces();
       RenderAll();
+   }
+
+   //--- the height the floating table WANTS for the current data. ReadChart
+   //--- sizes the canvas with it and Tick re-creates the surface when it moves :
+   //--- the geometry used to be frozen at ReadChart time, so a position opened
+   //--- after the last layout was drawn outside the bitmap - invisible. That was
+   //--- the "the table bugs and disappears" defect.
+   int FloatWantH(void) const {
+      const int rows = (m_d.posN > 8 ? 8 : m_d.posN);
+      return RCS_FLT_HEAD + RCS_FLT_QUICK + 4
+           + (rows > 0 ? rows * RCS_FLT_ROW : 20)
+           + (m_d.posCount > m_d.posN ? 16 : 0) + 22;
    }
 
    //--- CHARTEVENT_CLICK dispatch (anchor-relative zones) -----------------
@@ -1585,7 +1653,7 @@ public:
       for(int i = 0; i < m_zn; i++) {
          const int id = m_z[i].id;
          if(inMenu && !(id >= RZ_MENU_0 && id <= RZ_MENU_11)) continue;
-         if(inFlt  && !(id >= RZ_FLT_GRIP && id <= RZ_FLT_ROW7)) continue;
+         if(inFlt  && !(id >= RZ_FLT_GRIP && id <= RZ_FLT_QNEWS)) continue;
          if(inRail && !(id >= RZ_RAIL_LIM && id <= RZ_RAIL_CHEVRON)) continue;
          // x full-rect + y TOP-only : a panel zone overflowing at the bottom on a
          // small chart stays clickable, navbar chips (y < m_sideY-4) stay excluded.
@@ -1668,11 +1736,22 @@ public:
       }
       if(hit == RZ_MAXLOT_EDIT) return true;                  // native edit : no-op zone
       if(hit >= RZ_FLT_ROW0 && hit <= RZ_FLT_ROW7) return true;   // position rows : read-only
+      if(hit >= RZ_FLT_CLOSE0 && hit <= RZ_FLT_CLOSE7) {          // disabled on purpose
+         m_closeNotice = true; RenderFloat(); ChartRedraw(); return true;
+      }
       if(hit == RZ_FLT_HIDE) { m_fltHidden = true; OnChartChange(); return true; }
       if(hit == RZ_FLT_GRIP) return true;      // the drag itself runs on mouse-move
+      // the quick-access cells open the matching section : one click from the
+      // number to the detail behind it.
+      if(hit == RZ_FLT_QLIM || hit == RZ_FLT_QLOT || hit == RZ_FLT_QNEWS) {
+         m_state = 1;
+         m_sec   = (hit == RZ_FLT_QLIM ? RZ_RAIL_LIM : (hit == RZ_FLT_QLOT ? RZ_RAIL_LOT : RZ_RAIL_NEWS));
+         OnChartChange(); return true;
+      }
       switch(hit) {
          case RZ_RAIL_LIM: case RZ_RAIL_POS: case RZ_RAIL_LOT: case RZ_RAIL_NEWS:
          case RZ_RAIL_DISC: case RZ_RAIL_CPT: case RZ_RAIL_CFG: case RZ_RAIL_HELP:
+            if(hit == RZ_RAIL_POS) m_fltHidden = false;     // the only way back after the cross
             if(m_state == 1 && m_sec == hit) m_state = 0;   // toggle (VS Code contract)
             else { m_state = 1; m_sec = hit; }
             OnChartChange();
@@ -1713,7 +1792,11 @@ public:
    void OnMouseDrag(const int mx, const int my, const bool leftDown) {
       if(!m_created) return;
       if(!leftDown) {
-         if(m_drag) { m_drag = false; OnChartChange(); }   // dropped : re-anchor the surfaces
+         if(m_drag) {
+            m_drag = false;
+            ChartSetInteger(0, CHART_MOUSE_SCROLL, true);  // give the chart its pan back
+            OnChartChange();                               // dropped : re-anchor the surfaces
+         }
          return;
       }
       if(!m_drag) {
@@ -1722,6 +1805,10 @@ public:
             return;                                        // press started outside the header
          m_drag = true; m_dragOffX = mx - m_fltX; m_dragOffY = my - m_fltY;
          m_tipZone = RZ_NONE; m_tipPendZone = RZ_NONE;     // a drag cancels any pending tooltip
+         // JR : dragging the table used to PAN THE CHART underneath. Take the
+         // chart's mouse-scroll for the drag and give it back on release ;
+         // Destroy() also restores it, so it can never stay off.
+         ChartSetInteger(0, CHART_MOUSE_SCROLL, false);
          return;
       }
       m_fltX = mx - m_dragOffX;

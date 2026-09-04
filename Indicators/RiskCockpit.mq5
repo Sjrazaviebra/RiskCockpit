@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.04"
+#property version "3.05"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -3373,6 +3373,7 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_CPT_ADDONS,Tr("addons_lbl"));
     g_shell.SetLabel(RCL_CPT_SPLIT, Tr("shl_split"));
     g_shell.SetLabel(RCL_CPT_DAYS,  Tr("shl_mindays"));
+    g_shell.SetLabel(RCL_CLOSE_EA,  Tr("shl_closeea"));
     // --- tooltips : "title|description" packed in ONE i18n entry each --------
     for (int i = 0; i < 8; ++i) g_shell.SetTip(g_shell.ZidRail(i),
         Tr("tipr_" + IntegerToString(i)));
@@ -3393,6 +3394,9 @@ void ShellPushLabels(void) {
         Tr("tipc_" + IntegerToString(i)));
     g_shell.SetTip(g_shell.ZidBand(),    Tr("tip_band"));
     g_shell.SetTip(g_shell.ZidPosRow(),  Tr("tip_posrow"));
+    g_shell.SetTip(g_shell.ZidFltClose(), Tr("tip_fltclose"));
+    for (int i = 0; i < 3; ++i) g_shell.SetTip(g_shell.ZidFltQuick(i),
+        Tr("tipq_" + IntegerToString(i)));
     g_shell.SetTip(g_shell.ZidCptTip(),  Tr("tip_cpt"));
     g_shell.SetTip(g_shell.ZidHelpTip(), Tr("tip_help"));
 }
@@ -7244,6 +7248,9 @@ void InitI18n(void) {
     AddTr("shl_comm",      "Commission / lot",   "Commission / lot",     "Comision / lote");
     AddTr("shl_split",     "Split",              "Split",                "Reparto");
     AddTr("shl_mindays",   "Min days",           "Jours mini",           "Dias min");
+    AddTr("shl_closeea",   "Closing : EA version",
+                           "Fermeture : version EA",
+                           "Cierre : version EA");
     // --- v3 SHELL tooltips : ONE entry per bubble, "title|description" -------
     AddTr("tipr_0", "Limits|Usage of the NEAREST active limit. Marker = 80%.",
                     "Limites|Conso de la limite la plus proche. Repere = 80%.",
@@ -7382,6 +7389,19 @@ void InitI18n(void) {
     AddTr("tip_posrow", "Position|Symbol, side, volume, P&L, age, stop present.",
                         "Position|Symbole, sens, volume, P&L, age, presence de SL.",
                         "Posicion|Simbolo, sentido, volumen, P&L, edad, SL.");
+    AddTr("tip_fltclose",
+        "Closing|Disabled : an indicator cannot send orders. Closing lives in the EA version.",
+        "Fermeture|Desactive : un indicateur ne passe pas d'ordre. La fermeture est dans la version EA.",
+        "Cierre|Desactivado : un indicador no envia ordenes. El cierre esta en la version EA.");
+    AddTr("tipq_0",     "Room|Distance in $ to the nearest active limit. Click : the limits.",
+                        "Marge|Distance en $ a la limite active la plus proche. Clic : les limites.",
+                        "Margen|Distancia en $ al limite activo mas cercano. Clic : los limites.");
+    AddTr("tipq_1",     "Lot|Advised size for the current risk. Click : the advisor.",
+                        "Lot|Taille conseillee pour le risque en cours. Clic : le conseiller.",
+                        "Lote|Tamano aconsejado para el riesgo actual. Clic : el asesor.");
+    AddTr("tipq_2",     "News|Minutes to the next binding event. Click : the news.",
+                        "News|Minutes avant le prochain evenement contraignant. Clic : les news.",
+                        "News|Minutos hasta el proximo evento vinculante. Clic : las noticias.");
     AddTr("tip_cpt",    "Profile|The plan EVERY limit is derived from.",
                         "Profil|Le plan dont TOUTES les limites sont deduites.",
                         "Perfil|El plan del que salen TODOS los limites.");

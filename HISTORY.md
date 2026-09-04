@@ -86,6 +86,33 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.05.16 - le tableau flottant devient permanent (retour JR, 5 defauts)
+
+- **Le flottant disparaissait** : sa geometrie (`m_fltOn`, `m_fltH`) n'etait
+  calculee que dans `ReadChart()`, appele a la creation et sur CHART_CHANGE.
+  Une position ouverte ENTRE deux layouts ne redimensionnait donc jamais le
+  bitmap : les lignes etaient dessinees hors surface, donc invisibles. La
+  hauteur voulue est maintenant dans `FloatWantH()`, et `Tick()` recree les
+  surfaces des qu'elle bouge (meme mecanique que le bandeau d'alerte).
+- **Toujours affiche** (demande JR) : `m_fltOn = !m_fltHidden`. A plat il garde
+  son cadre et dit "Aucune position ouverte". La croix le masque pour la
+  session ; la cellule POS du rail est le chemin de retour.
+- **Acces rapide sur le flottant** (demande JR) : bandeau MARGE / LOT / NEWS
+  sous l'en-tete, chaque cellule cliquable ouvre la section correspondante.
+- **Le drag ne fait plus defiler le graphique** : `CHART_MOUSE_SCROLL` est pris
+  pendant le glisser et rendu au relachement (`Destroy()` le rend aussi, il ne
+  peut donc pas rester coupe).
+- **Bouton CLOSE par position, DESACTIVE** : un indicateur ne passe pas d'ordre
+  et ce produit n'en passera pas. La pastille est grisee, le clic n'appelle
+  aucune fonction de trade - il met en evidence la ligne "Fermeture : version
+  EA". Tooltip en 3 langues.
+- Compilation : `Result: 0 errors, 0 warnings` (MetaEditor du terminal D0E8).
+
+> ATTENTION topologie : `C:\Program Files\FundedNext MT5 Terminal\metaeditor64.exe`
+> resout ses includes sur SON dossier de donnees (`89FE26...`), dont
+> `MQL5\Libraries\` est VIDE -> `error 106` sur les 4 .mqh. Le seul editeur
+> valide pour ce projet est `C:\Program Files\MetaTrader 5\metaeditor64.exe`.
+
 ### v3.04.15 — 2026-09-04 — parity complete: add-ons, violations, self-lock, cycle, copy-max, BE
 
 The last six things the legacy modal could do and the shell could not. Feature parity is reached;
