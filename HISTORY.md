@@ -86,6 +86,26 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.01.12 — 2026-09-04 — rule parity: the 7 legacy rows the shell was missing
+
+The legacy panel showed eleven rule rows; the shell showed four. The seven that were missing are
+back, each in the section where it belongs rather than in one long list:
+
+- **LOT** — *Max lot allowed*, with **which cap binds** (per-trade margin target / remaining
+  cumulative room / broker free margin).
+- **LIMITS** — *Quick Strike ratio*, metered like the other rules.
+- **DISCIPLINE** — *Hyperactivity* (trades vs daily cap) and *Server messages* (orders touched).
+- **NEWS** — the *news-window meter* (ramps over the hour before, full inside the window) and the
+  *news-trading stats* (count, P&L, eligible share).
+- **ACCOUNT** — *Profit target*, relabelled *Payout eligibility* on a trailing profile, with its
+  progress meter.
+
+The max-lot maths was **extracted into `Live_MaxLot()`** and is now called by both the legacy row
+and the shell. Two copies of a risk number is how they start disagreeing — the health badge bug
+fixed in the previous version was exactly that failure mode.
+
+Compiled `0 errors, 0 warnings`.
+
 ### v3.00.11 — 2026-09-04 — shell on by default, floating positions table, health badge fixed
 
 `InpShellV2` now defaults to **true**: the rail *is* the interface. The legacy panel is kept in the

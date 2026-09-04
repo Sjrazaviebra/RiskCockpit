@@ -3154,6 +3154,25 @@ void BuildDeckData(RCDeckData &d) {
     }
     d.spreadPts  = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
     d.commPerLot = CommissionPerLot(_Symbol);              // -1 when the broker books none
+    // --- v3.01 parity : the legacy rule rows the shell was missing ----------
+    {   // largest openable lot + which cap binds (SHARED implementation)
+        double mpct = 0.0, avail = 0.0, cused = 0.0, ccap = 0.0;
+        string mtag = ""; int mld = 2;
+        d.maxLot       = Live_MaxLot(mpct, mtag, mld, avail, cused, ccap);
+        d.maxLotDigits = mld;
+        d.maxLotPct    = mpct;
+        d.maxLotTag    = mtag;
+    }
+    d.targetPct = Live_ProfitTargetPct();
+    d.targetCap = g_profile.profit_target_pct;
+    d.qsPct     = Live_QuickStrikeRatioPct();
+    d.qsCap     = g_profile.quick_strike_violate_pct;
+    d.msgsToday = Live_OrdersToday();
+    d.msgsCap   = g_profile.hyperactivity_msgs_per_day;
+    ComputeNewsStats();                                    // cached ~60 s inside
+    d.newsTrades   = g_news_trades;
+    d.newsPnl      = g_news_pnl;
+    d.newsEligible = g_news_eligible;
     // --- news (cell NEWS) --------------------------------------------------
     const datetime nevt = Live_NextNewsEvt();              // RULE class (FF restricted / MT5 HIGH)
     d.newsFF     = g_ff_active;
@@ -3170,6 +3189,16 @@ void BuildDeckData(RCDeckData &d) {
             d.newsMins   = (int)((mevt - TimeCurrent()) / 60);
             if (d.newsMins < 0) d.newsMins = 0;
         }
+    }
+    // news-window meter (legacy row 8) : ramps over the hour before the window,
+    // full while the window is open, empty otherwise.
+    d.newsMeterPct = 0.0;
+    if (d.newsActive)        d.newsMeterPct = 100.0;
+    else if (d.newsHasEvt) {
+        const int win = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5);
+        const double mins_to_win = (double)d.newsMins - (double)win;
+        if (mins_to_win <= 0.0)      d.newsMeterPct = 100.0;
+        else if (mins_to_win < 60.0) d.newsMeterPct = 100.0 * (60.0 - mins_to_win) / 60.0;
     }
     // --- news detail : next groups, SAME grouping key as the timeline -------
     // (release time x currency x level) - one row per group, rule + vigilance,
@@ -3470,45 +3499,15 @@ void RefreshPanel(void) {
         // INITIAL balance) when free margin covers it ; otherwise falls back to
         // "N lots @ X% free (target Y%)" so the user sees both the cap AND what
         // is actually openable RIGHT NOW with the real broker free margin.
-        const double m1       = MarginPerLot(_Symbol);
-        const double init_bal = g_profile.initial_balance;
+        // v3.01 : the MATH now lives in Live_MaxLot() (shared with the v3 shell) ;
+        // this block keeps the legacy row's TEXT formatting, unchanged.
         const double tgt_pct  = g_eff_max_margin_pt;
-        const double free_m   = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-        // V1.29 A : removed the ungated "RC Max-lot debug" Print (log spam in the
-        // client's Experts tab ; the only hot-path Print). Diagnostics stay in the
-        // g_maxlot_* globals for an opt-in debug build if ever needed.
-        if (m1 <= 0.0 || init_bal <= 0.0) {
+        double pct_disp = 0.0, avail_pct = 0.0, cum_used = 0.0, cum_cap = 0.0;
+        string tag = ""; int ld = 2;
+        const double lot = Live_MaxLot(pct_disp, tag, ld, avail_pct, cum_used, cum_cap);
+        if (lot < 0.0) {
             maxlot_text = Tr("maxlot_na") + " err=" + IntegerToString(g_maxlot_err);
         } else {
-            // B-MAXLOT-MARGINROOM (audit 2026-06-07) : the largest openable lot is
-            // the MIN of THREE caps, not just the per-trade target :
-            //   (a) per-trade margin target = g_eff_max_margin_pt % of initial bal
-            //   (b) cumulative-cap room left = (EffectiveMarginCap - used) % of init
-            //   (c) real broker free margin  = ACCOUNT_MARGIN_FREE
-            // The old code did only min(a, c) -> it still showed the 25 % target
-            // when e.g. 60 % of the 70 % cumulative cap was already used (only
-            // ~10 % room left). Now (b) binds and the row shows the real max.
-            const double tgt_money  = (tgt_pct / 100.0) * init_bal;
-            const double cum_used   = Live_CumulativeMarginPct();
-            const double cum_cap    = EffectiveMarginCap();
-            const double room_pct   = MathMax(0.0, cum_cap - cum_used);
-            const double room_money = room_pct / 100.0 * init_bal;
-            const double avail_pct  = 100.0 * free_m / init_bal;
-            const double money_cap  = MathMin(tgt_money, MathMin(room_money, free_m));
-            const double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-            const double vmin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-            const double vmax = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-            double lot = money_cap / m1;
-            if (step > 0.0) lot = MathFloor(lot / step) * step;
-            if (lot < vmin) lot = 0.0;
-            else if (vmax > 0.0 && lot > vmax) lot = vmax;
-            const int ld = LotDigits(step);  // B-LOTPRECISION : crypto step=0.00001 -> 5 decimals
-            g_maxlot_copy = (lot > 0.0 ? lot : 0.0); g_maxlot_digits = ld; // V1.24 G3 copy
-            // Which cap binds ? (tie -> prefer target, then cumulative room, then free)
-            string tag; double pct_disp;
-            if (tgt_money <= room_money + 1e-6 && tgt_money <= free_m + 1e-6) { tag = "marg"; pct_disp = tgt_pct; }
-            else if (room_money <= free_m + 1e-6)                            { tag = "room"; pct_disp = room_pct; }
-            else                                                             { tag = "free"; pct_disp = avail_pct; }
             const string tag_disp = (tag == "marg" ? Tr("tag_marg") : tag == "room" ? Tr("tag_room") : Tr("tag_free"));
             if (lot <= 0.0) {
                 maxlot_text = Tr("maxlot_belowmin") + " " + DoubleToString(pct_disp, 1) + "% " + tag_disp +
@@ -4630,6 +4629,45 @@ bool Live_SlGuardBreached(string &reco_sym, double &reco_sl) {
         }
     }
     return true;
+}
+
+// v3.01 : the largest openable lot, extracted from the legacy row so the panel
+// and the shell share ONE implementation (two copies of a risk number is how
+// they start disagreeing). Returns the lot ; -1 when it cannot be computed.
+// Out : the binding cap's percentage + its tag, lot digits, free-margin %, and
+// the cumulative used / cap pair the caller displays.
+double Live_MaxLot(double &pct_disp, string &tag, int &ld,
+                   double &avail_pct, double &cum_used, double &cum_cap) {
+    pct_disp = 0.0; tag = ""; ld = 2; avail_pct = 0.0; cum_used = 0.0; cum_cap = 0.0;
+    const double m1       = MarginPerLot(_Symbol);
+    const double init_bal = g_profile.initial_balance;
+    const double tgt_pct  = g_eff_max_margin_pt;
+    const double free_m   = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+    if (m1 <= 0.0 || init_bal <= 0.0)
+        return -1.0;
+    // The largest openable lot is the MIN of THREE caps :
+    //   (a) per-trade margin target, (b) remaining cumulative room, (c) real free margin.
+    const double tgt_money  = (tgt_pct / 100.0) * init_bal;
+    cum_used   = Live_CumulativeMarginPct();
+    cum_cap    = EffectiveMarginCap();
+    const double room_pct   = MathMax(0.0, cum_cap - cum_used);
+    const double room_money = room_pct / 100.0 * init_bal;
+    avail_pct  = 100.0 * free_m / init_bal;
+    const double money_cap  = MathMin(tgt_money, MathMin(room_money, free_m));
+    const double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+    const double vmin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+    const double vmax = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+    double lot = money_cap / m1;
+    if (step > 0.0) lot = MathFloor(lot / step) * step;
+    if (lot < vmin) lot = 0.0;
+    else if (vmax > 0.0 && lot > vmax) lot = vmax;
+    ld = LotDigits(step);
+    g_maxlot_copy = (lot > 0.0 ? lot : 0.0); g_maxlot_digits = ld;   // V1.24 G3 copy
+    // which cap binds ? (tie -> target, then cumulative room, then free margin)
+    if (tgt_money <= room_money + 1e-6 && tgt_money <= free_m + 1e-6) { tag = "marg"; pct_disp = tgt_pct; }
+    else if (room_money <= free_m + 1e-6)                            { tag = "room"; pct_disp = room_pct; }
+    else                                                             { tag = "free"; pct_disp = avail_pct; }
+    return lot;
 }
 
 double Live_ProfitTargetPct(void) {

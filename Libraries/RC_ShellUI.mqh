@@ -116,6 +116,17 @@ struct RCDeckData {
    bool   cfgNewsHigh, cfgNewsMed, cfgSound, cfgTelegram, cfgComfort, cfgDiscipline;
    int    lang;                         // 0 EN, 1 FR, 2 ES
    string version;
+   // --- v3.01 parity : the legacy rule rows the shell was still missing ---
+   double maxLot;                       // largest openable lot (-1 = unavailable)
+   int    maxLotDigits;
+   double maxLotPct;                    // the binding cap, in %
+   string maxLotTag;                    // "marg" | "room" | "free"
+   double targetPct, targetCap;         // profit target / payout eligibility
+   double qsPct, qsCap;                 // quick-strike ratio
+   int    msgsToday, msgsCap;           // server messages (orders touched)
+   int    newsTrades;                   // trades opened inside a news window
+   double newsPnl, newsEligible;        // their P&L and the eligible share
+   double newsMeterPct;                 // news-window meter fill 0..100
 };
 
 //--- click-zone ids. Ranges used in arithmetic stay CONTIGUOUS ; new ids are
@@ -147,7 +158,7 @@ enum ERCZone {
    // --- lot 2b : config toggles (contiguous : the host maps the offset) --
    RZ_CFG_PAL, RZ_CFG_MODE, RZ_CFG_LANG, RZ_CFG_NEWSH, RZ_CFG_NEWSM,
    RZ_CFG_SOUND, RZ_CFG_TG, RZ_CFG_COMFORT, RZ_CFG_DISC, RZ_CFG_RTOOLS,
-   RZ_TIP_CPT, RZ_TIP_HELP,
+   RZ_TIP_CPT, RZ_TIP_HELP, RZ_TIP_LIM_QS, RZ_TIP_MAXLOT, RZ_TIP_TARGET, RZ_TIP_MSGS, RZ_TIP_NEWSTR,
    RZ_LOT_EDIT,                                // copy-lot native edit : click = no-op (never collapses)
    // --- floating positions table (appears as soon as a trade is open) ---
    RZ_FLT_GRIP, RZ_FLT_HIDE,
@@ -173,7 +184,9 @@ enum ERCLabel {
    RCL_DISC_TRADES, RCL_DISC_TILTWIN,
    RCL_BAND_LOCK, RCL_BAND_SL, RCL_BAND_TILT, RCL_LEFT, RCL_MAX,
    RCL_CPT_PLAN, RCL_CPT_PHASE, RCL_CPT_SIZE, RCL_CPT_TYPE, RCL_CPT_ADDONS,
-   RCL_CPT_SPLIT, RCL_CPT_DAYS, RCL_LOT_COPY
+   RCL_CPT_SPLIT, RCL_CPT_DAYS, RCL_LOT_COPY,
+   RCL_LIM_QS, RCL_LOT_MAX, RCL_TARGET, RCL_MSGS, RCL_NEWSTRADES,
+   RCL_PAYOUT, RCL_HYPER, RCL_ELIG, RCL_TAG_MARG, RCL_TAG_ROOM, RCL_TAG_FREE
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -561,6 +574,9 @@ private:
       y = LimRow(y, L(RCL_LIM_RISK, "Risque ouvert"),  m_d.riskPct,    m_d.riskCap,    m_d.riskCap > 0.0,    RZ_TIP_LIM_M1);
       y = LimRow(y, L(RCL_LIM_DAILY, "DD journalier"),  m_d.dailyPct,   m_d.dailyCap,   m_d.dailyApplies,     RZ_TIP_LIM_M2);
       y = LimRow(y, L(RCL_LIM_OVERALL, "DD total"),       m_d.overallPct, m_d.overallCap, m_d.overallApplies,   RZ_TIP_LIM_M3);
+      // v3.01 parity : Quick Strike is a RULE too - it belongs with the meters.
+      if(m_d.qsCap > 0.0)
+         y = LimRow(y, L(RCL_LIM_QS, "Quick Strike"), m_d.qsPct, m_d.qsCap, true, RZ_TIP_LIM_QS);
       y += 6;
       SecHead(L(RCL_SURV_HEAD, "MARGE DE SURVIE"), y);
       if(m_d.roomMoney >= 0.0) {
@@ -660,7 +676,17 @@ private:
       m_side.Text(18, y, L(RCL_LOT_FREE, "Marge libre"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.freeMarginPct, 0) + "%", A(m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_LOT_FREE);
-      y += 22;
+      // v3.01 parity : "Max lot allowed" - the biggest lot the caps still allow,
+      // and WHICH cap binds (target margin / cumulative room / broker free margin).
+      if(m_d.maxLot >= 0.0) {
+         string mx = DoubleToString(m_d.maxLot, m_d.maxLotDigits) + "  @ " +
+                     DoubleToString(m_d.maxLotPct, 1) + "% " +
+                     (m_d.maxLotTag == "marg" ? L(RCL_TAG_MARG, "marge")
+                      : (m_d.maxLotTag == "room" ? L(RCL_TAG_ROOM, "reste") : L(RCL_TAG_FREE, "libre")));
+         y = KV(y, L(RCL_LOT_MAX, "Lot max autorise"), mx,
+                (m_d.maxLot <= 0.0 ? m_t.warn : m_t.text), RZ_TIP_MAXLOT);
+      }
+      y += 4;
       SecHead(L(RCL_LOT_COST, "COUT DU SYMBOLE"), y);
       m_side.Text(18, y, L(RCL_SPREAD, "Spread"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.spreadPts, 0) + " pts", A(m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
@@ -688,7 +714,19 @@ private:
       y += 18;
       m_side.Text(18, y, L(RCL_NEWS_WIN, "Fenetre"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       m_side.Text(RCS_SIDE_W - 18, y, "+/- " + IntegerToString(m_d.newsWinMin) + " min", A(m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
-      y += 22;
+      y += 20;
+      // v3.01 parity : the news-window METER (legacy row 8) - it fills over the
+      // hour before the event and sits full while the window is open.
+      m_side.Meter(18, y, RCS_SIDE_W - 36, 8, m_d.newsMeterPct / 100.0, TrackC(),
+                   (m_d.newsActive ? m_t.red : m_t.warn), MixC((m_d.newsActive ? m_t.red : m_t.warn), clrBlack, 0.25));
+      y += 16;
+      // v3.01 parity : news-trading stats (legacy row 10)
+      y = KV(y, L(RCL_NEWSTRADES, "Trades news"),
+             IntegerToString(m_d.newsTrades) + "t  " +
+             (m_d.newsPnl >= 0.0 ? "+" : "") + DoubleToString(m_d.newsPnl, 2) + " $  " +
+             L(RCL_ELIG, "elig") + " " + (m_d.newsEligible >= 0.0 ? "+" : "") + DoubleToString(m_d.newsEligible, 2),
+             m_t.text, RZ_TIP_NEWSTR);
+      y += 4;
       SecHead(L(RCL_NEWS_NEXT, "A VENIR"), y);
       if(m_d.newsN <= 0) {
          m_side.Text(18, y, "Rien dans les 24 h.", A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
@@ -744,7 +782,22 @@ private:
                   IntegerToString(m_d.tiltWinMin) + " min" + (m_d.tiltN > 0 ? "  (max " + IntegerToString(m_d.tiltN) + ")" : ""),
                   A(m_d.discTilt ? m_t.warn : m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_DISC_TILT);
-      return y + 22;
+      y += 18;
+      // v3.01 parity : hyperactivity + server messages, the two "too much
+      // activity" rules the prop firm scores - they belong with discipline.
+      if(m_d.tradesCap > 0) {
+         const double hy = 100.0 * m_d.tradesToday / m_d.tradesCap;
+         y = LimRow(y, L(RCL_HYPER, "Hyperactivite"), hy, 100.0, true, RZ_NONE);
+      }
+      if(m_d.msgsCap > 0) {
+         const double mp = 100.0 * m_d.msgsToday / m_d.msgsCap;
+         m_side.Text(18, y, L(RCL_MSGS, "Msgs serveur (ordres)"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+         m_side.Text(RCS_SIDE_W - 18, y, IntegerToString(m_d.msgsToday) + " / " + IntegerToString(m_d.msgsCap),
+                     A(mp >= 100.0 ? m_t.red : (mp >= 75.0 ? m_t.warn : m_t.text)), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
+         ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_MSGS);
+         y += 18;
+      }
+      return y + 6;
    }
    //--- one "label ....... value" row (the panel's workhorse) ---------------
    int KV(int y, const string k, const string v, const color vc, const int zid = RZ_NONE) {
@@ -776,6 +829,23 @@ private:
                 IntegerToString(m_d.minDaysDone) + " / " + IntegerToString(m_d.minDays),
                 (m_d.minDaysDone >= m_d.minDays ? m_t.ok : m_t.warn));
       y = KV(y, "Compte", IntegerToString((int)m_d.login), m_t.dim);
+      // v3.01 parity : profit target - on a trailing (Instant) profile it is the
+      // PAYOUT eligibility threshold, not a challenge target to pass.
+      if(m_d.targetCap > 0.0) {
+         const double tr = m_d.targetPct / m_d.targetCap;
+         y += 4;
+         m_side.Text(18, y, L(m_d.trailing ? RCL_PAYOUT : RCL_TARGET,
+                              m_d.trailing ? "Eligibilite payout" : "Objectif profit"),
+                     A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+         m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.targetPct, 2) + " / " +
+                     DoubleToString(m_d.targetCap, 1) + "%",
+                     A(tr >= 1.0 ? m_t.ok : m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
+         ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_TARGET);
+         y += 17;
+         m_side.Meter(18, y, RCS_SIDE_W - 36, 8, (tr > 1.0 ? 1.0 : tr), TrackC(),
+                      (tr >= 1.0 ? m_t.ok : m_t.accent), MixC(tr >= 1.0 ? m_t.ok : m_t.accent, clrBlack, 0.25));
+         y += 16;
+      }
       y += 6;
       SecHead(L(RCL_CPT_ADDONS, "ADD-ONS"), y);
       m_side.Text(18, y, (StringLen(m_d.addonsLabel) > 0 ? m_d.addonsLabel : "-"),
