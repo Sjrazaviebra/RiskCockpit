@@ -1523,7 +1523,11 @@ public:
       // hover-only info zones : swallow the click, never collapse the section
       if(hit >= RZ_TIP_LIM_ROOM && hit <= RZ_TIP_LIM_M3) return true;
       if(hit >= RZ_POS_ROW0 && hit <= RZ_BAND) return true;   // info rows + safety band
-      if(hit == RZ_TIP_CPT || hit == RZ_TIP_HELP) return true;
+      // every hover-only info row, as ONE contiguous range : a zone added here
+      // and forgotten in OnClick would fall through to the auto-collapse and
+      // close the panel under the user's finger (RZ_TIP_TARGET and RZ_TIP_MSGS
+      // did exactly that in v3.01.12, caught by the zone audit).
+      if(hit >= RZ_TIP_CPT && hit <= RZ_TIP_NEWSTR) return true;
       if(hit == RZ_LOT_EDIT) return true;      // native edit sits here : NEVER collapse the section
       if(hit >= RZ_CFG_TAB0 && hit <= RZ_CFG_TAB3) {          // settings sub-tab
          m_cfgTab = hit - RZ_CFG_TAB0; RenderAll(); return true;

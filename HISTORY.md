@@ -86,6 +86,19 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.03.14 — 2026-09-04 — two orphan click zones (from v3.01.12)
+
+The static zone audit caught two zones added with the rule-parity rows that were **drawn but not
+handled**: the *Profit target* row and the *Server messages* row. A click on either fell through to
+the auto-collapse, so the panel closed under the user's finger instead of doing nothing.
+
+Both are info rows, so the fix is to swallow them — and rather than adding two more `==` tests, the
+whole family of hover-only rows is now handled as **one contiguous range**, which is what stops the
+next one from being forgotten. The HISTORY note of v3.02.13 has been corrected: it claimed zero
+orphans before the audit had answered.
+
+Audit after the fix: **0 orphan zones** out of 99 drawn. Compiled `0 errors, 0 warnings`.
+
 ### v3.02.13 — 2026-09-04 — settings steppers and the plan cascade
 
 The last thing the shell could not do that the legacy modal could: **change a setting**. Both are
@@ -105,8 +118,9 @@ one configuration.
 - Sections carrying controls (settings, account) get a taller panel, the way StrategyDeck gives its
   copilot more room.
 
-Static audit after the change: **0 orphan zones** (every drawn zone is handled), model fields all
-filled. Compiled `0 errors, 0 warnings`.
+Model fields all filled, compiled `0 errors, 0 warnings`. **The zone audit run with this commit
+reported two orphans** (`RZ_TIP_TARGET`, `RZ_TIP_MSGS`) — see v3.03.14, which fixes them; the
+"0 orphans" claim first written here was premature.
 
 ### v3.01.12 — 2026-09-04 — rule parity: the 7 legacy rows the shell was missing
 
