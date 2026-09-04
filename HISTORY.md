@@ -86,6 +86,37 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.08.20 - les vrais accents en FR et en ES
+
+- **98 entrées de la table i18n ré-accentuées** (FR + ES) par table de mots +
+  surcharges de phrases pour les cas qu'un mot ne peut pas trancher : `a`/`à`,
+  `ou`/`où`, `esta`/`está`, `perdida` (adjectif) vs `pérdida` (nom).
+- **Le rapport a été relu ligne à ligne, et il contenait 6 faux positifs** que
+  la table de mots ne pouvait pas voir : `FundedNext recommande 20-30%` et
+  `resserre le plafond` sont des VERBES (pas d'accent), `cuenta perdida` est un
+  adjectif (pas `pérdida`), `Sección unica` devait être `única`, `no envia`
+  devait être `envía`, `seuil configure` devait être `configuré`. Corrigés par
+  surcharge, puis re-vérifiés un par un.
+- Fixes ponctuels : `boîte à outils`, `perdre à sa SL`, `À PROPOS`, `À VENIR`,
+  `(100 = sûr)`, `âge`, `présence`, `ámbar`, `Año`.
+
+⚠️ **La preuve bout-en-bout n'est PAS acquise.** J'ai sondé le `.ex5` pour y
+retrouver les chaînes accentuées : **aucune** — mais mon contrôle positif
+(chercher une chaîne ASCII connue) échoue aussi, donc **l'instrument ne mesure
+rien** : MQL5 compresse ses chaînes dans le binaire. Ce qui est établi : le BOM
+UTF-8 est bien unique (c'est la condition qui avait manqué en v2.14.06 et
+provoqué le mojibake), la compilation est propre, et le fichier portait déjà
+des accents rendus correctement en v2.x. Une sonde `Print` temporaire a été
+laissée dans `OnInit` : au prochain attachement, le journal MQL5 montrera
+`RÈGLES / PYRAMIDE / FENÊTRE NEWS` - accentué ou non. Elle sera retirée
+ensuite.
+
+🔎 **Constat de terrain : le terminal n'a PAS rechargé l'indicateur depuis
+13:48.** Le journal ne montre aucune ré-initialisation de RiskCockpit après
+cette heure, alors que 6 compilations ont suivi. JR teste donc un build
+antérieur à la parité, à la purge et à l'i18n : il faut retirer puis remettre
+l'indicateur (ou redémarrer le terminal) pour charger `3.08`.
+
 ### v3.07.19 - i18n : tout ce que l'utilisateur lit devient traduisible
 
 Deux plafonds silencieux expliquaient l'essentiel du francais residuel :

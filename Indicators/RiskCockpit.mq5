@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.07"
+#property version "3.08"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1126,6 +1126,7 @@ int OnInit(void) {
 
     ApplyComfortScale(true); // FIX 6 : comfortable padded scale on attach (and on symbol switch via re-init)
     EventSetMillisecondTimer(g_eff_refresh_ms); // V1.27 : honor the persisted refresh period
+    Print("RiskCockpit: i18n encoding check -> ", Tr("rules"), " / ", Tr("shl_pyramid"), " / ", Tr("shl_news"));
     ChartRedraw(0);
     return (INIT_SUCCEEDED);
 }
@@ -4727,42 +4728,42 @@ void InitI18n(void) {
     AddTr("news_med_check",  "Medium - check FN",      "Medium - vérifier FN","Medium - verificar FN");
     AddTr("news_more",       "more",                   "autres",              "más"); // v2.03.05c : grouped-icon tooltip cap suffix
     // --- v3 SHELL : the rail/panel chrome goes through the SAME table ---
-    AddTr("shl_lim",       "LIMITS",             "LIMITES",              "LIMITES");
+    AddTr("shl_lim",       "LIMITS",             "LIMITES",              "LÍMITES");
     AddTr("shl_pos",       "OPEN POSITIONS",     "POSITIONS OUVERTES",   "POSICIONES ABIERTAS");
-    AddTr("shl_lot",       "SUGGESTED LOT",      "LOT CONSEILLE",        "LOTE SUGERIDO");
-    AddTr("shl_news",      "NEWS WINDOW",        "FENETRE NEWS",         "VENTANA NOTICIAS");
+    AddTr("shl_lot",       "SUGGESTED LOT",      "LOT CONSEILLÉ",        "LOTE SUGERIDO");
+    AddTr("shl_news",      "NEWS WINDOW",        "FENÊTRE NEWS",         "VENTANA NOTICIAS");
     AddTr("shl_disc",      "DISCIPLINE",         "DISCIPLINE",           "DISCIPLINA");
     AddTr("shl_cpt",       "ACCOUNT",            "COMPTE",               "CUENTA");
-    AddTr("shl_cfg",       "SETTINGS",           "REGLAGES",             "AJUSTES");
-    AddTr("shl_help",      "LEGEND",             "LEGENDE",              "LEYENDA");
-    AddTr("shl_limhead",   "LIMIT USAGE",        "CONSOMMATION DES LIMITES", "USO DE LIMITES");
+    AddTr("shl_cfg",       "SETTINGS",           "RÉGLAGES",             "AJUSTES");
+    AddTr("shl_help",      "LEGEND",             "LÉGENDE",              "LEYENDA");
+    AddTr("shl_limhead",   "LIMIT USAGE",        "CONSOMMATION DES LIMITES", "USO DE LÍMITES");
     AddTr("shl_survhead",  "SURVIVAL ROOM",      "MARGE DE SURVIE",      "MARGEN DE SUPERVIVENCIA");
-    AddTr("shl_room",      "Room to the limit",  "Marge avant limite",   "Margen hasta el limite");
+    AddTr("shl_room",      "Room to the limit",  "Marge avant limite",   "Margen hasta el límite");
     AddTr("shl_budget80",  "One trade (80%)",    "Budget d'un trade (80%)", "Presupuesto por op. (80%)");
     AddTr("shl_nolimit",   "No active limit on this profile.",
                            "Aucune limite active sur ce profil.",
-                           "Sin limite activo en este perfil.");
+                           "Sin límite activo en este perfil.");
     AddTr("shl_posnone",   "No open position.",  "Aucune position ouverte.", "Sin posiciones abiertas.");
     AddTr("shl_pospnl",    "Floating P&L",       "P&L flottant total",   "P&L flotante total");
     AddTr("shl_nosl",      "NO SL",              "SANS SL",              "SIN SL");
-    AddTr("shl_lotfrom",   "WHERE THIS LOT COMES FROM", "D'OU VIENT CE LOT", "DE DONDE SALE ESTE LOTE");
+    AddTr("shl_lotfrom",   "WHERE THIS LOT COMES FROM", "D'OÙ VIENT CE LOT", "DE DONDE SALE ESTE LOTE");
     AddTr("shl_lotbudget", "Trade budget",       "Budget du trade",      "Presupuesto de la op.");
-    AddTr("shl_lotn",      "Planned trades (N)", "Trades prevus (N)",    "Ops previstas (N)");
-    AddTr("shl_lotcost",   "SYMBOL COST",        "COUT DU SYMBOLE",      "COSTE DEL SIMBOLO");
+    AddTr("shl_lotn",      "Planned trades (N)", "Trades prévus (N)",    "Ops previstas (N)");
+    AddTr("shl_lotcost",   "SYMBOL COST",        "COÛT DU SYMBOLE",      "COSTE DEL SÍMBOLO");
     AddTr("shl_newssrc",   "Source",             "Source",               "Fuente");
-    AddTr("shl_newsstate", "State",              "Etat",                 "Estado");
-    AddTr("shl_newswin",   "Window",             "Fenetre",              "Ventana");
-    AddTr("shl_newsnext",  "UPCOMING",           "A VENIR",              "PROXIMOS");
-    AddTr("shl_discstate", "STATE",              "ETAT",                 "ESTADO");
-    AddTr("shl_discday",   "TODAY",              "ACTIVITE DU JOUR",     "ACTIVIDAD DE HOY");
+    AddTr("shl_newsstate", "State",              "État",                 "Estado");
+    AddTr("shl_newswin",   "Window",             "Fenêtre",              "Ventana");
+    AddTr("shl_newsnext",  "UPCOMING",           "À VENIR",              "PRÓXIMOS");
+    AddTr("shl_discstate", "STATE",              "ÉTAT",                 "ESTADO");
+    AddTr("shl_discday",   "TODAY",              "ACTIVITÉ DU JOUR",     "ACTIVIDAD DE HOY");
     AddTr("shl_free",      "Free margin",        "Marge libre",          "Margen libre");
     AddTr("shl_spread",    "Spread",             "Spread",               "Spread");
-    AddTr("shl_comm",      "Commission / lot",   "Commission / lot",     "Comision / lote");
+    AddTr("shl_comm",      "Commission / lot",   "Commission / lot",     "Comisión / lote");
     AddTr("shl_split",     "Split",              "Split",                "Reparto");
-    AddTr("shl_mindays",   "Min days",           "Jours mini",           "Dias min");
+    AddTr("shl_mindays",   "Min days",           "Jours mini",           "Días min");
     AddTr("shl_closeea",   "Closing : EA version",
                            "Fermeture : version EA",
-                           "Cierre : version EA");
+                           "Cierre : versión EA");
     AddTr("shl_qs",
         "Quick Strike",
         "Quick Strike",
@@ -4785,7 +4786,7 @@ void InitI18n(void) {
         "libre");
     AddTr("shl_lotmax",
         "Max allowed lot",
-        "Lot max autorise",
+        "Lot max autorisé",
         "Lote max permitido");
     AddTr("shl_newstrades",
         "News trades",
@@ -4797,16 +4798,16 @@ void InitI18n(void) {
         "eleg");
     AddTr("shl_afterviol",
         "AFTER A VIOLATION",
-        "APRES VIOLATION",
-        "TRAS UNA VIOLACION");
+        "APRÈS VIOLATION",
+        "TRAS UNA VIOLACIÓN");
     AddTr("shl_violm",
         "Margin violation",
         "Violation marge",
-        "Violacion margen");
+        "Violación margen");
     AddTr("shl_violr",
         "Risk violation",
         "Violation risque",
-        "Violacion riesgo");
+        "Violación riesgo");
     AddTr("shl_lockon",
         "LOCK ACTIVE",
         "VERROU ACTIF",
@@ -4821,24 +4822,24 @@ void InitI18n(void) {
         "ARMAR EL BLOQUEO");
     AddTr("shl_hyper",
         "Hyperactivity",
-        "Hyperactivite",
+        "Hyperactivité",
         "Hiperactividad");
     AddTr("shl_msgs",
         "Server msgs (orders)",
         "Msgs serveur (ordres)",
-        "Msgs servidor (ordenes)");
+        "Msgs servidor (órdenes)");
     AddTr("shl_profile",
         "PROFILE",
         "PROFIL",
         "PERFIL");
     AddTr("shl_cycle",
         "CYCLE START",
-        "DEBUT DE CYCLE",
+        "DÉBUT DE CYCLE",
         "INICIO DE CICLO");
     AddTr("shl_year",
         "Year",
-        "Annee",
-        "Ano");
+        "Année",
+        "Año");
     AddTr("shl_month",
         "Month",
         "Mois",
@@ -4846,7 +4847,7 @@ void InitI18n(void) {
     AddTr("shl_day",
         "Day",
         "Jour",
-        "Dia");
+        "Día");
     AddTr("shl_tabrisk",
         "RISK",
         "RISQUE",
@@ -4866,11 +4867,11 @@ void InitI18n(void) {
     AddTr("shl_belines",
         "Break-even lines",
         "Lignes break-even",
-        "Lineas break-even");
+        "Líneas break-even");
     AddTr("shl_more",
         "more",
         "autres",
-        "mas");
+        "más");
     AddTr("shl_r_cpt",
         "ACCT",
         "CPT",
@@ -4885,19 +4886,19 @@ void InitI18n(void) {
         "Equity bajo este nivel = cuenta perdida.");
     AddTr("shl_moresize",
         "more : enlarge the window",
-        "autres : agrandis la fenetre",
-        "mas : agranda la ventana");
+        "autres : agrandis la fenêtre",
+        "más : agranda la ventana");
     AddTr("shl_pyramid",
         "PYRAMID",
         "PYRAMIDE",
-        "PIRAMIDE");
+        "PIRÁMIDE");
     AddTr("shl_lotnoroom",
         "No room left : do not take this trade.",
         "Aucune marge : ne prends pas ce trade.",
-        "Sin margen : no tomes esta operacion.");
+        "Sin margen : no tomes esta operación.");
     AddTr("shl_lotcap80",
         "Capped at 80% of the survival margin.",
-        "Plafonne a 80% de la marge de survie.",
+        "Plafonné à 80% de la marge de survie.",
         "Limitado al 80% del margen de supervivencia.");
     AddTr("shl_srcmt",
         "MT5 calendar [MT]",
@@ -4909,7 +4910,7 @@ void InitI18n(void) {
         "inactiva");
     AddTr("shl_newsactel",
         "ACTIVE - eligible profit ",
-        "ACTIVE - profit eligible ",
+        "ACTIVE - profit éligible ",
         "ACTIVA - beneficio elegible ");
     AddTr("shl_inmin",
         "in ",
@@ -4918,22 +4919,22 @@ void InitI18n(void) {
     AddTr("shl_none24",
         "Nothing in the next 24 h.",
         "Rien dans les 24 h.",
-        "Nada en las proximas 24 h.");
+        "Nada en las próximas 24 h.");
     AddTr("shl_rule40",
         "40% rule",
-        "regle 40%",
+        "règle 40%",
         "regla 40%");
     AddTr("shl_checkfn",
         "check FN",
-        "verifier FN",
+        "vérifier FN",
         "revisar FN");
     AddTr("shl_slgon",
         "SL GUARD TRIGGERED",
-        "GARDE SL DECLENCHEE",
+        "GARDE SL DÉCLENCHÉE",
         "GUARDIA SL ACTIVADA");
     AddTr("shl_tilton",
         "TILT DETECTED",
-        "TILT DETECTE",
+        "TILT DÉTECTÉ",
         "TILT DETECTADO");
     AddTr("shl_allclear",
         "ALL CLEAR",
@@ -4958,7 +4959,7 @@ void InitI18n(void) {
     AddTr("shl_noslpos",
         "position without SL",
         "position sans SL",
-        "posicion sin SL");
+        "posición sin SL");
     AddTr("shl_keep20",
         "Goal : keep 20% of room.",
         "Objectif : garder 20% de marge.",
@@ -4969,7 +4970,7 @@ void InitI18n(void) {
         "Operaciones");
     AddTr("shl_tiltwin",
         "Tilt window",
-        "Fenetre tilt",
+        "Fenêtre tilt",
         "Ventana tilt");
     AddTr("shl_accountn",
         "Account",
@@ -4977,7 +4978,7 @@ void InitI18n(void) {
         "Cuenta");
     AddTr("shl_cfgtheme",
         "Theme",
-        "Theme",
+        "Thème",
         "Tema");
     AddTr("shl_cfgmode",
         "Mode",
@@ -5009,7 +5010,7 @@ void InitI18n(void) {
         "CONFORT");
     AddTr("shl_comforts",
         "Comfort scale",
-        "Echelle confort",
+        "Échelle confort",
         "Escala de confort");
     AddTr("shl_disclockt",
         "Discipline lock",
@@ -5022,27 +5023,27 @@ void InitI18n(void) {
     AddTr("shl_hsafe",
         "SAFE - below 80% of the limit",
         "SAFE - sous 80% de la limite",
-        "SAFE - por debajo del 80% del limite");
+        "SAFE - por debajo del 80% del límite");
     AddTr("shl_hwatch",
         "WATCH - 80% used, be careful",
-        "WATCH - 80% consomme, prudence",
+        "WATCH - 80% consommé, prudence",
         "WATCH - 80% consumido, prudencia");
     AddTr("shl_hbreach",
         "BREACH - limit reached",
         "BREACH - limite atteinte",
-        "BREACH - limite alcanzado");
+        "BREACH - límite alcanzado");
     AddTr("shl_hr40",
         "40% RULE",
-        "REGLE 40%",
+        "RÈGLE 40%",
         "REGLA 40%");
     AddTr("shl_hr40a",
         "News window : only ",
-        "Fenetre news : seuls ",
+        "Fenêtre news : seuls ",
         "Ventana news : solo ");
     AddTr("shl_hr40b",
         "of the profit counts ; losses count 100%.",
         "du profit comptent ; les pertes comptent 100%.",
-        "del beneficio cuenta ; las perdidas 100%.");
+        "del beneficio cuenta ; las pérdidas 100%.");
     AddTr("shl_hsurv",
         "SURVIVAL MARGIN",
         "MARGE DE SURVIE",
@@ -5050,19 +5051,19 @@ void InitI18n(void) {
     AddTr("shl_hsurva",
         "A trade never risks more than 80% of",
         "Un trade ne risque jamais plus de 80% de",
-        "Una operacion nunca arriesga mas del 80%");
+        "Una operación nunca arriesga más del 80%");
     AddTr("shl_hsurvb",
         "the room : 20% are kept to survive.",
         "la marge : 20% restent pour survivre.",
         "del margen : el 20% queda para sobrevivir.");
     AddTr("shl_habout",
         "ABOUT",
-        "A PROPOS",
+        "À PROPOS",
         "ACERCA DE");
     AddTr("shl_version",
         "Version",
         "Version",
-        "Version");
+        "Versión");
     AddTr("shl_newssrc",
         "News source",
         "Source news",
@@ -5074,10 +5075,10 @@ void InitI18n(void) {
     AddTr("shl_hro2",
         "or closes ANY trade. No signal.",
         "ne ferme AUCUN trade. Aucun signal.",
-        "modifica ni cierra NINGUNA operacion. Sin senal.");
+        "modifica ni cierra NINGUNA operación. Sin señal.");
     AddTr("shl_secsize",
         "sections : enlarge the window",
-        "sections : agrandis la fenetre",
+        "sections : agrandis la fenêtre",
         "secciones : agranda la ventana");
     AddTr("shl_rtoolsoff",
         "Risk toolkit OFF (personal account).",
@@ -5085,7 +5086,7 @@ void InitI18n(void) {
         "Herramientas OFF (cuenta personal).");
     AddTr("shl_bandwknd",
         "OPEN POSITIONS INTO THE WEEKLY CLOSE - consider flattening",
-        "POSITIONS OUVERTES AVANT LA CLOTURE HEBDO - envisage de solder",
+        "POSITIONS OUVERTES AVANT LA CLÔTURE HEBDO - envisage de solder",
         "POSICIONES ABIERTAS ANTES DEL CIERRE SEMANAL - considera cerrar");
     AddTr("shl_minsleft",
         "min left",
@@ -5097,7 +5098,7 @@ void InitI18n(void) {
         "sube ");
     AddTr("shl_bandsllow",
         "SL TOO LOW - breach risk",
-        "SL TROP BAS - risque de breche",
+        "SL TROP BAS - risque de brèche",
         "SL DEMASIADO BAJO - riesgo de brecha");
     AddTr("shl_bandlocked",
         "DISCIPLINE LOCK ACTIVE",
@@ -5121,49 +5122,49 @@ void InitI18n(void) {
         "News MEDIUM");
     // --- v3 SHELL tooltips : ONE entry per bubble, "title|description" -------
     AddTr("tipr_0", "Limits|Usage of the NEAREST active limit. Marker = 80%.",
-                    "Limites|Conso de la limite la plus proche. Repere = 80%.",
-                    "Limites|Uso del limite mas cercano. Marca = 80%.");
+                    "Limites|Conso de la limite la plus proche. Repère = 80%.",
+                    "Límites|Uso del límite más cercano. Marca = 80%.");
     AddTr("tipr_1", "Positions|Open trades and the worst row status.",
                     "Positions|Positions ouvertes et pire statut de ligne.",
                     "Posiciones|Operaciones abiertas y peor estado.");
     AddTr("tipr_2", "Suggested lot|Amber = capped at 80%, red = no room left.",
-                    "Lot conseille|Ambre = plafonne a 80%, rouge = plus de marge.",
-                    "Lote sugerido|Ambar = limitado al 80%, rojo = sin margen.");
+                    "Lot conseillé|Ambre = plafonné à 80%, rouge = plus de marge.",
+                    "Lote sugerido|Ámbar = limitado al 80%, rojo = sin margen.");
     AddTr("tipr_3", "News|Minutes to the next rule-bound event.",
-                    "News|Minutes avant le prochain event soumis a la regle.",
-                    "Noticias|Minutos hasta el proximo evento con regla.");
+                    "News|Minutes avant le prochain event soumis à la règle.",
+                    "Noticias|Minutos hasta el próximo evento con regla.");
     AddTr("tipr_4", "Discipline|Lock, tilt, SL guard, trades today.",
                     "Discipline|Verrou, tilt, garde SL, trades du jour.",
                     "Disciplina|Bloqueo, tilt, guarda SL, ops de hoy.");
     AddTr("tipr_5", "Account|Plan, size, phase, add-ons, split.",
                     "Compte|Plan, taille, phase, add-ons, split.",
-                    "Cuenta|Plan, tamano, fase, extras, reparto.");
+                    "Cuenta|Plan, tamaño, fase, extras, reparto.");
     AddTr("tipr_6", "Settings|Display, news, alerts, comfort.",
-                    "Reglages|Affichage, news, alertes, confort.",
+                    "Réglages|Affichage, news, alertes, confort.",
                     "Ajustes|Pantalla, noticias, alertas, confort.");
     AddTr("tipr_7", "Help|Colour legend, rules, version.",
-                    "Aide|Legende des couleurs, regles, version.",
-                    "Ayuda|Leyenda de colores, reglas, version.");
+                    "Aide|Légende des couleurs, règles, version.",
+                    "Ayuda|Leyenda de colores, reglas, versión.");
     AddTr("tipr_chev", "Sidebar|Opens every section, stacked.",
-                       "Sidebar|Ouvre toutes les sections empilees.",
+                       "Sidebar|Ouvre toutes les sections empilées.",
                        "Barra lateral|Abre todas las secciones apiladas.");
     AddTr("tipn_0", "RiskCockpit|Opens the full sidebar.",
-                    "RiskCockpit|Ouvre la sidebar complete.",
+                    "RiskCockpit|Ouvre la sidebar complète.",
                     "RiskCockpit|Abre la barra lateral completa.");
     AddTr("tipn_1", "Symbol|Pick a Market Watch symbol.",
                     "Symbole|Choisir un symbole du Market Watch.",
-                    "Simbolo|Elegir un simbolo del Market Watch.");
+                    "Símbolo|Elegir un símbolo del Market Watch.");
     AddTr("tipn_2", "Timeframe|Switch the chart timeframe.",
-                    "Unite de temps|Changer l'unite de temps du graphique.",
-                    "Temporalidad|Cambiar la temporalidad del grafico.");
+                    "Unité de temps|Changer l'unité de temps du graphique.",
+                    "Temporalidad|Cambiar la temporalidad del gráfico.");
     AddTr("tipn_3", "Vitals|Current equity and open positions.",
                     "Vitals|Equity courante et positions ouvertes.",
                     "Vitales|Equity actual y posiciones abiertas.");
     AddTr("tipn_4", "Health|Account health out of 100 (100 = safe).",
-                    "Sante|Sante du compte sur 100 (100 = sur).",
+                    "Santé|Santé du compte sur 100 (100 = sûr).",
                     "Salud|Salud de la cuenta sobre 100 (100 = seguro).");
     AddTr("tipn_5", "Theme|Emerald / Indigo / Slate.",
-                    "Theme|Emeraude / Indigo / Ardoise.",
+                    "Thème|Émeraude / Indigo / Ardoise.",
                     "Tema|Esmeralda / Indigo / Pizarra.");
     AddTr("tipn_6", "Mode|Dark / light.", "Mode|Sombre / clair.", "Modo|Oscuro / claro.");
     AddTr("tipn_7", "Clock|Broker server time.",
@@ -5171,111 +5172,111 @@ void InitI18n(void) {
                     "Reloj|Hora del servidor del broker.");
     AddTr("tipn_8", "Remove|Takes RiskCockpit off this chart.",
                     "Retirer|Retire RiskCockpit de ce graphique.",
-                    "Quitar|Quita RiskCockpit de este grafico.");
+                    "Quitar|Quita RiskCockpit de este gráfico.");
     AddTr("tipp_close", "Close|Closes the panel, the rail stays.",
                         "Fermer|Referme le panneau, le rail reste.",
                         "Cerrar|Cierra el panel, el carril queda.");
     AddTr("tipp_pin",   "Sidebar|Single section / full sidebar.",
-                        "Sidebar|Section unique / sidebar complete.",
-                        "Barra lateral|Seccion unica / barra completa.");
+                        "Sidebar|Section unique / sidebar complète.",
+                        "Barra lateral|Sección única / barra completa.");
     AddTr("tipl_0", "Room|Dollars before the nearest active limit.",
                     "Marge|Dollars avant la limite active la plus proche.",
-                    "Margen|Dolares antes del limite activo mas cercano.");
+                    "Margen|Dólares antes del límite activo más cercano.");
     AddTr("tipl_1", "Floor|Equity under this level = account lost.",
                     "Plancher|Equity sous ce niveau = compte perdu.",
                     "Suelo|Equity bajo este nivel = cuenta perdida.");
     AddTr("tipl_2", "Cumulative margin|Margin used / plan cap.",
-                    "Marge cumulee|Marge engagee / plafond du plan.",
+                    "Marge cumulée|Marge engagée / plafond du plan.",
                     "Margen acumulado|Margen usado / tope del plan.");
     AddTr("tipl_3", "Open risk|Sum of risks at the stops / cap.",
                     "Risque ouvert|Somme des risques aux SL / plafond.",
                     "Riesgo abierto|Suma de riesgos en los SL / tope.");
     AddTr("tipl_4", "Daily DD|Today's loss / daily limit.",
-                    "DD journalier|Perte du jour / limite journaliere.",
-                    "DD diario|Perdida de hoy / limite diario.");
+                    "DD journalier|Perte du jour / limite journalière.",
+                    "DD diario|Pérdida de hoy / límite diario.");
     AddTr("tipl_5", "Overall DD|Total loss / plan maximum.",
                     "DD total|Perte totale / limite max du plan.",
-                    "DD total|Perdida total / maximo del plan.");
+                    "DD total|Pérdida total / máximo del plan.");
     AddTr("tipo_0", "Budget|What this trade may lose at its stop.",
-                    "Budget|Ce que ce trade a le droit de perdre a sa SL.",
+                    "Budget|Ce que ce trade a le droit de perdre à sa SL.",
                     "Presupuesto|Lo que esta op. puede perder en su SL.");
     AddTr("tipo_1", "Free margin|Broker free margin / initial balance.",
                     "Marge libre|Marge broker disponible / balance initiale.",
                     "Margen libre|Margen libre del broker / balance inicial.");
     AddTr("tipo_2", "80% cap|Lot reduced to keep a 20% reserve.",
-                    "Plafond 80%|Lot reduit pour garder 20% de reserve.",
+                    "Plafond 80%|Lot réduit pour garder 20% de réserve.",
                     "Tope 80%|Lote reducido para guardar 20% de reserva.");
     AddTr("tipw_0", "News source|FF = ForexFactory feed (FN-aligned). MT = fallback.",
-                    "Source news|FF = flux ForexFactory (aligne FN). MT = secours.",
+                    "Source news|FF = flux ForexFactory (aligné FN). MT = secours.",
                     "Fuente noticias|FF = feed ForexFactory (alineado FN). MT = respaldo.");
     AddTr("tipw_1", "News rule|Red = the 40% rule. Amber = check on FN.",
-                    "Regle news|Rouge = regle 40%. Ambre = a verifier sur FN.",
-                    "Regla noticias|Rojo = regla 40%. Ambar = verificar en FN.");
+                    "Règle news|Rouge = règle 40%. Ambre = à vérifier sur FN.",
+                    "Regla noticias|Rojo = regla 40%. Ámbar = verificar en FN.");
     AddTr("tipw_2", "Upcoming|Next groups (time, currency, level).",
                     "A venir|Prochains groupes (heure, devise, niveau).",
-                    "Proximos|Proximos grupos (hora, divisa, nivel).");
+                    "Próximos|Próximos grupos (hora, divisa, nivel).");
     AddTr("tipd_0", "Lock|Time left before it releases.",
-                    "Verrou|Temps restant avant deverrouillage.",
+                    "Verrou|Temps restant avant déverrouillage.",
                     "Bloqueo|Tiempo restante antes de liberarse.");
     AddTr("tipd_1", "SL guard|Stop price that keeps a 20% survival room.",
                     "Garde SL|Prix de SL qui laisse 20% de marge de survie.",
                     "Guarda SL|Precio de SL que deja 20% de margen.");
     AddTr("tipd_2", "Tilt|Trades in the window / configured threshold.",
-                    "Tilt|Trades dans la fenetre / seuil configure.",
+                    "Tilt|Trades dans la fenêtre / seuil configuré.",
                     "Tilt|Ops en la ventana / umbral configurado.");
     AddTr("tipc_0", "Palette|Emerald / Indigo / Slate.",
-                    "Palette|Emeraude / Indigo / Ardoise.",
+                    "Palette|Émeraude / Indigo / Ardoise.",
                     "Paleta|Esmeralda / Indigo / Pizarra.");
     AddTr("tipc_1", "Mode|Dark / light.", "Mode|Sombre / clair.", "Modo|Oscuro / claro.");
     AddTr("tipc_2", "Language|EN / FR / ES (persisted).",
-                    "Langue|EN / FR / ES (persistee).",
+                    "Langue|EN / FR / ES (persistée).",
                     "Idioma|EN / FR / ES (persistido).");
     AddTr("tipc_3", "News HIGH|Events bound by the 40% rule.",
-                    "News HIGH|Events soumis a la regle 40%.",
+                    "News HIGH|Events soumis à la règle 40%.",
                     "Noticias ALTA|Eventos sujetos a la regla 40%.");
     AddTr("tipc_4", "News MEDIUM|Watch only : check on FN, no rule.",
-                    "News MEDIUM|Vigilance : a verifier sur FN, pas de regle.",
+                    "News MEDIUM|Vigilance : à vérifier sur FN, pas de règle.",
                     "Noticias MEDIA|Vigilancia : verificar en FN, sin regla.");
     AddTr("tipc_5", "Sound|Audible alert on status changes.",
                     "Son|Alerte sonore aux changements de statut.",
                     "Sonido|Alerta sonora en cambios de estado.");
     AddTr("tipc_6", "Telegram|Sends alerts (token in the Inputs).",
                     "Telegram|Envoi des alertes (token dans les Inputs).",
-                    "Telegram|Envia alertas (token en los Inputs).");
+                    "Telegram|Envía alertas (token en los Inputs).");
     AddTr("tipc_7", "Comfort|Vertical padding of the chart.",
                     "Confort|Marge verticale du graphique.",
-                    "Confort|Margen vertical del grafico.");
+                    "Confort|Margen vertical del gráfico.");
     AddTr("tipc_8", "Discipline|Daily lock + tilt detection.",
-                    "Discipline|Verrou journalier + detection de tilt.",
-                    "Disciplina|Bloqueo diario + deteccion de tilt.");
+                    "Discipline|Verrou journalier + détection de tilt.",
+                    "Disciplina|Bloqueo diario + detección de tilt.");
     AddTr("tipc_9", "Risk tools|The whole prop toolkit (personal account).",
-                    "Outils|Toute la boite a outils prop (compte perso).",
+                    "Outils|Toute la boîte à outils prop (compte perso).",
                     "Herramientas|Todo el kit prop (cuenta personal).");
     AddTr("tip_band",   "Alert|Blocking state : read it, act, it goes away.",
-                        "Alerte|Etat bloquant : lis la ligne, agis, elle part.",
-                        "Alerta|Estado bloqueante : lee, actua, desaparece.");
+                        "Alerte|État bloquant : lis la ligne, agis, elle part.",
+                        "Alerta|Estado bloqueante : lee, actúa, desaparece.");
     AddTr("tip_posrow", "Position|Symbol, side, volume, P&L, age, stop present.",
-                        "Position|Symbole, sens, volume, P&L, age, presence de SL.",
-                        "Posicion|Simbolo, sentido, volumen, P&L, edad, SL.");
+                        "Position|Symbole, sens, volume, P&L, âge, présence de SL.",
+                        "Posición|Símbolo, sentido, volumen, P&L, edad, SL.");
     AddTr("tip_fltclose",
         "Closing|Disabled : an indicator cannot send orders. Closing lives in the EA version.",
-        "Fermeture|Desactive : un indicateur ne passe pas d'ordre. La fermeture est dans la version EA.",
-        "Cierre|Desactivado : un indicador no envia ordenes. El cierre esta en la version EA.");
+        "Fermeture|Désactivé : un indicateur ne passe pas d'ordre. La fermeture est dans la version EA.",
+        "Cierre|Desactivado : un indicador no envía órdenes. El cierre está en la versión EA.");
     AddTr("tipq_0",     "Room|Distance in $ to the nearest active limit. Click : the limits.",
-                        "Marge|Distance en $ a la limite active la plus proche. Clic : les limites.",
-                        "Margen|Distancia en $ al limite activo mas cercano. Clic : los limites.");
+                        "Marge|Distance en $ à la limite active la plus proche. Clic : les limites.",
+                        "Margen|Distancia en $ al límite activo más cercano. Clic : los límites.");
     AddTr("tipq_1",     "Lot|Advised size for the current risk. Click : the advisor.",
-                        "Lot|Taille conseillee pour le risque en cours. Clic : le conseiller.",
-                        "Lote|Tamano aconsejado para el riesgo actual. Clic : el asesor.");
+                        "Lot|Taille conseillée pour le risque en cours. Clic : le conseiller.",
+                        "Lote|Tamaño aconsejado para el riesgo actual. Clic : el asesor.");
     AddTr("tipq_2",     "News|Minutes to the next binding event. Click : the news.",
-                        "News|Minutes avant le prochain evenement contraignant. Clic : les news.",
-                        "News|Minutos hasta el proximo evento vinculante. Clic : las noticias.");
+                        "News|Minutes avant le prochain événement contraignant. Clic : les news.",
+                        "News|Minutos hasta el próximo evento vinculante. Clic : las noticias.");
     AddTr("tip_cpt",    "Profile|The plan EVERY limit is derived from.",
-                        "Profil|Le plan dont TOUTES les limites sont deduites.",
-                        "Perfil|El plan del que salen TODOS los limites.");
+                        "Profil|Le plan dont TOUTES les limites sont déduites.",
+                        "Perfil|El plan del que salen TODOS los límites.");
     AddTr("tip_help",   "Version|Current build + active news source.",
                         "Version|Build en cours + source des news active.",
-                        "Version|Build actual + fuente de noticias activa.");
+                        "Versión|Build actual + fuente de noticias activa.");
     // --- v2.13 FEATURE B : SL-vs-limit survival guard (20% margin) ---
     AddTr("slguard",
           "SL too low - breach risk : raise the SL to keep a 20% margin",
@@ -5307,7 +5308,7 @@ void InitI18n(void) {
     AddTr("chip_ok",   "OK",     "OK",        "OK");      // positions keep OK (E6)
     AddTr("chip_safe", "SAFE",   "SUR",       "SEGURO");  // E2 : mockup vocabulary for metered RULES
     AddTr("chip_warn", "WATCH",  "SURVEILLE", "VIGILAR"); // E2 : was WARN
-    AddTr("chip_red",  "BREACH", "BRECHE",    "BRECHA");  // E2 : was RED
+    AddTr("chip_red",  "BREACH", "BRÈCHE",    "BRECHA");  // E2 : was RED
     AddTr("chip_na",   "--",   "--",     "--");
     // --- TF / recent bar ---
     AddTr("tf",       "TF:",       "TF:",       "TF:");
@@ -5359,7 +5360,7 @@ void InitI18n(void) {
     AddTr("tab_advanced",  "Advanced",                   "Avancé",                     "Avanzado");
     AddTr("set_tiltn",     "Tilt trades :",              "Trades tilt :",              "Trades tilt :");
     AddTr("set_tiltwin",   "Tilt window :",              "Fenêtre tilt :",             "Ventana tilt :");
-    AddTr("set_cooldownn", "Cooldown losses :",          "Pertes pause :",             "Perdidas pausa :");
+    AddTr("set_cooldownn", "Cooldown losses :",          "Pertes pause :",             "Pérdidas pausa :");
     AddTr("set_cooldownm", "Cooldown delay :",           "Délai pause :",              "Retraso pausa :");
     AddTr("set_selflockh", "Self-lock hours :",          "Heures auto-verrou :",       "Horas auto-bloqueo :");
     AddTr("set_comfortpct","Comfort pad :",              "Marge confort :",            "Margen confort :");
@@ -5373,7 +5374,7 @@ void InitI18n(void) {
     AddTr("set_rcapviol",  "Risk cap (viol.) :",         "Plafond risque (viol.) :",   "Tope riesgo (viol.) :");
     AddTr("set_cycyear",   "Cycle year :",               "Année cycle :",              "Año ciclo :");
     AddTr("set_cycmonth",  "Cycle month :",              "Mois cycle :",               "Mes ciclo :");
-    AddTr("set_cycday",    "Cycle day :",                "Jour cycle :",               "Dia ciclo :");
+    AddTr("set_cycday",    "Cycle day :",                "Jour cycle :",               "Día ciclo :");
     AddTr("set_refreshms", "Refresh (ms) :",             "Rafraîchir (ms) :",          "Refresco (ms) :");
     AddTr("pos_click_tip", "Click to switch chart to this symbol",
                            "Cliquer pour afficher ce symbole",
