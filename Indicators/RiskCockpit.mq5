@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.15"
+#property version "3.16"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -32,6 +32,7 @@
 #include <..\Libraries\CPyramidEngine.mqh>
 #include <Canvas\Canvas.mqh>            // v1.4 : CCanvas FX overlay (risk-breach glow ring)
 #include <..\Libraries\JR_CanvasUI.mqh> // v1.4 : reusable modern-UI canvas kit (brand design language)
+#include <..\Libraries\RC_Math.mqh>
 #include <..\Libraries\RC_ShellUI.mqh> // v3 SHELL (lot 1) : 36px rail + on-demand panel (StrategyDeck v2 space architecture)
 
 // V1.29 : EMBED the header logo so BUYERS see it. A Market product ships only the
@@ -382,12 +383,7 @@ int RC_CapWidth(const string txt, const int h, const string font) {
 //+------------------------------------------------------------------+
 //| Status enumeration (rule status)                                 |
 //+------------------------------------------------------------------+
-enum ENUM_RC_STATUS {
-    RC_STATUS_NA = 0,
-    RC_STATUS_OK = 1,
-    RC_STATUS_WARN = 2,
-    RC_STATUS_RED = 3
-};
+// ENUM_RC_STATUS lives in RC_Math.mqh (shared with the self-test)
 
 //+------------------------------------------------------------------+
 //| Rule row definition                                              |
@@ -1392,8 +1388,7 @@ void BuildDeckData(RCDeckData &d) {
     d.roomMoney = Live_NearestLimitRoom();                 // -1 = no active limit
     d.floorMoney = 0.0;
     if (d.trailing && init > 0.0) {
-        const double permitted = (g_profile.max_loss_pct / 100.0) * init;
-        d.floorMoney = MathMin(g_peak_balance - permitted, init);
+        d.floorMoney = RC_TrailingFloor(g_peak_balance, init, g_profile.max_loss_pct);
     }
     // --- positions (cell POS + section rows) -----------------------------
     d.posCount = PositionsTotal();
@@ -2155,20 +2150,6 @@ void RefreshPanel(void) {
 }
 
 //+------------------------------------------------------------------+
-//| Status helpers                                                   |
-//+------------------------------------------------------------------+
-ENUM_RC_STATUS ComputeRangeStatus(double v, double max_v, double warn_ratio, double red_ratio) {
-    if (max_v <= 0.0)
-        return RC_STATUS_NA;
-    const double r = v / max_v;
-    if (r >= red_ratio)
-        return RC_STATUS_RED;
-    if (r >= warn_ratio)
-        return RC_STATUS_WARN;
-    return RC_STATUS_OK;
-}
-
-//+------------------------------------------------------------------+
 //| B5 : next HIGH-impact news + B4 : weekend-hold warning state      |
 //+------------------------------------------------------------------+
 bool     g_weekend_warned = false; // weekend alert already fired this window
@@ -2339,50 +2320,6 @@ void ApplyComfortScaleAllCharts(void) {
         if (sym != "") ApplyComfortScaleToChart(cid, sym);
         cid = ChartNext(cid);
     }
-}
-
-//+------------------------------------------------------------------+
-//| Formatting helpers                                               |
-//+------------------------------------------------------------------+
-string FormatMoney(double v) {
-    return "$" + DoubleToString(v, 2);
-}
-
-string FormatPct(double v) {
-    return DoubleToString(v, 2) + "%"; // P4 : 2 decimals on the rule meters too
-}
-
-//+------------------------------------------------------------------+
-//| ISO date diff (returns days B - A; 0 on parse error)             |
-//+------------------------------------------------------------------+
-int DaysBetweenIso(const string iso_a, const string iso_b) {
-    string a_norm = iso_a;
-    string b_norm = iso_b;
-    StringReplace(a_norm, "-", ".");
-    StringReplace(b_norm, "-", ".");
-    const datetime a = StringToTime(a_norm);
-    const datetime b = StringToTime(b_norm);
-    if (a == 0 || b == 0)
-        return 0;
-    return (int)((b - a) / 86400);
-}
-
-//+------------------------------------------------------------------+
-//| V1.27 : cycle-date <-> YYYYMMDD double (GlobalVariable is double  |
-//| only, so the editable cycle start is stored as e.g. 20260509.0). |
-//+------------------------------------------------------------------+
-double IsoToYmd(const string iso) {
-    string norm = iso;
-    StringReplace(norm, "-", ".");
-    const datetime t = StringToTime(norm);
-    if (t == 0) return 0.0;
-    MqlDateTime dt;
-    TimeToStruct(t, dt);
-    return (double)(dt.year * 10000 + dt.mon * 100 + dt.day);
-}
-string YmdToIso(const double ymd) {
-    const int v = (int)ymd;
-    return StringFormat("%04d-%02d-%02d", v / 10000, (v / 100) % 100, v % 100);
 }
 
 //+------------------------------------------------------------------+
@@ -2591,8 +2528,10 @@ double Live_OverallDdPct(void) {
         const double init = g_profile.initial_balance;
         if (init <= 0.0)
             return 0.0;
+        // ONE implementation, shared with Scripts/RC_SelfTest.mq5 : the level
+        // at which the account is lost cannot have two versions.
         const double permitted = (g_profile.max_loss_pct / 100.0) * init;
-        const double floorv    = MathMin(g_peak_balance - permitted, init);
+        const double floorv    = RC_TrailingFloor(g_peak_balance, init, g_profile.max_loss_pct);
         static bool s_floor_logged = false; // acceptance : must match the FN dashboard
         if (!s_floor_logged) {
             PrintFormat("RiskCockpit Instant floor: floor=%.2f permitted=%.2f peak_bal=%.2f",
@@ -3602,26 +3541,6 @@ bool FFRestrictedOverride(const string ccy, const string title) {
     return false;
 }
 // "2026-07-14T08:30:00-04:00" -> epoch UTC (offset parsed out ; trailing 'Z' = UTC).
-datetime FFParseIso8601Utc(const string s) {
-    if (StringLen(s) < 19) return 0;
-    MqlDateTime dt;
-    dt.year = (int)StringToInteger(StringSubstr(s, 0, 4));
-    dt.mon  = (int)StringToInteger(StringSubstr(s, 5, 2));
-    dt.day  = (int)StringToInteger(StringSubstr(s, 8, 2));
-    dt.hour = (int)StringToInteger(StringSubstr(s, 11, 2));
-    dt.min  = (int)StringToInteger(StringSubstr(s, 14, 2));
-    dt.sec  = (int)StringToInteger(StringSubstr(s, 17, 2));
-    if (dt.year < 2000 || dt.mon < 1 || dt.mon > 12 || dt.day < 1 || dt.day > 31) return 0;
-    datetime t = StructToTime(dt); // naive stamp -> epoch as-if-UTC
-    if (StringLen(s) >= 25) {      // +HH:MM / -HH:MM -> local = UTC + off => UTC = local - off
-        const ushort sign = StringGetCharacter(s, 19);
-        const int off = (int)StringToInteger(StringSubstr(s, 20, 2)) * 3600 +
-                        (int)StringToInteger(StringSubstr(s, 23, 2)) * 60;
-        if      (sign == '+') t -= off;
-        else if (sign == '-') t += off;
-    }
-    return t;
-}
 // Minimal string-scan : the JSON string value of `key`, searched forward from `from`
 // but NEVER past `until` (the next object's start) - a missing key in one object can
 // therefore never grab the NEXT object's field (cross-object desync guard). Advances
@@ -5680,11 +5599,6 @@ string MonthShort(const int m) {
 }
 // V1.28 : days in a month (leap-aware) so the cycle-date picker never produces
 // an invalid date like "31 Feb".
-int DaysInMonth(const int y, const int m) {
-    if (m == 2) return (((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0)) ? 29 : 28;
-    if (m == 4 || m == 6 || m == 9 || m == 11) return 30;
-    return 31;
-}
 string PhaseLabelLocal(int ph) {
     switch (ph) {
         case 0: return "Challenge P1";

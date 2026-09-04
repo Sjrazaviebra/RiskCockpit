@@ -69,6 +69,13 @@ python tools/audit.py           # one command, one verdict (exit 0 / 1)
 python tools/gate_selftest.py   # proves the gate can still say NO
 ```
 
+Those are static. The **math** is exercised inside MetaTrader itself: attach
+`Scripts/RC_SelfTest.mq5` to any chart — it needs no account, touches nothing,
+and writes one line per case to the Experts journal. It includes the very
+`RC_Math.mqh` the indicator includes, so it tests the code that ships rather
+than a copy of it: the trailing floor at which a funded account is lost, the
+80 % / 100 % status thresholds, the cycle dates and the news timestamps.
+
 The self-test injects one defect at a time into a throw-away copy and requires
 the matching line to turn FAIL — an audit nobody ever saw fail is a decoration.
 Checks that read a binary run a positive control first: if the instrument

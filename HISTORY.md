@@ -86,6 +86,34 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.16.28 - les formules de risque deviennent testables
+
+Les douze contrôles statiques ne regardent que la mécanique. **Le cœur — les
+chiffres qui décident si un compte est perdu — n'avait aucun test**, et le
+plancher trailing n'était vérifié que par un commentaire.
+
+- `Libraries/RC_Math.mqh` : les **8 fonctions pures** (aucun global, aucun
+  compte, aucun symbole) sortent de l'indicateur — seuils de statut, dates de
+  cycle, horodatages ISO 8601 du flux news, formats — plus
+  **`RC_TrailingFloor()`**, extrait de deux copies inline de la formule. Il
+  n'existe désormais qu'**une seule** implémentation du niveau où le compte est
+  perdu ; les deux appelants l'utilisent.
+- `Scripts/RC_SelfTest.mq5` : **30 cas**, à attacher à n'importe quel graphique.
+  Aucun compte requis, rien n'est modifié, une ligne par cas dans le journal.
+  Il inclut **le même** `RC_Math.mqh` que l'indicateur : ce qui est testé est
+  ce qui tourne, pas une réimplémentation — une vérification qui ne franchit
+  pas la frontière de langage ne vérifie rien.
+- Couverture : oracle FN Instant 2K (pic 2003.28 → plancher 1883.28), plafond
+  au break-even, pic sous la balance initiale, premier jour, garde-fous à zéro,
+  add-on 10 % ; les bornes 79/80/99/100 des statuts ; bascules de mois, d'année
+  et années bissextiles ; ISO 8601 avec décalage `-04:00` et forme `Z`.
+
+⚠️ **Le script compile (0/0) mais n'a jamais été exécuté** — MT5 est fermé
+depuis le crash. Sa première exécution en dira autant sur le test que sur le
+code : une attente fausse s'y verra comme un FAIL. J'ai relu chaque attente
+contre l'implémentation (seuils, bissextiles, sens des décalages horaires),
+mais relire n'est pas exécuter.
+
 ### v3.15.27 - un numéro de compte MT5 traînait dans le dépôt PUBLIC
 
 Contrôle déclenché par l'ajout du `.ex5` au dépôt en v3.13 : un binaire est
