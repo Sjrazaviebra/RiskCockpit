@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "2.17"
+#property version "2.18"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -3337,6 +3337,39 @@ void ShellApplyCfg(const int id) {
         ShellPushLabels();                 // the shell's chrome follows the language
     }
 }
+// v3 SHELL : the ONE native control of the shell - a copyable lot box. A canvas
+// cannot be selected, so the number the trader pastes into the order ticket has
+// to be an OBJ_EDIT. The shell reserves the rect (and a no-op click zone under
+// it) ; the host owns the object, so its lifecycle stays with the other
+// RC_-prefixed objects and it dies with the shell.
+void ShellSyncLotEdit(const double lot, const int digits) {
+    const string id = RC_PREFIX + "V3_copylot";
+    int x, y, w, h;
+    if (!InpShellV2 || !g_shell.LotEditRect(x, y, w, h)) {
+        ObjectDelete(0, id);
+        return;
+    }
+    if (ObjectFind(0, id) < 0) {
+        ObjectCreate(0, id, OBJ_EDIT, 0, 0, 0);
+        ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
+        ObjectSetInteger(0, id, OBJPROP_ALIGN, ALIGN_CENTER);
+        ObjectSetInteger(0, id, OBJPROP_READONLY, false);   // selectable text = copyable
+        ObjectSetInteger(0, id, OBJPROP_ZORDER, 300);
+        ObjectSetString (0, id, OBJPROP_FONT, RC_FONT);
+        ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
+        ObjectSetString (0, id, OBJPROP_TOOLTIP, Tr("copy_sug_tip"));
+    }
+    ObjectSetInteger(0, id, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, id, OBJPROP_YDISTANCE, y);
+    ObjectSetInteger(0, id, OBJPROP_XSIZE, w);
+    ObjectSetInteger(0, id, OBJPROP_YSIZE, h);
+    ObjectSetInteger(0, id, OBJPROP_COLOR, g_shell.EditTextColor());
+    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_shell.EditBackColor());
+    ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_shell.EditLineColor());
+    ObjectSetString (0, id, OBJPROP_TEXT, DoubleToString(lot, digits));
+}
 void ShellRefresh(void) {
     if (!InpShellV2) return;
     ShellApplyCfg(g_shell.PendCfgTake());  // consume a toggle click before rendering
@@ -3345,6 +3378,7 @@ void ShellRefresh(void) {
     g_shell.SetData(d);
     RefreshSlLines();                    // chart-side advisory lines stay live under the shell
     if (g_shell.Created()) g_shell.Tick();
+    ShellSyncLotEdit(d.sugLot, d.lotDigits);   // AFTER the render : the rect is known
 }
 
 void RefreshPanel(void) {

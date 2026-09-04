@@ -147,7 +147,8 @@ enum ERCZone {
    // --- lot 2b : config toggles (contiguous : the host maps the offset) --
    RZ_CFG_PAL, RZ_CFG_MODE, RZ_CFG_LANG, RZ_CFG_NEWSH, RZ_CFG_NEWSM,
    RZ_CFG_SOUND, RZ_CFG_TG, RZ_CFG_COMFORT, RZ_CFG_DISC, RZ_CFG_RTOOLS,
-   RZ_TIP_CPT, RZ_TIP_HELP
+   RZ_TIP_CPT, RZ_TIP_HELP,
+   RZ_LOT_EDIT                                 // copy-lot native edit : click = no-op (never collapses)
 };
 //--- label slots : the shell ships FR defaults ; the host overrides them with
 //--- its own i18n (Tr) so one translation table serves the whole product.
@@ -168,7 +169,7 @@ enum ERCLabel {
    RCL_DISC_TRADES, RCL_DISC_TILTWIN,
    RCL_BAND_LOCK, RCL_BAND_SL, RCL_BAND_TILT, RCL_LEFT, RCL_MAX,
    RCL_CPT_PLAN, RCL_CPT_PHASE, RCL_CPT_SIZE, RCL_CPT_TYPE, RCL_CPT_ADDONS,
-   RCL_CPT_SPLIT, RCL_CPT_DAYS
+   RCL_CPT_SPLIT, RCL_CPT_DAYS, RCL_LOT_COPY
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -214,6 +215,9 @@ private:
    int        m_railX, m_railY, m_railH, m_railGap;
    int        m_navX, m_navW, m_navY;
    bool       m_bandOn;          // a blocking alert owns the top band
+   // copy-lot : the shell RESERVES the rect, the host owns the native OBJ_EDIT
+   bool       m_lotEditOn;
+   int        m_lotEditX, m_lotEditY, m_lotEditW, m_lotEditH;
    int        m_sideX, m_sideY, m_sideH;
    RCZone     m_z[96];
    int        m_zn;
@@ -600,7 +604,21 @@ private:
       const color lc = (m_d.lotZero ? m_t.red : (m_d.lotCapped ? m_t.warn : m_t.accent));
       m_side.Text(18, y, (m_d.sugLot > 0.0 ? DoubleToString(m_d.sugLot, m_d.lotDigits) : "--"),
                   A(lc), RCS_F_BIG, "Consolas", TA_LEFT | TA_TOP, FW_BOLD);
-      m_side.Text(RCS_SIDE_W - 18, y + 6, "lot", A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_RIGHT | TA_TOP);
+      // COPY-LOT : the value has to be COPYABLE (Ctrl+C into the order ticket),
+      // and only a native OBJ_EDIT can be selected. The shell reserves the rect
+      // and registers a NO-OP zone on it (a click there must never collapse the
+      // section) ; the host creates and fills the control - see LotEditRect().
+      m_lotEditOn = (m_d.sugLot > 0.0);
+      if(m_lotEditOn) {
+         m_lotEditW = 76; m_lotEditH = 20;
+         m_lotEditX = m_sideX + RCS_SIDE_W - 18 - m_lotEditW;
+         m_lotEditY = m_sideY + y - 2;
+         m_side.Text(RCS_SIDE_W - 18 - m_lotEditW - 8, y + 3, L(RCL_LOT_COPY, "copier"),
+                     A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_RIGHT | TA_TOP);
+         ZAdd(m_lotEditX - 2, m_lotEditY - 2, m_lotEditW + 4, m_lotEditH + 4, RZ_LOT_EDIT);
+      } else {
+         m_side.Text(RCS_SIDE_W - 18, y + 6, "lot", A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_RIGHT | TA_TOP);
+      }
       y += 30;
       if(m_d.lotCapped) {
          m_side.Text(18, y, (m_d.lotZero ? "Aucune marge : ne prends pas ce trade."
@@ -822,6 +840,7 @@ private:
    void RenderSide(void) {
       if(!m_side.Ready()) return;
       m_side.Begin();
+      m_lotEditOn = false;                                 // re-armed by SecLot when it draws
       if(m_state == 0) { m_side.Commit(); return; }        // closed = transparent bitmap
       const int W = RCS_SIDE_W, H = m_sideH;
       m_side.SoftShadow(4, 4, W - 8, H - 8, 14, clrBlack, 7, 80);
@@ -1094,6 +1113,7 @@ public:
       }
       for(int q = 0; q < 6; q++) { m_d.newsWhen[q] = ""; m_d.newsCcy[q] = ""; m_d.newsRestr[q] = false; }
       m_navY = 0; m_bandOn = false;
+      m_lotEditOn = false; m_lotEditX = 0; m_lotEditY = 0; m_lotEditW = 0; m_lotEditH = 0;
       m_pendCfg = 0;
       m_menuOpen = false; m_menuMode = 0; m_menuX = 0; m_menuY = 0; m_menuH = 40; m_menuN = 0;
       for(int mi = 0; mi < 12; mi++) m_menuItem[mi] = "";
@@ -1138,6 +1158,15 @@ public:
    int ZidCfg(const int i)   const { return RZ_CFG_PAL + i; }         // 0..9
    int ZidCptTip(void) const { return RZ_TIP_CPT; }
    int ZidHelpTip(void) const { return RZ_TIP_HELP; }
+   //--- copy-lot : true + rect when the host must show its native edit box ----
+   bool LotEditRect(int &x, int &y, int &w, int &h) const {
+      if(!m_lotEditOn) return false;
+      x = m_lotEditX; y = m_lotEditY; w = m_lotEditW; h = m_lotEditH;
+      return true;
+   }
+   color EditTextColor(void) const { return m_t.text; }
+   color EditBackColor(void) const { return MixC(m_t.surface, m_t.accent, 0.10); }
+   color EditLineColor(void) const { return LineC(); }
    //--- config toggle ids, so the host can map them without knowing the enum
    int  CfgIdNewsHigh(void) const { return RZ_CFG_NEWSH; }
    int  CfgIdNewsMed(void)  const { return RZ_CFG_NEWSM; }
@@ -1257,6 +1286,7 @@ public:
       if(hit >= RZ_TIP_LIM_ROOM && hit <= RZ_TIP_LIM_M3) return true;
       if(hit >= RZ_POS_ROW0 && hit <= RZ_BAND) return true;   // info rows + safety band
       if(hit == RZ_TIP_CPT || hit == RZ_TIP_HELP) return true;
+      if(hit == RZ_LOT_EDIT) return true;      // native edit sits here : NEVER collapse the section
       switch(hit) {
          case RZ_RAIL_LIM: case RZ_RAIL_POS: case RZ_RAIL_LOT: case RZ_RAIL_NEWS:
          case RZ_RAIL_DISC: case RZ_RAIL_CPT: case RZ_RAIL_CFG: case RZ_RAIL_HELP:

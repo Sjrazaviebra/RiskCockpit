@@ -84,6 +84,21 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 2. Log
 
+### v2.18.10 — 2026-09-04 — copy-lot: the shell's one native control
+
+The suggested lot is the number that gets pasted into the order ticket, and a canvas cannot be
+selected — so this one value needs a native `OBJ_EDIT`. It is the last service the legacy panel
+had and the shell did not.
+
+- The shell **reserves the rectangle** inside the LOT section and registers a **no-op click zone**
+  under it: a click on the box (or its border) must never collapse the section — the trap the
+  playbook warns about.
+- The host owns the object (`RC_V3_copylot`), so it lives and dies with the rest of the
+  `RC_`-prefixed objects, and it is themed from the shell's own palette.
+- It appears only while the LOT section is open and a lot is actually available.
+
+Compiled `0 errors, 0 warnings`.
+
 ### v2.17.09 — 2026-09-04 — restore the UTF-8 BOM on the source
 
 `Indicators/RiskCockpit.mq5` lost its BOM during today's edits (it went out in v2.14.06). The file
