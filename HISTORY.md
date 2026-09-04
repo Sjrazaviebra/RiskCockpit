@@ -86,6 +86,38 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.13.25 - ménage post-purge, et un trou i18n que le rituel a débusqué
+
+Nettoyage de ce que la suppression de l'ancien shell avait laissé derrière :
+
+- **105 clés i18n mortes** retirées (sur 336) — 4 chaînes chacune, dans un
+  binaire public décompilable — plus **21 déclarations mortes** (`struct
+  RCHit`, les 7 `RCF_*`, `VerdictResult`, `g_settings_tab`, `g_chip_*`,
+  `RC_TITLE_HEIGHT`…) et 5 `SetLabel` que plus aucun `L()` ne lisait.
+  **5753 → 5570 lignes.**
+- Critère de suppression prudent : une clé n'est morte que si son littéral
+  n'apparaît **nulle part** ailleurs (un `Tr(cond ? "a" : "b")` échappe à une
+  recherche sur `Tr("x")`) et qu'aucun préfixe dynamique ne peut la construire.
+
+**Deux erreurs attrapées par les contrôles, pas par le compilateur** — `Tr()`
+renvoie la clé brute en secours, donc rien n'échoue à la compilation :
+
+1. Ma boucle de suppression cherchait une ligne finissant par `);` ; les
+   entrées suivies d'un commentaire (`); // E2 : was WARN`) ne matchaient pas,
+   et la boucle **avalait les entrées voisines** — `chip_red`, `chip_warn` et
+   `ins_tip_floor`, bien vivantes, étaient parties avec. Le contrôle « toute
+   clé demandée existe-t-elle ? » les a rendues.
+2. La sonde d'accents du rituel est tombée à **0** sur « Éligibilité ». En
+   creusant : `RCL_PAYOUT` et `RCL_TARGET` **n'avaient jamais eu de
+   traduction** depuis leur création — le shell les appelle dans un ternaire
+   (`L(trailing ? RCL_PAYOUT : RCL_TARGET, …)`), angle mort de mon audit.
+   En FR et en ES, la section COMPTE affichait donc de l'anglais. Corrigé, et
+   l'audit des libellés parcourt désormais l'expression entière : **131 ids
+   demandés, 131 poussés**.
+
+`Result: 0 errors, 0 warnings` · 0 clé demandée introuvable · 0 libellé sans
+traduction.
+
 ### v3.12.24 - le plancher trailing alerte à l'approche
 
 Le plancher (`min(pic de balance − perte permise, balance initiale)`) est le

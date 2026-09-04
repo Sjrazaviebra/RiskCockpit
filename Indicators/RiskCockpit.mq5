@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.12"
+#property version "3.13"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -357,7 +357,6 @@ color FilmOver(const color base, const double t) {
 //+------------------------------------------------------------------+
 #define RC_PREFIX "RC_"
 #define RC_PAD 10
-#define RC_TITLE_HEIGHT 30
 #define RC_TITLE_CLOCK_W 120 // FIX 7 : reserved right zone for the clock (news/weekend/LIVE) so it never overlaps the balance
 #define RC_HEADER_GAP    14  // FINESSE 1 : air between the gear cluster and the right-anchored status/clock (was a magic 8, too tight)
 #define RC_LOGO_FILE "RiskCockpit_logo.bmp" // fixed header logo asset under MQL5\Images\ (not a user input)
@@ -697,7 +696,6 @@ void   ApplySettingsChange(void);                                               
 void   ClearBreakevenLines(void);               // LOT 5 : remove all BE lines
 // LOT 6 : single-glance verdict badge + safety score (replaces the LIVE blinker
 // in the title bar's clock zone when no weekend / news countdown is active).
-struct VerdictResult { string text; color clr; int score; };
 void   PersistBE(void);
 void   PersistLang(void);
 void DrawRect(const string id, int x, int y, int w, int h, color bg, color border, int width = 1);
@@ -794,7 +792,6 @@ int g_max_parallel = 5; // runtime-mutable; init from InpMaxParallelPositions
 // B8 : recent-symbols quick-switch bar (FIFO, max 4, most-recent-first).
 // Rebuilt from open positions + recent deals (history persists -> no need to
 // store strings in GlobalVariable, which only holds doubles anyway).
-#define RC_MAX_RECENT_SYMS 4
 // LOT A : per-row LIVE status mirror. RefreshPositionsList (and the SL>REC override in
 // RefreshSlLinesForChart) write it ; RepaintCanvas reads it to tint the row's status
 // pill on the canvas. OnTimer order (RefreshPanel THEN RepaintCanvas) keeps it fresh.
@@ -803,9 +800,6 @@ ENUM_RC_STATUS g_pos_status[RC_MAX_POSITIONS];
 // source : DrawAccountStrip computes + stores them (and centers its labels on them) ;
 // RepaintCanvas paints the tinted pill faces from the SAME offsets -> drag-proof,
 // label/face can never desync (the BE lesson). w == 0 -> chips not drawn.
-int g_chip_swap_dx = 0, g_chip_swap_w = 0, g_chip_split_dx = 0, g_chip_split_w = 0;
-int    g_tfbar_y  = 0;    // P4 : y of the TF/control bar (copy-lot fields live here)
-int    g_footer_y = 0;    // P1 : y of the footer block (coloured info segments)
 
 // B2 : drag-to-move panel. g_anchor_x/y = live panel origin (init from
 // InpAnchorX/Y, restored from GlobalVariable, persisted on drop).
@@ -819,19 +813,10 @@ int    g_footer_y = 0;    // P1 : y of the footer block (coloured info segments)
 // control's geometry : hit-testing reads the (relative) rect, and RepaintCanvas
 // paints the matching rounded face from the SAME rect (local = relative + margin).
 // So faces + click zones can never drift, and both are drag-proof by design.
-#define RCF_NONE      0   // no face (label-only / row overlay / tf drawn separately)
-#define RCF_BTN       1   // flat rounded button (surface)
-#define RCF_BTN_ON    2   // rounded button, accent fill (active)
-#define RCF_BTN_RED   3   // rounded button, red edge (X / danger)
-#define RCF_PILL_OFF  4   // sliding pill toggle, OFF (knob left)
-#define RCF_PILL_ON   5   // sliding pill toggle, ON  (knob right, accent)
-#define RCF_BTN_GHOST 6   // E5 : outline-only (ghost) button - 1px ring on the panel bg
 
-struct RCHit { int x1, y1, x2, y2; string act; int idx; int style; };
 // D-FULL step 1 : the modal's hit-zones are always registered LAST (DrawSettingsOverlay
 // runs after the panel sections). This base index lets DestroySettingsOverlay TRUNCATE
 // them cleanly on close/tab-switch without touching the panel zones. -1 = modal closed.
-int g_modal_hit_base = -1;
 // Drop the (act, idx) zone so PaintFaces paints no ghost face for a control that just
 // disappeared on a standalone redraw (e.g. a recent-symbol slot that emptied). Zones
 // never overlap, so a swap-with-last removal keeps HitTest correct.
@@ -845,8 +830,6 @@ int g_modal_hit_base = -1;
 int  g_active_plan_idx  = -1;   // -1 = InpPlan, else cast to ENUM_FN_PLAN
 int  g_active_theme_idx = -1;   // -1 = InpTheme, else 0 = DARK, 1 = LIGHT
 int  g_active_palette_idx = -1; // v2.02 : -1 = InpPalette, else 0..2 (Emeraude / Indigo / Ardoise)
-int  g_settings_tab     = 0;    // 0=Account 1=Risk 2=Display 3=Alerts
-// D-FULL step 3 : g_swallow_click REMOVED. It existed because native modal OBJ_BUTTONs
 // emitted an OBJECT_CLICK paired with a trailing CHARTEVENT_CLICK that could leak to a
 // panel zone. The modal is 100% hit-testing now : one CLICK = one dispatch, and the
 // full-modal "set_noop" zone swallows anything that misses a control.
@@ -1342,7 +1325,6 @@ datetime g_disc_last_alert = 0;     // tilt sound/Telegram throttle
 // the lock -> clear TRANSITION and force ONE full rebuild (during the lock the refresh
 // is skipped and the overlay hid/covered objects -> without a rebuild the panel came
 // back half-rendered ; a risk tool must always re-display its full state).
-bool g_disc_locked_prev = false;
 
 //+------------------------------------------------------------------+
 //| RefreshPanel - reads stub values and updates labels/bars          |
@@ -1672,7 +1654,6 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_ROOM,      Tr("shl_room"));
     g_shell.SetLabel(RCL_BUDGET80,  Tr("shl_budget80"));
     g_shell.SetLabel(RCL_FLOOR,     Tr("ins_tip_floor"));
-    g_shell.SetLabel(RCL_FLOOR_WARN,Tr("ins_tip_floor2"));
     g_shell.SetLabel(RCL_NOLIMIT,   Tr("shl_nolimit"));
     g_shell.SetLabel(RCL_POS_NONE,  Tr("shl_posnone"));
     g_shell.SetLabel(RCL_POS_PNL,   Tr("shl_pospnl"));
@@ -1690,14 +1671,12 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_NEWS_NEXT, Tr("shl_newsnext"));
     g_shell.SetLabel(RCL_DISC_STATE,Tr("shl_discstate"));
     g_shell.SetLabel(RCL_DISC_DAY,  Tr("shl_discday"));
-    g_shell.SetLabel(RCL_CPT_PLAN,  Tr("set_type"));   // the catalog calls it the plan TYPE
-    g_shell.SetLabel(RCL_CPT_PHASE, Tr("set_phase"));
-    g_shell.SetLabel(RCL_CPT_SIZE,  Tr("set_size"));
-    g_shell.SetLabel(RCL_CPT_TYPE,  Tr("set_acct_type"));
     g_shell.SetLabel(RCL_CPT_ADDONS,Tr("addons_lbl"));
     g_shell.SetLabel(RCL_CPT_SPLIT, Tr("shl_split"));
     g_shell.SetLabel(RCL_CPT_DAYS,  Tr("shl_mindays"));
     g_shell.SetLabel(RCL_CLOSE_EA,  Tr("shl_closeea"));
+    g_shell.SetLabel(RCL_PAYOUT,    Tr("shl_payout"));
+    g_shell.SetLabel(RCL_TARGET,    Tr("shl_target"));
     g_shell.SetLabel(RCL_LOCK_RTOOLS, Tr("shl_lockrtools"));
     g_shell.SetLabel(RCL_LOCK_VIOL,   Tr("shl_lockviol"));
     g_shell.SetLabel(RCL_LIM_QS,        Tr("shl_qs"));
@@ -4604,105 +4583,22 @@ void InitI18n(void) {
     ArrayResize(g_i18n_fr,   0);
     ArrayResize(g_i18n_es,   0);
     // --- section headers ---
-    AddTr("rules",    "RULES",          "RÈGLES",             "REGLAS");
-    AddTr("open_pos", "OPEN POSITIONS", "POSITIONS OUVERTES", "POSICIONES ABIERTAS");
     // --- generic ---
     AddTr("on",  "ON",  "ON",  "ON");
-    AddTr("off", "OFF", "OFF", "OFF");
     // --- settings popup ---
-    AddTr("settings",    "SETTINGS",   "RÉGLAGES",  "AJUSTES");
-    AddTr("tab_account", "Account",    "Compte",    "Cuenta");
-    AddTr("tab_risk",    "Risk",       "Risque",    "Riesgo");
-    AddTr("tab_display", "Display",    "Affichage", "Pantalla");
-    AddTr("tab_alerts",  "Alerts",     "Alertes",   "Alertas");
     AddTr("set_phase",     "Phase :",              "Phase :",                "Fase :");
     AddTr("set_size",      "Size :",               "Taille :",               "Tamaño :");
     AddTr("set_acct_type", "Account type :",       "Type de compte :",       "Tipo de cuenta :");
-    AddTr("set_addons",    "Add-ons :",            "Options :",              "Extras :");
-    AddTr("set_personal_note", "Personal account - prop rules off.",
-                               "Compte perso - règles prop off.",
-                               "Cuenta personal - reglas prop off.");
     AddTr("set_maxparallel", "Max parallel :",        "Trades max :",          "Trades max :");
     AddTr("set_sl",          "SL distance % :",       "Distance SL % :",       "Distancia SL % :");
     AddTr("set_tp",          "TP distance % :",       "Distance TP % :",       "Distancia TP % :");
     AddTr("set_maxmargin",   "Max margin/trade % :",  "Marge max/trade % :",   "Margen máx/op % :");
     AddTr("set_maxrisk",     "Max risk/trade % :",    "Risque max/trade % :",  "Riesgo máx/op % :");
     // v1.4 : hover tooltips - explain each key param (unit + what it does).
-    AddTr("tip_maxparallel",
-          "How many trades you plan to hold at once. The SL budget is split across this count.",
-          "Combien de trades tu comptes tenir en même temps. Le budget SL est réparti sur ce nombre.",
-          "Cuántas operaciones prevés mantener a la vez. El presupuesto SL se reparte entre ellas.");
-    AddTr("tip_sl",
-          "Stop-loss distance, % of price. 1.0 = safest (locked in V1).",
-          "Distance du stop-loss, % du prix. 1.0 = le plus sûr (verrouillé en V1).",
-          "Distancia del stop-loss, % del precio. 1.0 = lo más seguro (fijo en V1).");
-    AddTr("tip_tp",
-          "Take-profit distance, % of price. 0.1 = scalping default.",
-          "Distance du take-profit, % du prix. 0.1 = défaut scalping.",
-          "Distancia del take-profit, % del precio. 0.1 = por defecto scalping.");
-    AddTr("tip_maxmargin",
-          "Max margin one trade may use, % of balance. FundedNext recommends 20-30%.",
-          "Marge max qu'un seul trade peut utiliser, % du solde. FundedNext recommande 20-30%.",
-          "Margen máx que una operación puede usar, % del saldo. FundedNext recomienda 20-30%.");
-    AddTr("tip_maxrisk",
-          "Max one trade may lose, % of balance. Your discipline ceiling.",
-          "Perte max sur un seul trade, % du solde. Ton plafond de discipline.",
-          "Pérdida máx en una operación, % del saldo. Tu límite de disciplina.");
-    AddTr("tip_mviol",
-          "Turn on after a margin violation : tightens the cumulative margin cap (2nd strike).",
-          "À activer après une violation de marge : resserre le plafond de marge cumulée (2e sanction).",
-          "Activar tras una violación de margen : ajusta el límite de margen acumulado (2ª sanción).");
-    AddTr("tip_mcapviol",
-          "Tightened cumulative margin cap after a violation (FundedNext 2nd strike = 30%).",
-          "Plafond de marge cumulée resserré après violation (FundedNext 2e sanction = 30%).",
-          "Límite de margen acumulado ajustado tras violación (FundedNext 2ª sanción = 30%).");
-    AddTr("tip_rviol",
-          "Turn on after a risk violation : tightens the cumulative risk cap (2nd strike).",
-          "À activer après une violation de risque : resserre le plafond de risque cumulé (2e sanction).",
-          "Activar tras una violación de riesgo : ajusta el límite de riesgo acumulado (2ª sanción).");
-    AddTr("tip_rcapviol",
-          "Tightened cumulative risk cap after a violation (FundedNext 2nd strike = 1%).",
-          "Plafond de risque cumulé resserré après violation (FundedNext 2e sanction = 1%).",
-          "Límite de riesgo acumulado ajustado tras violación (FundedNext 2ª sanción = 1%).");
-    AddTr("tip_news_high",
-          "Show HIGH-impact news on the chart (bars + countdown).",
-          "Afficher les news HIGH sur le graphique (barres + compte à rebours).",
-          "Mostrar noticias de ALTO impacto en el gráfico (barras + cuenta atrás).");
-    AddTr("tip_news_med",
-          "Also show MEDIUM-impact news (your prop firm may count these in its news window).",
-          "Afficher aussi les news MOYEN (ta prop firm peut les compter dans sa fenêtre news).",
-          "Mostrar también noticias de impacto MEDIO (tu prop firm puede contarlas en su ventana).");
-    AddTr("set_theme",       "Theme :",               "Thème :",               "Tema :");
     // v2.02 MULTI-THEMES : palette (brand) axis + dark/light relabelled as MODE ;
     // hover taglines for the 3 palettes.
-    AddTr("set_palette",     "Theme :",               "Thème :",               "Tema :");
-    AddTr("set_mode",        "Mode :",                "Mode :",                "Modo :");
-    AddTr("pal_tip_emerald", "Green momentum, cool head",  "L'élan vert, la tête froide",  "Impulso verde, mente fría");
-    AddTr("pal_tip_indigo",  "Depth & composure",          "Profondeur & sang-froid",      "Profundidad y sangre fría");
-    AddTr("pal_tip_mono",    "Absolute focus, zero noise", "Focus absolu, zéro bruit",     "Enfoque absoluto, cero ruido");
-    AddTr("set_language",    "Language :",            "Langue :",              "Idioma :");
-    AddTr("set_news",        "News on chart :",       "News graphique :",      "Noticias graf :");
-    AddTr("set_news_high",   "News HIGH :",           "News HIGH :",           "Noticias ALTA :");
-    AddTr("set_news_med",    "News MEDIUM :",         "News MOYEN :",          "Noticias MEDIA :");
-    AddTr("set_comfort",     "Comfort scale :",       "Échelle confort :",     "Escala confort :");
-    AddTr("set_discipline",  "Discipline lock :",     "Verrou discipline :",   "Bloqueo disciplina :");
-    AddTr("set_sound",       "Sound alerts :",        "Alertes son :",         "Alertas sonido :");
-    AddTr("set_telegram",    "Telegram alerts :",     "Alertes Telegram :",    "Alertas Telegram :");
-    AddTr("set_strings_note","Token / chat / .wav : in Inputs.",
-                             "Token / chat / .wav : dans Inputs.",
-                             "Token / chat / .wav : en Inputs.");
-    AddTr("set_note",   "Applies now + survives restart.",
-                        "Applique de suite + persiste.",
-                        "Se aplica ya + persiste.");
-    AddTr("set_broker", "Broker (auto) :", "Courtier (auto) :", "Broker (auto) :");
     // --- account strip ---
-    AddTr("acc",   "Acc",   "Cpt",   "Cta");
-    AddTr("split", "Split", "Partage", "Reparto");
-    AddTr("min_days_none", "Min days: 0 (No Min Days)", "Jours min: 0 (aucun)", "Días mín: 0 (ninguno)");
-    AddTr("days_traded",   "Days traded",               "Jours tradés",         "Días operados");
     // --- spread / commission ---
-    AddTr("spread", "Spr", "Spr", "Spr");
-    AddTr("comm",   "Com", "Com", "Com");
     // --- rule row labels (keyed by g_rows[].key) ---
     AddTr("rule_margin_cum", "Cumulative Margin",      "Marge cumulée",       "Margen acumulado");
     AddTr("rule_margin_pt",  "Max lot allowed",        "Lot max autorisé",    "Lote máx permitido");
@@ -4716,20 +4612,10 @@ void InitI18n(void) {
     AddTr("rule_newsstats",  "News Trades",            "Trades news",         "Ops noticias");
     AddTr("rule_msgs",       "Server msgs (orders)",   "Msgs serveur (ordres)","Msgs servidor (órdenes)");
     // --- v2.02.05 : FN Instant (trailing floor) presentation + news vigilance ---
-    AddTr("rule_payout",     "Payout eligibility",     "Éligibilité payout",  "Elegibilidad pago");
-    AddTr("ins_margin",      "Room",                   "Marge",               "Margen");
-    AddTr("ins_locked",      "locked",                 "verrouillé",          "bloqueado"); // short : must fit the _val column with the $ figure
     AddTr("ins_tip_floor",   "Floor:",                 "Plancher :",          "Suelo :");
     AddTr("ins_tip_floor2",  "equity below = account lost",
                              "équity dessous = compte perdu",
                              "equity debajo = cuenta perdida");
-    AddTr("ins_tip_permitted","max loss, fixed",       "perte max fixe",      "pérdida máx fija");
-    AddTr("ins_tip_lock",    "breakeven lock",         "verrou breakeven",    "bloqueo breakeven");
-    AddTr("ins_tip_locked1", "floor LOCKED at",        "plancher VERROUILLÉ à","suelo BLOQUEADO en");
-    AddTr("ins_tip_locked2", "- firm capital protected",
-                             "- capital firme protégé",
-                             "- capital protegido");
-    AddTr("news_med_check",  "Medium - check FN",      "Medium - vérifier FN","Medium - verificar FN");
     AddTr("news_more",       "more",                   "autres",              "más"); // v2.03.05c : grouped-icon tooltip cap suffix
     // --- v3 SHELL : the rail/panel chrome goes through the SAME table ---
     AddTr("shl_lim",       "LIMITS",             "LIMITES",              "LÍMITES");
@@ -4765,6 +4651,14 @@ void InitI18n(void) {
     AddTr("shl_comm",      "Commission / lot",   "Commission / lot",     "Comisión / lote");
     AddTr("shl_split",     "Split",              "Split",                "Reparto");
     AddTr("shl_mindays",   "Min days",           "Jours mini",           "Días min");
+    AddTr("shl_payout",
+        "Payout eligibility",
+        "Éligibilité payout",
+        "Elegibilidad de pago");
+    AddTr("shl_target",
+        "Profit target",
+        "Objectif de profit",
+        "Objetivo de beneficio");
     AddTr("shl_lockrtools",
         "Always on for a prop plan.",
         "Toujours actif sur un plan prop.",
@@ -5290,86 +5184,31 @@ void InitI18n(void) {
                         "Version|Build en cours + source des news active.",
                         "Versión|Build actual + fuente de noticias activa.");
     // --- v2.13 FEATURE B : SL-vs-limit survival guard (20% margin) ---
-    AddTr("slguard",
-          "SL too low - breach risk : raise the SL to keep a 20% margin",
-          "SL trop bas - risque de brèche : remonte la SL pour garder 20% de marge",
-          "SL muy bajo - riesgo de brecha : sube el SL para mantener 20% de margen");
-    AddTr("f_floorcap",
-          "[lot capped : worst-case loss limited to 80% of the room to the nearest limit - 20% survival margin]",
-          "[lot plafonné : perte pire-cas limitée à 80% de la marge vers la limite la plus proche - 20% de réserve]",
-          "[lote limitado : pérdida máxima al 80% del margen hasta el límite más cercano - 20% de reserva]");
     // --- v2.03 F3 : news source badge (ForexFactory feed vs MT5-calendar fallback) ---
-    AddTr("news_src_ff",     "news: FF (ForexFactory feed, FN-aligned)",
-                             "news: FF (flux ForexFactory, aligné FN)",
-                             "news: FF (feed ForexFactory, alineado FN)");
-    AddTr("news_src_mt",     "news: MT (MT5 calendar fallback)",
-                             "news: MT (calendrier MT5, secours)",
-                             "news: MT (calendario MT5, respaldo)");
-    AddTr("news_rule_tip",
-          "40% rule = HIGH-impact only (5min +/-, winning-trade profits). Medium = check the FN calendar/Clarity (MQL5 under-classes some central-bank speeches).",
-          "Règle 40% = high-impact (5min +/-, profits gagnants). Medium = à vérifier sur le calendrier/Clarity FN (MQL5 sous-classe parfois les discours banques centrales).",
-          "Regla 40% = solo high-impact (5min +/-, beneficios ganadores). Medium = verificar en el calendario/Clarity FN (MQL5 subclasifica algunos discursos de bancos centrales).");
     // --- verdict badge + clock ---
     AddTr("v_ontrack",   "HEALTHY",       "SAIN",           "SANO");        // v2.01.03 : health words - the score is account HEALTH /100
     AddTr("v_atrisk",    "CAUTION",       "PRUDENCE",       "PRECAUCIÓN");
     AddTr("v_violation", "DANGER",        "DANGER",         "PELIGRO");
-    AddTr("live",        "LIVE",          "LIVE",           "LIVE"); // FINAL : the green dot (U+25CF) is concatenated at the call sites - no more "* " placeholder
-    AddTr("weekend_hold","WEEKEND HOLD!", "TENUE WEEKEND!", "RETENER FINDE!");
-    AddTr("flatten",     "  FLATTEN!",    "  FERMER!",      "  CERRAR!");
     // --- status chips ---
     AddTr("chip_ok",   "OK",     "OK",        "OK");      // positions keep OK (E6)
-    AddTr("chip_safe", "SAFE",   "SUR",       "SEGURO");  // E2 : mockup vocabulary for metered RULES
     AddTr("chip_warn", "WATCH",  "SURVEILLE", "VIGILAR"); // E2 : was WARN
     AddTr("chip_red",  "BREACH", "BRÈCHE",    "BRECHA");  // E2 : was RED
-    AddTr("chip_na",   "--",   "--",     "--");
     // --- TF / recent bar ---
-    AddTr("tf",       "TF:",       "TF:",       "TF:");
-    AddTr("recent",   "Recent:",   "Récent:",   "Reciente:");
-    AddTr("recenter", "Re-center", "Recentrer", "Recentrar");
     // --- discipline overlay ---
-    AddTr("stop_trading", "STOP TRADING -- daily limit reached",
-                          "STOP TRADING -- limite du jour atteinte",
-                          "PARAR -- límite diario alcanzado");
     // --- footer descriptive words ---
-    AddTr("f_bal",    "Bal",    "Solde",  "Saldo");
-    AddTr("f_today",  "Today",  "Auj",    "Hoy");
-    AddTr("f_profit", "Profit", "Profit", "Benef");
-    AddTr("f_lot",    "Lot",    "Lot",    "Lote");
-    AddTr("f_free",   "free",   "libre",  "libre");
-    AddTr("f_cap",    "Cap",    "Cap",    "Cap");
-    AddTr("f_risk",   "Risk",   "Risque", "Riesgo");
-    AddTr("f_margin", "Margin", "Marge",  "Margen");
     // --- R4 : remaining panel-visible dynamic text ---
     AddTr("pos_lock", "LOCK",  "VERR",   "BLOQ");
     AddTr("pos_nosl", "NO SL", "SANS SL","SIN SL");
     AddTr("pos_slq",  "SL?",   "SL ?",   "SL?"); // E6 : SL missing, still in grace (amber WATCH)
-    AddTr("pos_none", "no open positions", "aucune position ouverte", "sin posiciones abiertas"); // FINAL : empty-section hint
-    AddTr("f_insuf",       "[insufficient margin]",       "[marge insuffisante]",        "[margen insuficiente]");
-    AddTr("f_reduce",      "[reduce lot / tighten SL]",   "[réduire lot / resserrer SL]","[reducir lote / ajustar SL]");
-    AddTr("f_belowmin",    "[below min]",                 "[sous min]",                  "[bajo min]");
-    AddTr("f_marginbound", "[lot limited by free margin]","[lot limité par marge libre]","[lote limitado por margen libre]");
-    AddTr("lot_unavail",   "Lot : symbol info unavailable","Lot : infos symbole indispo","Lote : info símbolo no disp.");
-    AddTr("maxlot_na",      "n/a (margin unavailable)",     "n/a (marge indisponible)",    "n/a (margen no disponible)");
-    AddTr("maxlot_belowmin","< broker min lot @",          "< lot min courtier @",        "< lote min broker @");
-    AddTr("tag_marg", "marg", "marge", "margen");
-    AddTr("tag_room", "room", "reste", "resto");
-    AddTr("tag_free", "free", "libre", "libre");
     AddTr("used",     "used", "util",  "usado");
     AddTr("locked",   "locked","verr", "bloq");
     // --- V1.24 G1 discipline-lock ---
-    AddTr("disc_selflock", "SELF-LOCKED -- left",        "AUTO-VERROU -- reste",       "AUTO-BLOQUEO -- queda");
-    AddTr("disc_cooldown", "COOLDOWN -- losing streak",  "PAUSE -- série perdante",    "ENFRIAR -- racha perdedora");
-    AddTr("disc_tilt",     "TILT : slow down",           "TILT : ralentis",            "TILT : frena");
-    AddTr("disc_unlock",   "Unlock",                     "Déverrouiller",              "Desbloquear");
-    AddTr("disc_unlock_confirm", "Click again to confirm","Reclique pour confirmer",   "Clic otra vez para confirmar");
-    AddTr("set_selflock",  "Self-lock",                  "Auto-verrou",                "Auto-bloqueo");
     // --- V1.25 G4 : on-chart SL/TP recommendation annotations ---
     AddTr("sl_rec",        "SL rec",                     "SL reco",                    "SL reco");
     AddTr("tp_rec",        "TP rec",                     "TP reco",                    "TP reco");
     AddTr("sl_over_chip",  "SL>REC",                     "SL>REC",                     "SL>REC");
     AddTr("over",          "OVER",                       "DÉPASSE",                    "EXCEDE");
     // --- V1.26 G4 : Advanced (discipline) settings tab ---
-    AddTr("tab_advanced",  "Advanced",                   "Avancé",                     "Avanzado");
     AddTr("set_tiltn",     "Tilt trades :",              "Trades tilt :",              "Trades tilt :");
     AddTr("set_tiltwin",   "Tilt window :",              "Fenêtre tilt :",             "Ventana tilt :");
     AddTr("set_cooldownn", "Cooldown losses :",          "Pertes pause :",             "Pérdidas pausa :");
@@ -5379,28 +5218,13 @@ void InitI18n(void) {
     // --- V1.27 : cascade (broker/type/split), violation caps, cycle date, refresh ---
     AddTr("set_broker_sel","Broker :",                   "Courtier :",                 "Broker :");
     AddTr("set_type",      "Type :",                     "Type :",                     "Tipo :");
-    AddTr("set_split_sel", "Profit split :",             "Partage gains :",            "Reparto :");
-    AddTr("set_mviol",     "Margin violation :",         "Violation marge :",          "Violación margen :");
     AddTr("set_mcapviol",  "Margin cap (viol.) :",       "Plafond marge (viol.) :",    "Tope margen (viol.) :");
-    AddTr("set_rviol",     "Risk violation :",           "Violation risque :",         "Violación riesgo :");
     AddTr("set_rcapviol",  "Risk cap (viol.) :",         "Plafond risque (viol.) :",   "Tope riesgo (viol.) :");
-    AddTr("set_cycyear",   "Cycle year :",               "Année cycle :",              "Año ciclo :");
-    AddTr("set_cycmonth",  "Cycle month :",              "Mois cycle :",               "Mes ciclo :");
-    AddTr("set_cycday",    "Cycle day :",                "Jour cycle :",               "Día ciclo :");
     AddTr("set_refreshms", "Refresh (ms) :",             "Rafraîchir (ms) :",          "Refresco (ms) :");
-    AddTr("pos_click_tip", "Click to switch chart to this symbol",
-                           "Cliquer pour afficher ce symbole",
-                           "Clic para cambiar a este símbolo");
     // --- V1.28 : footer add-ons label + cycle-date header ---
     AddTr("addons_lbl",    "Add-ons:",                   "Options:",                   "Extras:");
     AddTr("addons_none",   "none",                       "aucune",                     "ninguna");
-    AddTr("set_cycle",     "Cycle start :",              "Début cycle :",              "Inicio ciclo :");
-    AddTr("kill_tip",      "Remove RiskCockpit from this chart",
-                           "Retirer RiskCockpit du graphique",
-                           "Quitar RiskCockpit del gráfico");
     // --- V1.29 F : copy-lot captions + localized tooltips ---
-    AddTr("cap_sug",       "Sug",  "Sug",  "Sug");
-    AddTr("cap_max",       "Max",  "Max",  "Max");
     AddTr("copy_sug_tip",  "Suggested lot - click + Ctrl+C",
                            "Lot suggéré - cliquer + Ctrl+C",
                            "Lote sugerido - clic + Ctrl+C");
@@ -5411,8 +5235,6 @@ void InitI18n(void) {
     AddTr("be_pl",         "Total P&L",  "P&L total",  "P&L total");
     AddTr("be_toflat",     "to flat",    "pour solder","para saldar");
     // --- V1.29 I/J : Personal type + risk-tools master ---
-    AddTr("set_personal_type", "Personal type :", "Type perso :",   "Tipo perso :");
-    AddTr("set_risktools",     "Risk tools :",    "Outils risque :","Herram. riesgo :");
 }
 
 string Tr(const string key) {
