@@ -86,6 +86,27 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.04.15 — 2026-09-04 — parity complete: add-ons, violations, self-lock, cycle, copy-max, BE
+
+The last six things the legacy modal could do and the shell could not. Feature parity is reached;
+the old panel is now kept only as a fallback.
+
+- **Add-ons** are toggles again, in ACCOUNT — and only those the current plan actually allows are
+  listed (an add-on you cannot buy on this plan is noise). Toggling one re-resolves the profile,
+  because add-ons change the rules themselves (95 % split, no-min-days, 10 % DD…).
+- **Post-violation caps** (margin / risk) move next to the discipline state rather than into a
+  settings tab: they *change the limits*, so they belong where the limits are read.
+- **Self-lock** arms in **two clicks** — the button asks "CONFIRMER ?" first, and any click
+  elsewhere disarms the question. The legacy modal armed a multi-hour full-panel STOP on a single
+  click; that is too easy to hit by accident.
+- **Cycle start date** (year / month / day) as three cyclers, clamped so an impossible date
+  (31 February) can never be built.
+- **Copy-max**: the max lot gets its own copyable box under the suggested one.
+- **Break-even lines** toggle, which draws or clears the chart-side lines immediately.
+
+Audit: **0 orphan zones** out of 117 drawn, every model field filled. Compiled `0 errors,
+0 warnings`.
+
 ### v3.03.14 — 2026-09-04 — two orphan click zones (from v3.01.12)
 
 The static zone audit caught two zones added with the rule-parity rows that were **drawn but not

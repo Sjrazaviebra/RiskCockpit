@@ -132,6 +132,14 @@ struct RCDeckData {
    string stepLabel[10], stepValue[10];
    int    casN;                         // plan cascade rows (broker/type/phase/size/type)
    string casLabel[5], casValue[5];
+   // --- v3.04 : add-ons, violation flags, self-lock, cycle date ----------
+   int    addonN;                       // add-ons VALID for this plan (0..7)
+   string addonName[7];
+   bool   addonOn[7];
+   bool   violMargin, violRisk;         // post-violation tightened caps
+   bool   beLines;                      // break-even lines drawn on the chart
+   int    selfLockH;                    // hours the self-lock would arm for
+   int    cycY, cycM, cycD;             // cycle start date
 };
 
 //--- click-zone ids. Ranges used in arithmetic stay CONTIGUOUS ; new ids are
@@ -176,7 +184,14 @@ enum ERCZone {
    RZ_STEP_INC0, RZ_STEP_INC1, RZ_STEP_INC2, RZ_STEP_INC3, RZ_STEP_INC4,
    RZ_STEP_INC5, RZ_STEP_INC6, RZ_STEP_INC7, RZ_STEP_INC8, RZ_STEP_INC9,
    RZ_CAS_PREV0, RZ_CAS_PREV1, RZ_CAS_PREV2, RZ_CAS_PREV3, RZ_CAS_PREV4,
-   RZ_CAS_NEXT0, RZ_CAS_NEXT1, RZ_CAS_NEXT2, RZ_CAS_NEXT3, RZ_CAS_NEXT4
+   RZ_CAS_NEXT0, RZ_CAS_NEXT1, RZ_CAS_NEXT2, RZ_CAS_NEXT3, RZ_CAS_NEXT4,
+   // --- v3.04 : add-ons, violation flags, self-lock, cycle date, BE, copy max
+   RZ_ADDON0, RZ_ADDON1, RZ_ADDON2, RZ_ADDON3, RZ_ADDON4, RZ_ADDON5, RZ_ADDON6,
+   RZ_CFG_MVIOL, RZ_CFG_RVIOL, RZ_CFG_BE,
+   RZ_SELFLOCK,
+   RZ_CYC_PREV0, RZ_CYC_PREV1, RZ_CYC_PREV2,
+   RZ_CYC_NEXT0, RZ_CYC_NEXT1, RZ_CYC_NEXT2,
+   RZ_MAXLOT_EDIT
 };
 //--- label slots : the shell ships FR defaults ; the host overrides them with
 //--- its own i18n (Tr) so one translation table serves the whole product.
@@ -200,7 +215,9 @@ enum ERCLabel {
    RCL_CPT_SPLIT, RCL_CPT_DAYS, RCL_LOT_COPY,
    RCL_LIM_QS, RCL_LOT_MAX, RCL_TARGET, RCL_MSGS, RCL_NEWSTRADES,
    RCL_PAYOUT, RCL_HYPER, RCL_ELIG, RCL_TAG_MARG, RCL_TAG_ROOM, RCL_TAG_FREE,
-   RCL_CPT_PROFILE, RCL_TAB_RISK, RCL_TAB_DISC, RCL_TAB_ADV, RCL_TAB_DISP
+   RCL_CPT_PROFILE, RCL_TAB_RISK, RCL_TAB_DISC, RCL_TAB_ADV, RCL_TAB_DISP,
+   RCL_CYCLE, RCL_YEAR, RCL_MONTH, RCL_DAY, RCL_DISC_VIOL, RCL_VIOL_M, RCL_VIOL_R,
+   RCL_LOCK_ARM, RCL_LOCK_ASK, RCL_LOCK_ON, RCL_BE
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -265,6 +282,12 @@ private:
    int        m_cfgTab;          // settings sub-tab : 0 risk, 1 discipline, 2 advanced, 3 display
    int        m_pendStepRow, m_pendStepDir;   // host consumes : stepper row + direction
    int        m_pendCas;         // host consumes : cascade row * 10 + (0 prev / 1 next), -1 = none
+   int        m_pendAddon;       // host consumes : add-on row toggled, -1 = none
+   int        m_pendCyc;         // host consumes : cycle field * 10 + dir, -1 = none
+   bool       m_pendSelfLock;    // host consumes : ARM the self-lock (confirmed)
+   bool       m_lockArm;         // first click : the button asks for confirmation
+   bool       m_maxEditOn;       // second copy box (max lot)
+   int        m_maxEditX, m_maxEditY;
    string     m_L[RCS_L_MAX];    // i18n slots (empty = the built-in FR default is used)
    string     m_tipT[RCS_TIP_MAX], m_tipD[RCS_TIP_MAX];   // translated tooltips, indexed by zone id
    // dropdown menu (symbol / timeframe)
@@ -707,6 +730,16 @@ private:
                       : (m_d.maxLotTag == "room" ? L(RCL_TAG_ROOM, "reste") : L(RCL_TAG_FREE, "libre")));
          y = KV(y, L(RCL_LOT_MAX, "Lot max autorise"), mx,
                 (m_d.maxLot <= 0.0 ? m_t.warn : m_t.text), RZ_TIP_MAXLOT);
+         // v3.04 : the max lot gets its own copy box, like the suggested one
+         m_maxEditOn = (m_d.maxLot > 0.0);
+         if(m_maxEditOn) {
+            m_maxEditX = m_sideX + RCS_SIDE_W - 18 - 76;
+            m_maxEditY = m_sideY + y - 2;
+            m_side.Text(RCS_SIDE_W - 18 - 76 - 8, y + 3, L(RCL_LOT_COPY, "copier"),
+                        A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_RIGHT | TA_TOP);
+            ZAdd(m_maxEditX - 2, m_maxEditY - 2, 80, 24, RZ_MAXLOT_EDIT);
+            y += 24;
+         }
       }
       y += 4;
       SecHead(L(RCL_LOT_COST, "COUT DU SYMBOLE"), y);
@@ -805,6 +838,27 @@ private:
                   A(m_d.discTilt ? m_t.warn : m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_DISC_TILT);
       y += 18;
+      // v3.04 : post-violation caps + the self-lock, both of which CHANGE the
+      // limits - they belong next to the discipline state, not in a settings tab.
+      y += 4;
+      SecHead(L(RCL_DISC_VIOL, "APRES VIOLATION"), y);
+      y = Toggle(y, L(RCL_VIOL_M, "Violation marge"), m_d.violMargin, RZ_CFG_MVIOL);
+      y = Toggle(y, L(RCL_VIOL_R, "Violation risque"), m_d.violRisk,  RZ_CFG_RVIOL);
+      y += 4;
+      // ARMING a lock is irreversible for its duration : it takes two clicks.
+      {
+         const bool armed = m_lockArm;
+         const string txt = (m_d.discLocked
+                             ? L(RCL_LOCK_ON, "VERROU ACTIF")
+                             : (armed ? L(RCL_LOCK_ASK, "CONFIRMER ?")
+                                      : L(RCL_LOCK_ARM, "ARMER LE VERROU") + "  " +
+                                        IntegerToString(m_d.selfLockH) + " h"));
+         const color bc = (m_d.discLocked ? m_t.dim : (armed ? m_t.red : m_t.warn));
+         m_side.Capsule(18, y, RCS_SIDE_W - 36, 24, Mix(m_t.surface, bc, 0.30));
+         m_side.Text(RCS_SIDE_W / 2, y + 5, txt, A(bc), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+         if(!m_d.discLocked) ZAdd(m_sideX + 18, m_sideY + y, RCS_SIDE_W - 36, 24, RZ_SELFLOCK);
+         y += 30;
+      }
       // v3.01 parity : hyperactivity + server messages, the two "too much
       // activity" rules the prop firm scores - they belong with discipline.
       if(m_d.tradesCap > 0) {
@@ -867,6 +921,20 @@ private:
       return y + 24;
    }
 
+   //--- < value > with EXPLICIT zone ids (cycle date, and anything one-off) --
+   int Cycler2(int y, const string k, const string v, const int zprev, const int znext) {
+      m_side.Text(18, y + 3, k, A(m_t.text), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+      const int bw = 20, nx = RCS_SIDE_W - 18 - bw, px = 150;
+      m_side.CapsuleStroke(px, y, bw, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.08));
+      m_side.Text(px + bw / 2, y + 3, "<", A(m_t.text), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      ZAdd(m_sideX + px, m_sideY + y, bw, 20, zprev);
+      m_side.Text((px + bw + nx) / 2, y + 3, v, A(m_t.accent), RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
+      m_side.CapsuleStroke(nx, y, bw, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.08));
+      m_side.Text(nx + bw / 2, y + 3, ">", A(m_t.text), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      ZAdd(m_sideX + nx, m_sideY + y, bw, 20, znext);
+      return y + 24;
+   }
+
    //--- COMPTE : the profile the whole risk model is resolved from ----------
    int SecAccount(int y) {
       // v3.02 : the CASCADE is editable here - broker -> type -> phase -> size
@@ -901,11 +969,22 @@ private:
          y += 16;
       }
       y += 6;
+      // v3.04 : the add-ons are TOGGLES again - only those the plan actually
+      // allows are listed (an add-on you cannot buy on this plan is noise).
       SecHead(L(RCL_CPT_ADDONS, "ADD-ONS"), y);
-      m_side.Text(18, y, (StringLen(m_d.addonsLabel) > 0 ? m_d.addonsLabel : "-"),
-                  A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
-      y += 18;
-      if(StringLen(m_d.cycleLabel) > 0) y = KV(y, "Cycle", m_d.cycleLabel, m_t.dim);
+      if(m_d.addonN <= 0) {
+         m_side.Text(18, y, "-", A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+         y += 18;
+      } else {
+         for(int i = 0; i < m_d.addonN && i < 7; i++)
+            y = Toggle(y, m_d.addonName[i], m_d.addonOn[i], RZ_ADDON0 + i);
+      }
+      y += 4;
+      // v3.04 : cycle start date - the payout window every FN counter hangs on
+      SecHead(L(RCL_CYCLE, "DEBUT DE CYCLE"), y);
+      y = Cycler2(y, L(RCL_YEAR, "Annee"), IntegerToString(m_d.cycY), RZ_CYC_PREV0, RZ_CYC_NEXT0);
+      y = Cycler2(y, L(RCL_MONTH, "Mois"),  IntegerToString(m_d.cycM), RZ_CYC_PREV1, RZ_CYC_NEXT1);
+      y = Cycler2(y, L(RCL_DAY, "Jour"),    IntegerToString(m_d.cycD), RZ_CYC_PREV2, RZ_CYC_NEXT2);
       return y + 6;
    }
    //--- REGLAGES : the toggles that matter day to day ----------------------
@@ -948,6 +1027,7 @@ private:
       y = Toggle(y, "Echelle confort", m_d.cfgComfort, RZ_CFG_COMFORT);
       y = Toggle(y, "Verrou discipline", m_d.cfgDiscipline, RZ_CFG_DISC);
       y = Toggle(y, "Outils de risque", m_d.riskTools, RZ_CFG_RTOOLS);
+      y = Toggle(y, L(RCL_BE, "Lignes break-even"), m_d.beLines, RZ_CFG_BE);
       return y + 6;
    }
    //--- AIDE : the legend, and what this tool is (and is not) --------------
@@ -1006,7 +1086,7 @@ private:
    void RenderSide(void) {
       if(!m_side.Ready()) return;
       m_side.Begin();
-      m_lotEditOn = false;                                 // re-armed by SecLot when it draws
+      m_lotEditOn = false; m_maxEditOn = false;            // re-armed by SecLot when it draws
       if(m_state == 0) { m_side.Commit(); return; }        // closed = transparent bitmap
       const int W = RCS_SIDE_W, H = m_sideH;
       m_side.SoftShadow(4, 4, W - 8, H - 8, 14, clrBlack, 7, 80);
@@ -1094,6 +1174,11 @@ private:
          case RZ_CFG_TAB1:     t = "Discipline"; d = "Tilt, cooldown, duree du self-lock.";              return true;
          case RZ_CFG_TAB2:     t = "Avance";     d = "Confort, rafraichissement, caps apres violation."; return true;
          case RZ_CFG_TAB3:     t = "Affichage";  d = "Theme, langue, news, alertes.";                    return true;
+         case RZ_SELFLOCK:     t = "Self-lock";  d = "Deux clics : arme un STOP total pour la duree reglee."; return true;
+         case RZ_CFG_MVIOL:    t = "Violation marge"; d = "Cap de marge resserre apres une violation.";   return true;
+         case RZ_CFG_RVIOL:    t = "Violation risque"; d = "Cap de risque resserre apres une violation.";  return true;
+         case RZ_CFG_BE:       t = "Break-even";  d = "Trace la ligne de break-even du panier.";           return true;
+         case RZ_MAXLOT_EDIT:  t = "Lot max";     d = "Selectionne puis Ctrl+C pour le coller.";           return true;
          case RZ_TIP_HELP:     t = "Version";    d = "Build en cours + source des news active.";         return true;
          case RZ_CFG_PAL:      t = "Palette";    d = "Emeraude / Indigo / Ardoise.";                     return true;
          case RZ_CFG_MODE:     t = "Mode";       d = "Sombre / clair.";                                  return true;
@@ -1334,6 +1419,11 @@ public:
       m_fltX = 0; m_fltY = 0; m_fltW = RCS_FLT_W; m_fltH = RCS_FLT_HEAD + 40;
       m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
+      m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
+      m_maxEditOn = false; m_maxEditX = 0; m_maxEditY = 0;
+      m_d.addonN = 0; m_d.violMargin = false; m_d.violRisk = false; m_d.beLines = false;
+      m_d.selfLockH = 4; m_d.cycY = 0; m_d.cycM = 0; m_d.cycD = 0;
+      for(int ai = 0; ai < 7; ai++) { m_d.addonName[ai] = ""; m_d.addonOn[ai] = false; }
       m_d.stepN = 0; m_d.casN = 0;
       for(int si = 0; si < 10; si++) { m_d.stepLabel[si] = ""; m_d.stepValue[si] = ""; }
       for(int ci = 0; ci < 5; ci++)  { m_d.casLabel[ci] = "";  m_d.casValue[ci] = ""; }
@@ -1361,6 +1451,18 @@ public:
    bool PendStepTake(int &row, int &dir) {
       if(m_pendStepRow < 0) return false;
       row = m_pendStepRow; dir = m_pendStepDir; m_pendStepRow = -1; return true;
+   }
+   int  PendAddonTake(void) { const int r = m_pendAddon; m_pendAddon = -1; return r; }
+   bool PendSelfLockTake(void) { const bool r = m_pendSelfLock; m_pendSelfLock = false; return r; }
+   bool PendCycTake(int &field, int &dir) {
+      if(m_pendCyc < 0) return false;
+      field = m_pendCyc / 10; dir = ((m_pendCyc % 10) == 1 ? 1 : -1); m_pendCyc = -1; return true;
+   }
+   //--- second copy box : the MAX lot, next to the suggested one -----------
+   bool MaxEditRect(int &x, int &y, int &w, int &h) const {
+      if(!m_maxEditOn) return false;
+      x = m_maxEditX; y = m_maxEditY; w = 76; h = 20;
+      return true;
    }
    //--- a cascade cycler was clicked : row + direction. false = nothing.
    bool PendCasTake(int &row, int &dir) {
@@ -1409,6 +1511,9 @@ public:
    int  CfgIdDiscipline(void) const { return RZ_CFG_DISC; }
    int  CfgIdRiskTools(void) const { return RZ_CFG_RTOOLS; }
    int  CfgIdLang(void)     const { return RZ_CFG_LANG; }
+   int  CfgIdViolMargin(void) const { return RZ_CFG_MVIOL; }
+   int  CfgIdViolRisk(void)   const { return RZ_CFG_RVIOL; }
+   int  CfgIdBe(void)         const { return RZ_CFG_BE; }
 
    bool Create(const string pfx) {
       m_pfx = pfx;
@@ -1520,6 +1625,9 @@ public:
          m_pendCfg = hit;                                   // host consumes on its next refresh
          return true;
       }
+      // any click elsewhere disarms a pending lock confirmation : an armed
+      // question must never survive the user going somewhere else.
+      if(hit != RZ_SELFLOCK && m_lockArm) m_lockArm = false;
       // hover-only info zones : swallow the click, never collapse the section
       if(hit >= RZ_TIP_LIM_ROOM && hit <= RZ_TIP_LIM_M3) return true;
       if(hit >= RZ_POS_ROW0 && hit <= RZ_BAND) return true;   // info rows + safety band
@@ -1544,6 +1652,21 @@ public:
       if(hit >= RZ_CAS_NEXT0 && hit <= RZ_CAS_NEXT4) {
          m_pendCas = (hit - RZ_CAS_NEXT0) * 10 + 1; return true;
       }
+      if(hit >= RZ_ADDON0 && hit <= RZ_ADDON6) {              // add-on toggled
+         m_pendAddon = hit - RZ_ADDON0; return true;
+      }
+      if(hit >= RZ_CYC_PREV0 && hit <= RZ_CYC_PREV2) {        // cycle date
+         m_pendCyc = (hit - RZ_CYC_PREV0) * 10 + 0; return true;
+      }
+      if(hit >= RZ_CYC_NEXT0 && hit <= RZ_CYC_NEXT2) {
+         m_pendCyc = (hit - RZ_CYC_NEXT0) * 10 + 1; return true;
+      }
+      if(hit == RZ_SELFLOCK) {                                // two clicks to arm
+         if(!m_lockArm) { m_lockArm = true; RenderAll(); }     // first : ask
+         else { m_lockArm = false; m_pendSelfLock = true; }    // second : the host arms it
+         return true;
+      }
+      if(hit == RZ_MAXLOT_EDIT) return true;                  // native edit : no-op zone
       if(hit >= RZ_FLT_ROW0 && hit <= RZ_FLT_ROW7) return true;   // position rows : read-only
       if(hit == RZ_FLT_HIDE) { m_fltHidden = true; OnChartChange(); return true; }
       if(hit == RZ_FLT_GRIP) return true;      // the drag itself runs on mouse-move

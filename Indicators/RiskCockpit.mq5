@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.03"
+#property version "3.04"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -3283,6 +3283,36 @@ void BuildDeckData(RCDeckData &d) {
     d.cfgDiscipline = g_eff_discipline;
     d.lang          = g_lang;
     d.version       = "3.02";
+    // v3.04 : add-ons VALID for this plan, violation flags, self-lock, cycle date
+    {
+        int    flags[7]; string names[7];
+        flags[0] = FN_ADDON_LIFETIME_95; names[0] = "Lifetime 95%";
+        flags[1] = FN_ADDON_NO_MIN_DAYS; names[1] = "No Min Days";
+        flags[2] = FN_ADDON_SWAP_FREE;   names[2] = "Swap-Free";
+        flags[3] = FN_ADDON_10PCT_DD;    names[3] = "10% Total DD";
+        flags[4] = FN_ADDON_DOUBLE_UP;   names[4] = "Double Up";
+        flags[5] = FN_ADDON_BI_WEEKLY;   names[5] = "Bi-Weekly";
+        flags[6] = FN_ADDON_150_REWARD;  names[6] = "150% Reward";
+        const int valid = g_catalog.ValidAddonsMask(EffectivePlan());
+        d.addonN = 0;
+        for (int i = 0; i < 7; ++i) {
+            if ((valid & flags[i]) == 0) continue;          // not purchasable on this plan
+            d.addonName[d.addonN] = names[i];
+            d.addonOn[d.addonN]   = ((g_addons_mask & flags[i]) != 0);
+            d.addonN++;
+        }
+    }
+    d.violMargin = g_margin_violation_active;
+    d.violRisk   = g_risk_violation_active;
+    d.beLines    = g_be_visible;
+    d.selfLockH  = g_eff_selflock_h;
+    {
+        double ymd = g_eff_cycle_ymd;
+        if (ymd <= 0.0) ymd = IsoToYmd(InpCycleStartIso);
+        d.cycY = (int)ymd / 10000;
+        d.cycM = ((int)ymd / 100) % 100;
+        d.cycD = (int)ymd % 100;
+    }
     // v3.02 : the settings rows of the ACTIVE tab + the plan cascade
     {
         string lab[], val[];
@@ -3400,7 +3430,64 @@ void ShellApplyCfg(const int id) {
         g_lang = (g_lang + 1) % 3;
         GlobalVariableSet("RC_lang", (double)g_lang);
         ShellPushLabels();                 // the shell's chrome follows the language
+    } else if (id == g_shell.CfgIdViolMargin()) {
+        g_margin_violation_active = !g_margin_violation_active;
+        GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
+    } else if (id == g_shell.CfgIdViolRisk()) {
+        g_risk_violation_active = !g_risk_violation_active;
+        GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0);
+    } else if (id == g_shell.CfgIdBe()) {
+        g_be_visible = !g_be_visible;
+        PersistBE();
+        if (g_be_visible) DrawBreakevenLines();
+        else              ObjectsDeleteAll(0, "RC_BE_");     // the lines live on the chart
     }
+}
+// v3.04 : add-on toggled from the shell. The mask is the SAME one the modal
+// writes ; a re-resolve follows because add-ons change the rules themselves
+// (95% split, no-min-days, 10% DD...).
+void ShellApplyAddon(const int row) {
+    if (row < 0) return;
+    int    flags[7];
+    flags[0] = FN_ADDON_LIFETIME_95; flags[1] = FN_ADDON_NO_MIN_DAYS; flags[2] = FN_ADDON_SWAP_FREE;
+    flags[3] = FN_ADDON_10PCT_DD;    flags[4] = FN_ADDON_DOUBLE_UP;   flags[5] = FN_ADDON_BI_WEEKLY;
+    flags[6] = FN_ADDON_150_REWARD;
+    const int valid = g_catalog.ValidAddonsMask(EffectivePlan());
+    int shown = 0;
+    for (int i = 0; i < 7; ++i) {
+        if ((valid & flags[i]) == 0) continue;
+        if (shown == row) {
+            if ((g_addons_mask & flags[i]) != 0) g_addons_mask &= ~flags[i];
+            else                                 g_addons_mask |=  flags[i];
+            GVSetLogin("RC_addons", (double)g_addons_mask);
+            ApplySettingsChange();                 // add-ons change the RULES
+            return;
+        }
+        shown++;
+    }
+}
+// v3.04 : cycle start date (year / month / day), clamped to a real date.
+void ShellApplyCycle(const int field, const int dir) {
+    double ymd = g_eff_cycle_ymd;
+    if (ymd <= 0.0) ymd = IsoToYmd(InpCycleStartIso);
+    int y = (int)ymd / 10000, m = ((int)ymd / 100) % 100, dd = (int)ymd % 100;
+    if (y < 2000) { y = 2026; m = 1; dd = 1; }
+    if (field == 0) y = (int)MathMax(2020.0, MathMin(2099.0, (double)y + dir));
+    else if (field == 1) m = ((m - 1 + dir) % 12 + 12) % 12 + 1;
+    else                 dd = ((dd - 1 + dir) % 31 + 31) % 31 + 1;
+    if (m == 2 && dd > 28) dd = 28;                          // never build an impossible date
+    if ((m == 4 || m == 6 || m == 9 || m == 11) && dd > 30) dd = 30;
+    g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
+    GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd);
+}
+// v3.04 : arm the self-lock (the shell already asked for confirmation twice).
+void ShellArmSelfLock(void) {
+    g_selflock_until = TimeCurrent() + (datetime)MathMax(1, g_eff_selflock_h) * 3600;
+    GlobalVariableSet("RC_selflock_until", (double)g_selflock_until);
+    g_unlock_arm = 0;
+    Print("RiskCockpit : self-lock armed for ", g_eff_selflock_h, "h (until ",
+          TimeToString(g_selflock_until, TIME_DATE | TIME_MINUTES), ").");
+    ApplySettingsChange();
 }
 // v3 SHELL : the ONE native control of the shell - a copyable lot box. A canvas
 // cannot be selected, so the number the trader pastes into the order ticket has
@@ -3571,6 +3658,35 @@ void ShellApplyCascade(const int row, const int dir) {
     }
     ApplySettingsChange();      // re-resolve the profile : every limit follows
 }
+// v3.04 : the MAX lot gets its own copy box, right under the suggested one.
+void ShellSyncMaxEdit(const double lot, const int digits) {
+    const string id = RC_PREFIX + "V3_copymax";
+    int x, y, w, h;
+    if (!InpShellV2 || !g_shell.MaxEditRect(x, y, w, h)) {
+        ObjectDelete(0, id);
+        return;
+    }
+    if (ObjectFind(0, id) < 0) {
+        ObjectCreate(0, id, OBJ_EDIT, 0, 0, 0);
+        ObjectSetInteger(0, id, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
+        ObjectSetInteger(0, id, OBJPROP_ALIGN, ALIGN_CENTER);
+        ObjectSetInteger(0, id, OBJPROP_READONLY, false);
+        ObjectSetInteger(0, id, OBJPROP_ZORDER, 300);
+        ObjectSetString (0, id, OBJPROP_FONT, RC_FONT);
+        ObjectSetInteger(0, id, OBJPROP_FONTSIZE, RC_FONT_SIZE);
+        ObjectSetString (0, id, OBJPROP_TOOLTIP, Tr("copy_max_tip"));
+    }
+    ObjectSetInteger(0, id, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, id, OBJPROP_YDISTANCE, y);
+    ObjectSetInteger(0, id, OBJPROP_XSIZE, w);
+    ObjectSetInteger(0, id, OBJPROP_YSIZE, h);
+    ObjectSetInteger(0, id, OBJPROP_COLOR, g_shell.EditTextColor());
+    ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_shell.EditBackColor());
+    ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_shell.EditLineColor());
+    ObjectSetString (0, id, OBJPROP_TEXT, DoubleToString(lot, digits));
+}
 void ShellRefresh(void) {
     if (!InpShellV2) return;
     ShellApplyCfg(g_shell.PendCfgTake());  // consume a toggle click before rendering
@@ -3578,6 +3694,9 @@ void ShellRefresh(void) {
         int row = 0, dir = 0;
         if (g_shell.PendStepTake(row, dir)) ShellApplyStep(g_shell.CfgTab(), row, dir);
         if (g_shell.PendCasTake(row, dir))  ShellApplyCascade(row, dir);
+        if (g_shell.PendCycTake(row, dir))  ShellApplyCycle(row, dir);
+        ShellApplyAddon(g_shell.PendAddonTake());
+        if (g_shell.PendSelfLockTake())     ShellArmSelfLock();
     }
     RCDeckData d;
     BuildDeckData(d);
@@ -3585,6 +3704,7 @@ void ShellRefresh(void) {
     RefreshSlLines();                    // chart-side advisory lines stay live under the shell
     if (g_shell.Created()) g_shell.Tick();
     ShellSyncLotEdit(d.sugLot, d.lotDigits);   // AFTER the render : the rect is known
+    ShellSyncMaxEdit(d.maxLot, d.maxLotDigits);
 }
 
 void RefreshPanel(void) {
