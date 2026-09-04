@@ -84,6 +84,21 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 2. Log
 
+### v2.16.08 — 2026-09-04 — shell tooltips go through the product's i18n
+
+The 40-odd hover bubbles were the last block of hard-coded French in the shell. They now flow
+through the same `Tr()` table as everything else: one entry per bubble, `"title|description"`
+packed in a single translation, split by the shell.
+
+- `SetTip(zoneId, "title|desc")` on the shell + `Zid*()` accessors, so the host addresses its
+  tooltips without importing the zone enum.
+- 49 new keys, EN/FR/ES, covering the 8 rail cells, the chevron, the 9 navbar chips, the panel
+  chrome, the limit / lot / news / discipline info rows, the 10 settings toggles, the safety band,
+  a position row, the account card and the version line.
+- The French wording stays in the shell as the fallback and the reference.
+
+Compiled `0 errors, 0 warnings`.
+
 ### v2.15.07 — 2026-09-04 — menu theme aligned on StrategyDeck v2
 
 The dropdown built in the previous lot drew its selected item as a flat tinted highlight, which

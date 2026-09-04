@@ -152,6 +152,7 @@ enum ERCZone {
 //--- label slots : the shell ships FR defaults ; the host overrides them with
 //--- its own i18n (Tr) so one translation table serves the whole product.
 #define RCS_L_MAX 64
+#define RCS_TIP_MAX 96      // tooltip slots, indexed by zone id (see ERCZone)
 enum ERCLabel {
    RCL_SEC_LIM = 0, RCL_SEC_POS, RCL_SEC_LOT, RCL_SEC_NEWS, RCL_SEC_DISC,
    RCL_SEC_CPT, RCL_SEC_CFG, RCL_SEC_HELP,
@@ -219,6 +220,7 @@ private:
    bool       m_pendKill;        // host consumes : remove the indicator
    int        m_pendCfg;         // host consumes : a config toggle was clicked (RZ_CFG_* id, 0 = none)
    string     m_L[RCS_L_MAX];    // i18n slots (empty = the built-in FR default is used)
+   string     m_tipT[RCS_TIP_MAX], m_tipD[RCS_TIP_MAX];   // translated tooltips, indexed by zone id
    // dropdown menu (symbol / timeframe)
    bool       m_menuOpen;
    int        m_menuMode;        // 0 = timeframe, 1 = symbol
@@ -859,6 +861,12 @@ private:
 
    //================= TOOLTIP (hover intent) ===============================
    bool TipText(const int id, string &t, string &d) const {
+      // i18n first : the host pushes translated bubbles through SetTip() ; the FR
+      // defaults below are the fallback (and the reference wording).
+      if(id >= 0 && id < RCS_TIP_MAX && StringLen(m_tipT[id]) > 0) {
+         t = m_tipT[id]; d = m_tipD[id];
+         return true;
+      }
       switch(id) {
          case RZ_RAIL_LIM:   t = "Limites";      d = "Conso de la limite la plus proche. Repere = 80%."; return true;
          case RZ_RAIL_POS:   t = "Positions";    d = "Positions ouvertes + pire statut de ligne.";       return true;
@@ -1090,6 +1098,7 @@ public:
       m_menuOpen = false; m_menuMode = 0; m_menuX = 0; m_menuY = 0; m_menuH = 40; m_menuN = 0;
       for(int mi = 0; mi < 12; mi++) m_menuItem[mi] = "";
       for(int li = 0; li < RCS_L_MAX; li++) m_L[li] = "";
+      for(int ti = 0; ti < RCS_TIP_MAX; ti++) { m_tipT[ti] = ""; m_tipD[ti] = ""; }
       m_d.planLabel = "--"; m_d.phaseLabel = "--"; m_d.acctTypeLabel = "--";
       m_d.addonsLabel = ""; m_d.cycleLabel = ""; m_d.sizeLabelFull = "--";
       m_d.login = 0; m_d.minDays = 0; m_d.minDaysDone = 0;
@@ -1107,6 +1116,28 @@ public:
    int  PendCfgTake(void)  { const int  r = m_pendCfg;  m_pendCfg  = 0;     return r; }
    //--- i18n : slot ids are ERCLabel ; empty string = keep the FR default ---
    void SetLabel(const int id, const string s) { if(id >= 0 && id < RCS_L_MAX) m_L[id] = s; }
+   //--- translated tooltip for a zone id ("title|description" packed by the host)
+   void SetTip(const int zid, const string packed) {
+      if(zid < 0 || zid >= RCS_TIP_MAX) return;
+      const int bar = StringFind(packed, "|");
+      if(bar <= 0) { m_tipT[zid] = packed; m_tipD[zid] = ""; return; }
+      m_tipT[zid] = StringSubstr(packed, 0, bar);
+      m_tipD[zid] = StringSubstr(packed, bar + 1);
+   }
+   //--- zone ids the host needs to address its tooltips (no enum leak needed) --
+   int ZidRail(const int i)  const { return RZ_RAIL_LIM + i; }        // 0..7 = the 8 cells
+   int ZidChevron(void) const { return RZ_RAIL_CHEVRON; }
+   int ZidNav(const int i)   const { return RZ_NAV_LOGO + i; }        // 0..7 navbar chips
+   int ZidPanel(const int i) const { return RZ_PANEL_CLOSE + i; }     // 0 close, 1 pin
+   int ZidLimTip(const int i) const { return RZ_TIP_LIM_ROOM + i; }   // 0..5 limits rows
+   int ZidLotTip(const int i) const { return RZ_TIP_LOT_BUD + i; }    // 0..2
+   int ZidNewsTip(const int i) const { return RZ_TIP_NEWS_SRC + i; }  // 0..2
+   int ZidDiscTip(const int i) const { return RZ_TIP_DISC_LOCK + i; } // 0..2
+   int ZidBand(void) const { return RZ_BAND; }
+   int ZidPosRow(void) const { return RZ_POS_ROW0; }
+   int ZidCfg(const int i)   const { return RZ_CFG_PAL + i; }         // 0..9
+   int ZidCptTip(void) const { return RZ_TIP_CPT; }
+   int ZidHelpTip(void) const { return RZ_TIP_HELP; }
    //--- config toggle ids, so the host can map them without knowing the enum
    int  CfgIdNewsHigh(void) const { return RZ_CFG_NEWSH; }
    int  CfgIdNewsMed(void)  const { return RZ_CFG_NEWSM; }

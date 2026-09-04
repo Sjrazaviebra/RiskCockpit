@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "2.15"
+#property version "2.16"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -3278,6 +3278,28 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_CPT_ADDONS,Tr("addons_lbl"));
     g_shell.SetLabel(RCL_CPT_SPLIT, Tr("shl_split"));
     g_shell.SetLabel(RCL_CPT_DAYS,  Tr("shl_mindays"));
+    // --- tooltips : "title|description" packed in ONE i18n entry each --------
+    for (int i = 0; i < 8; ++i) g_shell.SetTip(g_shell.ZidRail(i),
+        Tr("tipr_" + IntegerToString(i)));
+    g_shell.SetTip(g_shell.ZidChevron(), Tr("tipr_chev"));
+    for (int i = 0; i < 9; ++i) g_shell.SetTip(g_shell.ZidNav(i),
+        Tr("tipn_" + IntegerToString(i)));
+    g_shell.SetTip(g_shell.ZidPanel(0), Tr("tipp_close"));
+    g_shell.SetTip(g_shell.ZidPanel(1), Tr("tipp_pin"));
+    for (int i = 0; i < 6; ++i) g_shell.SetTip(g_shell.ZidLimTip(i),
+        Tr("tipl_" + IntegerToString(i)));
+    for (int i = 0; i < 3; ++i) g_shell.SetTip(g_shell.ZidLotTip(i),
+        Tr("tipo_" + IntegerToString(i)));
+    for (int i = 0; i < 3; ++i) g_shell.SetTip(g_shell.ZidNewsTip(i),
+        Tr("tipw_" + IntegerToString(i)));
+    for (int i = 0; i < 3; ++i) g_shell.SetTip(g_shell.ZidDiscTip(i),
+        Tr("tipd_" + IntegerToString(i)));
+    for (int i = 0; i < 10; ++i) g_shell.SetTip(g_shell.ZidCfg(i),
+        Tr("tipc_" + IntegerToString(i)));
+    g_shell.SetTip(g_shell.ZidBand(),    Tr("tip_band"));
+    g_shell.SetTip(g_shell.ZidPosRow(),  Tr("tip_posrow"));
+    g_shell.SetTip(g_shell.ZidCptTip(),  Tr("tip_cpt"));
+    g_shell.SetTip(g_shell.ZidHelpTip(), Tr("tip_help"));
 }
 // v3 SHELL : a config toggle was clicked. The SHELL never mutates the model -
 // the change lands HERE, on the same globals + persistence the modal uses.
@@ -6850,6 +6872,150 @@ void InitI18n(void) {
     AddTr("shl_discday",   "TODAY",              "ACTIVITE DU JOUR",     "ACTIVIDAD DE HOY");
     AddTr("shl_split",     "Split",              "Split",                "Reparto");
     AddTr("shl_mindays",   "Min days",           "Jours mini",           "Dias min");
+    // --- v3 SHELL tooltips : ONE entry per bubble, "title|description" -------
+    AddTr("tipr_0", "Limits|Usage of the NEAREST active limit. Marker = 80%.",
+                    "Limites|Conso de la limite la plus proche. Repere = 80%.",
+                    "Limites|Uso del limite mas cercano. Marca = 80%.");
+    AddTr("tipr_1", "Positions|Open trades and the worst row status.",
+                    "Positions|Positions ouvertes et pire statut de ligne.",
+                    "Posiciones|Operaciones abiertas y peor estado.");
+    AddTr("tipr_2", "Suggested lot|Amber = capped at 80%, red = no room left.",
+                    "Lot conseille|Ambre = plafonne a 80%, rouge = plus de marge.",
+                    "Lote sugerido|Ambar = limitado al 80%, rojo = sin margen.");
+    AddTr("tipr_3", "News|Minutes to the next rule-bound event.",
+                    "News|Minutes avant le prochain event soumis a la regle.",
+                    "Noticias|Minutos hasta el proximo evento con regla.");
+    AddTr("tipr_4", "Discipline|Lock, tilt, SL guard, trades today.",
+                    "Discipline|Verrou, tilt, garde SL, trades du jour.",
+                    "Disciplina|Bloqueo, tilt, guarda SL, ops de hoy.");
+    AddTr("tipr_5", "Account|Plan, size, phase, add-ons, split.",
+                    "Compte|Plan, taille, phase, add-ons, split.",
+                    "Cuenta|Plan, tamano, fase, extras, reparto.");
+    AddTr("tipr_6", "Settings|Display, news, alerts, comfort.",
+                    "Reglages|Affichage, news, alertes, confort.",
+                    "Ajustes|Pantalla, noticias, alertas, confort.");
+    AddTr("tipr_7", "Help|Colour legend, rules, version.",
+                    "Aide|Legende des couleurs, regles, version.",
+                    "Ayuda|Leyenda de colores, reglas, version.");
+    AddTr("tipr_chev", "Sidebar|Opens every section, stacked.",
+                       "Sidebar|Ouvre toutes les sections empilees.",
+                       "Barra lateral|Abre todas las secciones apiladas.");
+    AddTr("tipn_0", "RiskCockpit|Opens the full sidebar.",
+                    "RiskCockpit|Ouvre la sidebar complete.",
+                    "RiskCockpit|Abre la barra lateral completa.");
+    AddTr("tipn_1", "Symbol|Pick a Market Watch symbol.",
+                    "Symbole|Choisir un symbole du Market Watch.",
+                    "Simbolo|Elegir un simbolo del Market Watch.");
+    AddTr("tipn_2", "Timeframe|Switch the chart timeframe.",
+                    "Unite de temps|Changer l'unite de temps du graphique.",
+                    "Temporalidad|Cambiar la temporalidad del grafico.");
+    AddTr("tipn_3", "Vitals|Current equity and open positions.",
+                    "Vitals|Equity courante et positions ouvertes.",
+                    "Vitales|Equity actual y posiciones abiertas.");
+    AddTr("tipn_4", "Health|Account health out of 100 (100 = safe).",
+                    "Sante|Sante du compte sur 100 (100 = sur).",
+                    "Salud|Salud de la cuenta sobre 100 (100 = seguro).");
+    AddTr("tipn_5", "Theme|Emerald / Indigo / Slate.",
+                    "Theme|Emeraude / Indigo / Ardoise.",
+                    "Tema|Esmeralda / Indigo / Pizarra.");
+    AddTr("tipn_6", "Mode|Dark / light.", "Mode|Sombre / clair.", "Modo|Oscuro / claro.");
+    AddTr("tipn_7", "Clock|Broker server time.",
+                    "Horloge|Heure serveur du broker.",
+                    "Reloj|Hora del servidor del broker.");
+    AddTr("tipn_8", "Remove|Takes RiskCockpit off this chart.",
+                    "Retirer|Retire RiskCockpit de ce graphique.",
+                    "Quitar|Quita RiskCockpit de este grafico.");
+    AddTr("tipp_close", "Close|Closes the panel, the rail stays.",
+                        "Fermer|Referme le panneau, le rail reste.",
+                        "Cerrar|Cierra el panel, el carril queda.");
+    AddTr("tipp_pin",   "Sidebar|Single section / full sidebar.",
+                        "Sidebar|Section unique / sidebar complete.",
+                        "Barra lateral|Seccion unica / barra completa.");
+    AddTr("tipl_0", "Room|Dollars before the nearest active limit.",
+                    "Marge|Dollars avant la limite active la plus proche.",
+                    "Margen|Dolares antes del limite activo mas cercano.");
+    AddTr("tipl_1", "Floor|Equity under this level = account lost.",
+                    "Plancher|Equity sous ce niveau = compte perdu.",
+                    "Suelo|Equity bajo este nivel = cuenta perdida.");
+    AddTr("tipl_2", "Cumulative margin|Margin used / plan cap.",
+                    "Marge cumulee|Marge engagee / plafond du plan.",
+                    "Margen acumulado|Margen usado / tope del plan.");
+    AddTr("tipl_3", "Open risk|Sum of risks at the stops / cap.",
+                    "Risque ouvert|Somme des risques aux SL / plafond.",
+                    "Riesgo abierto|Suma de riesgos en los SL / tope.");
+    AddTr("tipl_4", "Daily DD|Today's loss / daily limit.",
+                    "DD journalier|Perte du jour / limite journaliere.",
+                    "DD diario|Perdida de hoy / limite diario.");
+    AddTr("tipl_5", "Overall DD|Total loss / plan maximum.",
+                    "DD total|Perte totale / limite max du plan.",
+                    "DD total|Perdida total / maximo del plan.");
+    AddTr("tipo_0", "Budget|What this trade may lose at its stop.",
+                    "Budget|Ce que ce trade a le droit de perdre a sa SL.",
+                    "Presupuesto|Lo que esta op. puede perder en su SL.");
+    AddTr("tipo_1", "Free margin|Broker free margin / initial balance.",
+                    "Marge libre|Marge broker disponible / balance initiale.",
+                    "Margen libre|Margen libre del broker / balance inicial.");
+    AddTr("tipo_2", "80% cap|Lot reduced to keep a 20% reserve.",
+                    "Plafond 80%|Lot reduit pour garder 20% de reserve.",
+                    "Tope 80%|Lote reducido para guardar 20% de reserva.");
+    AddTr("tipw_0", "News source|FF = ForexFactory feed (FN-aligned). MT = fallback.",
+                    "Source news|FF = flux ForexFactory (aligne FN). MT = secours.",
+                    "Fuente noticias|FF = feed ForexFactory (alineado FN). MT = respaldo.");
+    AddTr("tipw_1", "News rule|Red = the 40% rule. Amber = check on FN.",
+                    "Regle news|Rouge = regle 40%. Ambre = a verifier sur FN.",
+                    "Regla noticias|Rojo = regla 40%. Ambar = verificar en FN.");
+    AddTr("tipw_2", "Upcoming|Next groups (time, currency, level).",
+                    "A venir|Prochains groupes (heure, devise, niveau).",
+                    "Proximos|Proximos grupos (hora, divisa, nivel).");
+    AddTr("tipd_0", "Lock|Time left before it releases.",
+                    "Verrou|Temps restant avant deverrouillage.",
+                    "Bloqueo|Tiempo restante antes de liberarse.");
+    AddTr("tipd_1", "SL guard|Stop price that keeps a 20% survival room.",
+                    "Garde SL|Prix de SL qui laisse 20% de marge de survie.",
+                    "Guarda SL|Precio de SL que deja 20% de margen.");
+    AddTr("tipd_2", "Tilt|Trades in the window / configured threshold.",
+                    "Tilt|Trades dans la fenetre / seuil configure.",
+                    "Tilt|Ops en la ventana / umbral configurado.");
+    AddTr("tipc_0", "Palette|Emerald / Indigo / Slate.",
+                    "Palette|Emeraude / Indigo / Ardoise.",
+                    "Paleta|Esmeralda / Indigo / Pizarra.");
+    AddTr("tipc_1", "Mode|Dark / light.", "Mode|Sombre / clair.", "Modo|Oscuro / claro.");
+    AddTr("tipc_2", "Language|EN / FR / ES (persisted).",
+                    "Langue|EN / FR / ES (persistee).",
+                    "Idioma|EN / FR / ES (persistido).");
+    AddTr("tipc_3", "News HIGH|Events bound by the 40% rule.",
+                    "News HIGH|Events soumis a la regle 40%.",
+                    "Noticias ALTA|Eventos sujetos a la regla 40%.");
+    AddTr("tipc_4", "News MEDIUM|Watch only : check on FN, no rule.",
+                    "News MEDIUM|Vigilance : a verifier sur FN, pas de regle.",
+                    "Noticias MEDIA|Vigilancia : verificar en FN, sin regla.");
+    AddTr("tipc_5", "Sound|Audible alert on status changes.",
+                    "Son|Alerte sonore aux changements de statut.",
+                    "Sonido|Alerta sonora en cambios de estado.");
+    AddTr("tipc_6", "Telegram|Sends alerts (token in the Inputs).",
+                    "Telegram|Envoi des alertes (token dans les Inputs).",
+                    "Telegram|Envia alertas (token en los Inputs).");
+    AddTr("tipc_7", "Comfort|Vertical padding of the chart.",
+                    "Confort|Marge verticale du graphique.",
+                    "Confort|Margen vertical del grafico.");
+    AddTr("tipc_8", "Discipline|Daily lock + tilt detection.",
+                    "Discipline|Verrou journalier + detection de tilt.",
+                    "Disciplina|Bloqueo diario + deteccion de tilt.");
+    AddTr("tipc_9", "Risk tools|The whole prop toolkit (personal account).",
+                    "Outils|Toute la boite a outils prop (compte perso).",
+                    "Herramientas|Todo el kit prop (cuenta personal).");
+    AddTr("tip_band",   "Alert|Blocking state : read it, act, it goes away.",
+                        "Alerte|Etat bloquant : lis la ligne, agis, elle part.",
+                        "Alerta|Estado bloqueante : lee, actua, desaparece.");
+    AddTr("tip_posrow", "Position|Symbol, side, volume, P&L, age, stop present.",
+                        "Position|Symbole, sens, volume, P&L, age, presence de SL.",
+                        "Posicion|Simbolo, sentido, volumen, P&L, edad, SL.");
+    AddTr("tip_cpt",    "Profile|The plan EVERY limit is derived from.",
+                        "Profil|Le plan dont TOUTES les limites sont deduites.",
+                        "Perfil|El plan del que salen TODOS los limites.");
+    AddTr("tip_help",   "Version|Current build + active news source.",
+                        "Version|Build en cours + source des news active.",
+                        "Version|Build actual + fuente de noticias activa.");
     // --- v2.13 FEATURE B : SL-vs-limit survival guard (20% margin) ---
     AddTr("slguard",
           "SL too low - breach risk : raise the SL to keep a 20% margin",
