@@ -683,7 +683,14 @@ private:
       }
       if(m_d.trailing) {
          m_side.Text(18, y, L(RCL_FLOOR, "Floor:"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
-         m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.floorMoney, 2) + " $", A(m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
+         // v3.12 : the floor is the level where the ACCOUNT IS LOST - it must
+         // warn on approach instead of sitting there in neutral grey. The
+         // proximity measure is the total-DD ratio, same 80% / 100% thresholds
+         // as every other limit : no new metric invented here.
+         const double fdd = (m_d.overallApplies && m_d.overallCap > 0.0
+                             ? m_d.overallPct / m_d.overallCap : 0.0);
+         const color  fc  = (fdd >= 1.0 ? m_t.red : (fdd >= 0.80 ? m_t.warn : m_t.text));
+         m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.floorMoney, 2) + " $", A(fc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, (fdd >= 0.80 ? FW_BOLD : 0));
          ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 20, RZ_TIP_LIM_FLOOR);
          y += 18;
          m_side.Text(18, y, L(RCL_FLOOR_HINT, "Equity below this level = account lost."), A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);

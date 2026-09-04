@@ -86,6 +86,15 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.12.24 - le plancher trailing alerte à l'approche
+
+Le plancher (`min(pic de balance − perte permise, balance initiale)`) est le
+niveau où **le compte est perdu**. Il s'affichait en gris neutre, quelle que
+soit la distance : la donnée la plus grave du panneau était la seule à ne rien
+signaler. Il prend maintenant la couleur du ratio de DD total — mêmes seuils
+80 % / 100 % que toutes les autres limites, aucune métrique inventée — et
+passe en gras dès la zone d'alerte.
+
 ### v3.11.23 - deux boutons FANTÔMES : cliquables, sans effet, sans un mot
 
 Audit demandé par JR (« être sûr que tous les boutons marchent »), poussé au
