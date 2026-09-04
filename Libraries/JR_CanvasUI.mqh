@@ -325,6 +325,26 @@ public:
          m_cv.FillRectangle(xl, y + row, xr, y + row, c);
       }
    }
+   //=== v3 shell additions (shared with StrategyDeck v2 — same kit) ===========
+   //--- canvas text : one render path (no OBJ_LABEL forest for the v2 shell). -
+   //--- size is given in POINTS ; FontSet gets NEGATIVE tenths-of-point        -
+   //--- (TextSetFont convention : negative = points, scales with the OS text   -
+   //--- size ; positive would be raw pixels). Anchor via TA_* of TextOut.      -
+   void Text(const int x, const int y, const string txt, const uint argb,
+             const int size, const string font = "Segoe UI",
+             const uint align = TA_LEFT | TA_TOP, const uint flags = 0) {
+      if(!m_ready) return;
+      m_cv.FontSet(font, -size * 10, flags);   // -size*10 = size in points
+      m_cv.TextOut(x, y, txt, argb, align);
+   }
+   //--- measured text width/height for text-in-capsule sizing (uint& per doc). -
+   void TextSizeGet(const string txt, const int size, const string font,
+                    int &w_out, int &h_out, const uint flags = 0) {
+      if(!m_ready) { w_out = 0; h_out = 0; return; }
+      m_cv.FontSet(font, -size * 10, flags);
+      w_out = m_cv.TextWidth(txt);
+      h_out = m_cv.TextHeight(txt);
+   }
 };
 
 #endif // __JR_CANVAS_UI_MQH__

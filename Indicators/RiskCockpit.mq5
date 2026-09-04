@@ -1,4 +1,4 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //|                                          RiskCockpit.mq5   |
 //|                                                JR Trading - 2026 |
 //|                                          https://javadrazavi.fr  |
@@ -20,7 +20,7 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "2.13"
+#property version "2.14"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -32,6 +32,7 @@
 #include <..\Libraries\CPyramidEngine.mqh>
 #include <Canvas\Canvas.mqh>            // v1.4 : CCanvas FX overlay (risk-breach glow ring)
 #include <..\Libraries\JR_CanvasUI.mqh> // v1.4 : reusable modern-UI canvas kit (brand design language)
+#include <..\Libraries\RC_ShellUI.mqh> // v3 SHELL (lot 1) : 36px rail + on-demand panel (StrategyDeck v2 space architecture)
 
 // V1.29 : EMBED the header logo so BUYERS see it. A Market product ships only the
 // .ex5 - an external MQL5\Images\ file is NOT delivered, so the runtime path load
@@ -173,6 +174,8 @@ input bool          InpShowNews              = true;                // Show econ
 input ENUM_RC_THEME InpTheme                 = RC_THEME_GLASS_DARK; // Panel mode (Glass Dark / Glass Light)
 input ENUM_RC_PALETTE InpPalette             = RC_PAL_EMERALD;      // Brand palette (Emeraude / Indigo / Ardoise) - v2.02
 input ENUM_RC_LANG  InpLang                  = RC_LANG_EN;          // UI language (EN / FR / ES)
+input bool          InpShellV2               = false;               // v3 SHELL : 36px right rail + on-demand panel (replaces the big panel)
+input int           InpShellTipMs            = 600;                 // v3 SHELL : hover delay before a tooltip shows (ms)
 input int           InpAnchorX               = 20;                  // Panel X offset from chart top-left (px)
 input int           InpAnchorY               = 100;                 // Panel Y offset (px ; clears MT5 one-click panel)
 input int           InpPanelWidth            = 620;                 // Panel width (px)
@@ -247,6 +250,14 @@ int     g_fx_h  = 0;
 // v1.4 MODERN : the panel body is drawn in ONE CCanvasKit bitmap (rounded card,
 // soft gradient, drop shadow, hairline dividers, rounded-end meters + pills).
 // It sits UNDER the text (OBJ_LABEL) and controls, and under g_fx (the glow).
+// v3 SHELL (lot 1) : the new space architecture lives in RC_ShellUI.mqh and is
+// gated on InpShellV2 - OFF = the legacy panel is untouched (additive only).
+// The shell is a VIEW : BuildDeckData fills its snapshot from the SAME Live_*
+// functions the legacy rows use, so there is exactly one risk model.
+RCShellUI g_shell;
+void BuildDeckData(RCDeckData &d);
+void ShellRefresh(void);
+
 CCanvasKit g_kit;
 // LOT D : the settings modal draws on its OWN canvas - shell (rounded card + shadow +
 // glow) AND, since D-FULL step 2, every control face (buttons / pills / steppers).
@@ -1233,6 +1244,17 @@ int OnInit(void) {
     InitI18n();
 
     DestroyAllObjects();
+    // v3 SHELL : either the legacy panel OR the shell - never both (one UI owns
+    // the chart). The shell reads its theme index from the palette/mode inputs so
+    // a fresh attach already matches the product's brand language.
+    if (InpShellV2) {
+        g_shell.Init();
+        g_shell.SetThemeIdx((int)InpPalette * 2 + (EffectiveTheme() == RC_THEME_GLASS_DARK ? 0 : 1));
+        g_shell.SetTipDelay(InpShellTipMs);
+        g_shell.Create(RC_PREFIX + "V3_");
+        ShellPushLabels();   // the shell's chrome speaks the product's language
+        ShellRefresh();
+    }
     BuildPanel();
     MovePanelBy(0, 0); // v2.01 : re-clamp with the REAL height (BuildPanel just set
                        // g_panel_height ; the pre-build clamp above only had the 52px
@@ -1262,6 +1284,7 @@ int OnInit(void) {
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason) {
     EventKillTimer();
+    g_shell.Destroy();                                 // v3 SHELL : frees its 6 canvases + restores chart flags
     if (g_fx_on) { g_fx.Destroy(); g_fx_on = false; } // v1.4 : free the FX bitmap resource
     g_kit.Destroy();                                   // v1.4 : free the modern body canvas
     g_modal_kit.Destroy();                             // LOT D STEP 0 : free the modal shell canvas
@@ -1741,6 +1764,25 @@ void DispatchHit(const string act, const int idx) {
 }
 
 void OnChartEvent(const int id, const long& lparam, const double& dparam, const string& sparam) {
+    // v3 SHELL : ONE dispatcher. When the shell is on it owns clicks + hover ; the
+    // legacy hit registry never sees them (two registries must never consume the
+    // same click). CHART_CHANGE still falls through : the chart-side news markers
+    // keep their re-pin, and the shell rebuilds its surfaces at the end of it.
+    if (InpShellV2 && g_shell.Created()) {
+        if (id == CHARTEVENT_CLICK) {
+            g_shell.OnClick((int)lparam, (int)dparam);
+            if (g_shell.PendKillTake()) {          // navbar X : remove this instance
+                int kwin2 = ChartWindowFind();
+                if (kwin2 < 0) kwin2 = 0;
+                g_shell.Destroy();
+                ObjectsDeleteAll(0, RC_PREFIX);
+                ChartIndicatorDelete(0, kwin2, "RiskCockpit");
+                ChartRedraw(0);
+            }
+            return;
+        }
+        if (id == CHARTEVENT_MOUSE_MOVE) { g_shell.OnMouseMove((int)lparam, (int)dparam); return; }
+    }
     // V1.29 V : on any chart change (resize / TF switch / scroll / zoom), re-pin the
     // bottom news icons to the CURRENT visible price floor IMMEDIATELY - no calendar
     // re-query, no lag. VLINEs are time-anchored (native, fine) ; SL/TP labels are
@@ -1762,6 +1804,9 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
             const int lane = (np >= 5 ? (int)StringToInteger(parts[3]) : 0);
             ObjectSetDouble(0, nm, OBJPROP_PRICE, pmin + rng * (0.02 + 0.018 * lane)); // keep OBJPROP_TIME (x follows natively) ; v2.03.05c FIX 4 : baseline synced with RefreshNewsZonesForChart (0.02)
         }
+        // v3 SHELL : surfaces are destroyed + recreated (the zones moved) and the
+        // hover state is reset - the playbook's OnChartChange rule.
+        if (InpShellV2 && g_shell.Created()) g_shell.OnChartChange();
         ChartRedraw(0);
         return;
     }
@@ -2136,6 +2181,7 @@ void PaintStatusPill(const int x, const int y, const ENUM_RC_STATUS s, const boo
 //| rectangle-label backgrounds sit UNDER it (hidden) - R2 removes.   |
 //+------------------------------------------------------------------+
 void RepaintCanvas(const int x, const int y, const int w) {
+    if (InpShellV2) return;   // v3 SHELL : legacy body canvas is dark
     if (!g_kit.Ready()) return;
     const int M = RC_KIT_MARGIN;
     const int rules_h     = (g_eff_risktools ? RC_RULE_COUNT * InpRowHeight : 0);
@@ -2276,6 +2322,7 @@ void RepaintCanvas(const int x, const int y, const int w) {
 //| Build static skeleton (background + section frames)              |
 //+------------------------------------------------------------------+
 void BuildPanel(void) {
+    if (InpShellV2) return;   // v3 SHELL owns the chart : the legacy panel is not built
     const int x = g_anchor_x; // B2 : live anchor (drag-updated, persisted)
     const int y = g_anchor_y;
     const int w = InpPanelWidth;
@@ -2964,7 +3011,322 @@ void DrawFooter(int x, int y, int w) {
 //| RefreshPanel - reads stub values and updates labels/bars          |
 //| T7 will replace the Stub_ calls with real implementations.       |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| v3 SHELL (lot 1) : model -> view bridge.                          |
+//|                                                                   |
+//| BuildDeckData reads the SAME Live_* functions the legacy rows use  |
+//| - ZERO new risk math, so the shell can never disagree with the     |
+//| panel it replaces. The shell is a pure VIEW : it decides nothing.  |
+//+------------------------------------------------------------------+
+string ShellPlanTag(void) {
+    switch (EffectivePlan()) {
+        case FN_PLAN_STELLAR_1STEP:    return "1STP";
+        case FN_PLAN_STELLAR_2STEP:    return "2STP";
+        case FN_PLAN_STELLAR_LITE:     return "LITE";
+        case FN_PLAN_STELLAR_INSTANT:  return "INST";
+        case FN_PLAN_FREE_TRIAL:       return "TRIAL";
+        case FN_PLAN_FREE_COMPETITION: return "COMP";
+        case FN_PLAN_FTMO_2STEP:       return "FTMO";
+        case FN_PLAN_E8_8PCT:          return "E8";
+        case FN_PLAN_THE5ERS_HIGH:     return "5ERS";
+        case FN_PLAN_MFF_RAPID:        return "MFF";
+        case FN_PLAN_PERSONAL:         return "PERSO";
+    }
+    return "--";
+}
+void BuildDeckData(RCDeckData &d) {
+    const double init = g_profile.initial_balance;
+    // --- session / account ---------------------------------------------
+    VerdictResult v;
+    ComputeVerdict(v);
+    d.score       = v.score;
+    d.verdict     = (v.clr == g_theme.red ? 2 : (v.clr == g_theme.warn ? 1 : 0));
+    d.verdictWord = Tr(d.verdict == 2 ? "v_violation" : (d.verdict == 1 ? "v_atrisk" : "v_ontrack"));
+    d.equity      = AccountInfoDouble(ACCOUNT_EQUITY);
+    d.balance     = AccountInfoDouble(ACCOUNT_BALANCE);
+    d.sym         = _Symbol;
+    d.tf          = StringSubstr(EnumToString((ENUM_TIMEFRAMES)ChartPeriod(0)), 7);
+    d.planTag     = ShellPlanTag();
+    d.sizeTag     = SizeLabel();
+    StringReplace(d.sizeTag, "$", "");
+    d.splitPct    = (int)MathRound(g_profile.profit_split_pct);
+    d.riskTools   = g_eff_risktools;
+    // --- limits (cell LIM) ----------------------------------------------
+    d.marginPct = Live_CumulativeMarginPct(); d.marginCap = EffectiveMarginCap();
+    d.riskPct   = Live_CumulativeRiskPct();   d.riskCap   = EffectiveRiskCap();
+    d.dailyPct  = Live_DailyDdPct();          d.dailyCap  = g_profile.daily_loss_pct;
+    d.overallPct= Live_OverallDdPct();        d.overallCap= g_profile.max_loss_pct;
+    d.dailyApplies   = (d.dailyCap > 0.0);
+    d.overallApplies = (d.overallCap > 0.0);
+    d.trailing       = g_profile.max_loss_trailing;
+    double worst = 0.0;
+    if (d.marginCap > 0.0)              worst = MathMax(worst, d.marginPct  / d.marginCap);
+    if (d.riskCap > 0.0)                worst = MathMax(worst, d.riskPct    / d.riskCap);
+    if (d.dailyApplies)                 worst = MathMax(worst, d.dailyPct   / d.dailyCap);
+    if (d.overallApplies)               worst = MathMax(worst, d.overallPct / d.overallCap);
+    d.limRatio  = worst;
+    d.roomMoney = Live_NearestLimitRoom();                 // -1 = no active limit
+    d.floorMoney = 0.0;
+    if (d.trailing && init > 0.0) {
+        const double permitted = (g_profile.max_loss_pct / 100.0) * init;
+        d.floorMoney = MathMin(g_peak_balance - permitted, init);
+    }
+    // --- positions (cell POS + section rows) -----------------------------
+    d.posCount = PositionsTotal();
+    d.posPnl   = 0.0;
+    d.posNoSl  = false;
+    d.posN     = 0;
+    for (int i = 0; i < d.posCount; ++i) {
+        const ulong tk = PositionGetTicket(i);
+        if (tk == 0 || !PositionSelectByTicket(tk)) continue;
+        const double rp  = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+        const bool   hsl = (PositionGetDouble(POSITION_SL) > 0.0);
+        d.posPnl += rp;
+        if (!hsl) d.posNoSl = true;
+        if (d.posN < 8) {                                  // 8 rows shown, the rest is announced
+            const int k = d.posN;
+            d.posSym[k]    = PositionGetString(POSITION_SYMBOL);
+            d.posSide[k]   = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "BUY" : "SELL");
+            d.posVol[k]    = PositionGetDouble(POSITION_VOLUME);
+            d.posRowPnl[k] = rp;
+            d.posAge[k]    = (int)(TimeCurrent() - (datetime)PositionGetInteger(POSITION_TIME));
+            d.posHasSl[k]  = hsl;
+            d.posStat[k]   = (hsl ? (rp >= 0.0 ? 0 : 1) : 2);   // no SL = the only red row state
+            d.posN++;
+        }
+    }
+    // --- discipline (cell DISC) + SL guard --------------------------------
+    string gsym = ""; double gsl = 0.0;
+    d.slGuard    = Live_SlGuardBreached(gsym, gsl);
+    d.slGuardSym = gsym;
+    d.slGuardPrice = gsl;
+    d.discLocked = (g_selflock_until > TimeCurrent());
+    d.selfLock   = d.discLocked;
+    d.lockMinsLeft = (d.discLocked ? (int)((g_selflock_until - TimeCurrent()) / 60) + 1 : 0);
+    d.discTilt   = (g_eff_discipline && ((g_eff_tilt_n > 0 && g_disc_trades_win > g_eff_tilt_n) || g_disc_revenge));
+    d.tiltTrades = g_disc_trades_win;
+    d.tiltN      = g_eff_tilt_n;
+    d.tiltWinMin = g_eff_tilt_win;
+    d.tradesToday = Live_TradesToday();
+    d.tradesCap   = g_profile.hyperactivity_trades_per_day;
+    d.posWorst    = (d.posCount <= 0 ? 3 : (d.posNoSl ? 2 : (d.slGuard ? 1 : 0)));
+    // --- lot advisor (cell LOT) -------------------------------------------
+    SuggestedLot s;
+    if (Live_ComputeSuggestedLot(s)) {
+        d.sugLot        = s.broker_lot;
+        d.lotDigits     = LotDigits(s.vol_step);
+        d.lotCapped     = s.floor_capped;
+        d.lotZero       = (s.floor_capped && s.risk_budget_money <= 0.005);
+        d.budgetPct     = s.budget_pct;
+        d.budgetMoney   = s.risk_budget_money;
+        d.freeMarginPct = s.free_margin_pct;
+        d.nPlanned      = s.n_planned;
+    } else {
+        d.sugLot = 0.0; d.lotDigits = 2; d.lotCapped = false; d.lotZero = false;
+        d.budgetPct = 0.0; d.budgetMoney = 0.0; d.freeMarginPct = 0.0; d.nPlanned = 0;
+    }
+    d.spreadPts  = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+    d.commPerLot = CommissionPerLot(_Symbol);              // -1 when the broker books none
+    // --- news (cell NEWS) --------------------------------------------------
+    const datetime nevt = Live_NextNewsEvt();              // RULE class (FF restricted / MT5 HIGH)
+    d.newsFF     = g_ff_active;
+    d.newsActive = Live_InNewsWindow();
+    d.newsHasEvt = (nevt > 0);
+    d.newsHigh   = d.newsHasEvt;                           // the rule class is the red one
+    d.newsMins   = (nevt > 0 ? (int)((nevt - TimeCurrent()) / 60) : 0);
+    if (d.newsMins < 0) d.newsMins = 0;
+    if (!d.newsHasEvt) {                                   // no rule event : medium vigilance
+        const datetime mevt = Live_NextMedNewsEvt();
+        if (mevt > 0) {
+            d.newsHasEvt = true;
+            d.newsHigh   = false;
+            d.newsMins   = (int)((mevt - TimeCurrent()) / 60);
+            if (d.newsMins < 0) d.newsMins = 0;
+        }
+    }
+    // --- news detail : next groups, SAME grouping key as the timeline -------
+    // (release time x currency x level) - one row per group, rule + vigilance,
+    // ordered by time, capped at 6 (the section states the cap honestly).
+    d.newsWinMin   = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5);
+    d.newsSharePct = g_profile.news_profit_share_pct;
+    d.newsN        = 0;
+    {
+        datetime ct[64]; string cc[64]; bool cr[64];
+        int nc = 0;
+        const datetime now_s = TimeCurrent(), end_s = now_s + 24 * 60 * 60;
+        if (g_ff_active) {
+            const int srv_off = (int)(TimeCurrent() - TimeGMT());
+            for (int i = 0; i < ArraySize(g_ff_events) && nc < 64; ++i) {
+                const datetime ts = g_ff_events[i].t_utc + srv_off;
+                if (ts < now_s || ts > end_s) continue;
+                if (g_ff_events[i].restricted  && !g_eff_news_high) continue;
+                if (!g_ff_events[i].restricted && !g_eff_news_med)  continue;
+                ct[nc] = ts; cc[nc] = g_ff_events[i].ccy; cr[nc] = g_ff_events[i].restricted; nc++;
+            }
+        } else {
+            MqlCalendarValue vals[];
+            if (CalendarValueHistory(vals, now_s, end_s, NULL, NULL) > 0) {
+                for (int i = 0; i < ArraySize(vals) && nc < 64; ++i) {
+                    MqlCalendarEvent ev;
+                    if (!CalendarEventById(vals[i].event_id, ev)) continue;
+                    const bool hi = (ev.importance == CALENDAR_IMPORTANCE_HIGH);
+                    const bool md = (ev.importance == CALENDAR_IMPORTANCE_MODERATE);
+                    if (!hi && !md) continue;
+                    if (hi && !g_eff_news_high) continue;
+                    if (md && !g_eff_news_med)  continue;
+                    MqlCalendarCountry cy;
+                    if (!CalendarCountryById(ev.country_id, cy)) continue;
+                    ct[nc] = vals[i].time; cc[nc] = cy.currency; cr[nc] = hi; nc++;
+                }
+            }
+        }
+        for (int a = 0; a < nc - 1; ++a)                   // chronological (the feed is not guaranteed sorted)
+            for (int b = a + 1; b < nc; ++b)
+                if (ct[b] < ct[a]) {
+                    const datetime tt = ct[a]; ct[a] = ct[b]; ct[b] = tt;
+                    const string   ss = cc[a]; cc[a] = cc[b]; cc[b] = ss;
+                    const bool     bb = cr[a]; cr[a] = cr[b]; cr[b] = bb;
+                }
+        for (int i = 0; i < nc && d.newsN < 6; ++i) {      // one row per group (dedup)
+            const string when = TimeToString(ct[i], TIME_MINUTES);
+            bool dup = false;
+            for (int k = 0; k < d.newsN; ++k)
+                if (d.newsWhen[k] == when && d.newsCcy[k] == cc[i] && d.newsRestr[k] == cr[i]) { dup = true; break; }
+            if (dup) continue;
+            d.newsWhen[d.newsN] = when; d.newsCcy[d.newsN] = cc[i]; d.newsRestr[d.newsN] = cr[i];
+            d.newsN++;
+        }
+    }
+    // --- account card + config toggles (sections CPT / CFG / AIDE) ---------
+    d.planLabel     = g_catalog.ModelLabel(EffectivePlan());
+    d.phaseLabel    = PhaseLabelLocal(g_eff_phase);
+    d.sizeLabelFull = SizeLabel();
+    d.acctTypeLabel = (EffectivePlan() == FN_PLAN_PERSONAL
+                       ? (g_eff_personal_demo == 1 ? "DEMO" : "REAL")
+                       : (g_eff_acct_type == 1 ? "SWAP-FREE" : "SWAP"));
+    d.login         = AccountInfoInteger(ACCOUNT_LOGIN);
+    d.minDays       = g_profile.min_trading_days;
+    d.minDaysDone   = 0;                                   // filled by the strip logic when available
+    d.cycleLabel    = "";
+    d.addonsLabel   = "";
+    {   // active add-ons, short list (same mask the footer prints)
+        string ad = "";
+        if ((g_addons_mask & FN_ADDON_LIFETIME_95) != 0) ad += "95% ";
+        if ((g_addons_mask & FN_ADDON_NO_MIN_DAYS) != 0) ad += "NoMinDays ";
+        if ((g_addons_mask & FN_ADDON_SWAP_FREE)   != 0) ad += "SwapFree ";
+        if ((g_addons_mask & FN_ADDON_10PCT_DD)    != 0) ad += "10%DD ";
+        if ((g_addons_mask & FN_ADDON_DOUBLE_UP)   != 0) ad += "DoubleUp ";
+        if ((g_addons_mask & FN_ADDON_BI_WEEKLY)   != 0) ad += "BiWeekly ";
+        d.addonsLabel = (StringLen(ad) > 0 ? ad : Tr("addons_none"));
+    }
+    d.cfgNewsHigh   = g_eff_news_high;
+    d.cfgNewsMed    = g_eff_news_med;
+    d.cfgSound      = g_eff_sound;
+    d.cfgTelegram   = g_eff_telegram;
+    d.cfgComfort    = g_eff_comfort;
+    d.cfgDiscipline = g_eff_discipline;
+    d.lang          = g_lang;
+    d.version       = "3.00 shell (2.13 core)";
+    // --- clocks -------------------------------------------------------------
+    d.clockSrv = TimeToString(TimeCurrent(), TIME_MINUTES);
+    d.clockGmt = TimeToString(TimeGMT(),     TIME_MINUTES);
+    d.clockLoc = TimeToString(TimeLocal(),   TIME_MINUTES);
+}
+// v3 SHELL : push the product's i18n into the shell's label slots. The shell
+// ships FR defaults ; whatever we set here wins, so ONE translation table
+// (AddTr) serves the legacy panel AND the shell.
+void ShellPushLabels(void) {
+    g_shell.SetLabel(RCL_SEC_LIM,   Tr("shl_lim"));
+    g_shell.SetLabel(RCL_SEC_POS,   Tr("shl_pos"));
+    g_shell.SetLabel(RCL_SEC_LOT,   Tr("shl_lot"));
+    g_shell.SetLabel(RCL_SEC_NEWS,  Tr("shl_news"));
+    g_shell.SetLabel(RCL_SEC_DISC,  Tr("shl_disc"));
+    g_shell.SetLabel(RCL_SEC_CPT,   Tr("shl_cpt"));
+    g_shell.SetLabel(RCL_SEC_CFG,   Tr("shl_cfg"));
+    g_shell.SetLabel(RCL_SEC_HELP,  Tr("shl_help"));
+    g_shell.SetLabel(RCL_LIM_HEAD,  Tr("shl_limhead"));
+    g_shell.SetLabel(RCL_LIM_MARGIN,Tr("rule_margin_cum"));
+    g_shell.SetLabel(RCL_LIM_RISK,  Tr("rule_risk_cum"));
+    g_shell.SetLabel(RCL_LIM_DAILY, Tr("rule_daily_dd"));
+    g_shell.SetLabel(RCL_LIM_OVERALL, Tr("rule_overall_dd"));
+    g_shell.SetLabel(RCL_SURV_HEAD, Tr("shl_survhead"));
+    g_shell.SetLabel(RCL_ROOM,      Tr("shl_room"));
+    g_shell.SetLabel(RCL_BUDGET80,  Tr("shl_budget80"));
+    g_shell.SetLabel(RCL_FLOOR,     Tr("ins_tip_floor"));
+    g_shell.SetLabel(RCL_FLOOR_WARN,Tr("ins_tip_floor2"));
+    g_shell.SetLabel(RCL_NOLIMIT,   Tr("shl_nolimit"));
+    g_shell.SetLabel(RCL_POS_NONE,  Tr("shl_posnone"));
+    g_shell.SetLabel(RCL_POS_PNL,   Tr("shl_pospnl"));
+    g_shell.SetLabel(RCL_NOSL,      Tr("shl_nosl"));
+    g_shell.SetLabel(RCL_LOT_FROM,  Tr("shl_lotfrom"));
+    g_shell.SetLabel(RCL_LOT_BUDGET,Tr("shl_lotbudget"));
+    g_shell.SetLabel(RCL_LOT_N,     Tr("shl_lotn"));
+    g_shell.SetLabel(RCL_LOT_FREE,  Tr("f_free"));
+    g_shell.SetLabel(RCL_LOT_COST,  Tr("shl_lotcost"));
+    g_shell.SetLabel(RCL_SPREAD,    Tr("spread"));
+    g_shell.SetLabel(RCL_COMM,      Tr("comm"));
+    g_shell.SetLabel(RCL_NEWS_SRC,  Tr("shl_newssrc"));
+    g_shell.SetLabel(RCL_NEWS_STATE,Tr("shl_newsstate"));
+    g_shell.SetLabel(RCL_NEWS_WIN,  Tr("shl_newswin"));
+    g_shell.SetLabel(RCL_NEWS_NEXT, Tr("shl_newsnext"));
+    g_shell.SetLabel(RCL_DISC_STATE,Tr("shl_discstate"));
+    g_shell.SetLabel(RCL_DISC_DAY,  Tr("shl_discday"));
+    g_shell.SetLabel(RCL_CPT_PLAN,  Tr("set_type"));   // the catalog calls it the plan TYPE
+    g_shell.SetLabel(RCL_CPT_PHASE, Tr("set_phase"));
+    g_shell.SetLabel(RCL_CPT_SIZE,  Tr("set_size"));
+    g_shell.SetLabel(RCL_CPT_TYPE,  Tr("set_acct_type"));
+    g_shell.SetLabel(RCL_CPT_ADDONS,Tr("addons_lbl"));
+    g_shell.SetLabel(RCL_CPT_SPLIT, Tr("shl_split"));
+    g_shell.SetLabel(RCL_CPT_DAYS,  Tr("shl_mindays"));
+}
+// v3 SHELL : a config toggle was clicked. The SHELL never mutates the model -
+// the change lands HERE, on the same globals + persistence the modal uses.
+void ShellApplyCfg(const int id) {
+    if (id == 0) return;
+    if (id == g_shell.CfgIdNewsHigh()) {
+        g_eff_news_high = !g_eff_news_high;
+        GlobalVariableSet("RC_news_high", g_eff_news_high ? 1.0 : 0.0);
+        RefreshNewsZones();
+    } else if (id == g_shell.CfgIdNewsMed()) {
+        g_eff_news_med = !g_eff_news_med;
+        GlobalVariableSet("RC_news_med", g_eff_news_med ? 1.0 : 0.0);
+        RefreshNewsZones();
+    } else if (id == g_shell.CfgIdSound()) {
+        g_eff_sound = !g_eff_sound;
+        GlobalVariableSet("RC_sound", g_eff_sound ? 1.0 : 0.0);
+    } else if (id == g_shell.CfgIdTelegram()) {
+        g_eff_telegram = !g_eff_telegram;
+        GlobalVariableSet("RC_telegram", g_eff_telegram ? 1.0 : 0.0);
+    } else if (id == g_shell.CfgIdComfort()) {
+        g_eff_comfort = !g_eff_comfort;
+        GlobalVariableSet("RC_comfort", g_eff_comfort ? 1.0 : 0.0);
+        ApplyComfortScale(false);
+    } else if (id == g_shell.CfgIdDiscipline()) {
+        g_eff_discipline = !g_eff_discipline;
+        GlobalVariableSet("RC_discipline", g_eff_discipline ? 1.0 : 0.0);
+    } else if (id == g_shell.CfgIdRiskTools()) {
+        if (PlanIsPersonal()) {            // prop plans are ALWAYS on : the toolkit is the product
+            g_eff_risktools = !g_eff_risktools;
+            GlobalVariableSet("RC_risktools", g_eff_risktools ? 1.0 : 0.0);
+        }
+    } else if (id == g_shell.CfgIdLang()) {
+        g_lang = (g_lang + 1) % 3;
+        GlobalVariableSet("RC_lang", (double)g_lang);
+        ShellPushLabels();                 // the shell's chrome follows the language
+    }
+}
+void ShellRefresh(void) {
+    if (!InpShellV2) return;
+    ShellApplyCfg(g_shell.PendCfgTake());  // consume a toggle click before rendering
+    RCDeckData d;
+    BuildDeckData(d);
+    g_shell.SetData(d);
+    RefreshSlLines();                    // chart-side advisory lines stay live under the shell
+    if (g_shell.Created()) g_shell.Tick();
+}
+
 void RefreshPanel(void) {
+    if (InpShellV2) { ShellRefresh(); return; }   // v3 SHELL : one refresh path, legacy rows skipped
     if (!g_profile_ok && !g_profile.is_default_fallback)
         return;
 
@@ -6457,6 +6819,37 @@ void InitI18n(void) {
                              "- capital protegido");
     AddTr("news_med_check",  "Medium - check FN",      "Medium - vérifier FN","Medium - verificar FN");
     AddTr("news_more",       "more",                   "autres",              "más"); // v2.03.05c : grouped-icon tooltip cap suffix
+    // --- v3 SHELL : the rail/panel chrome goes through the SAME table ---
+    AddTr("shl_lim",       "LIMITS",             "LIMITES",              "LIMITES");
+    AddTr("shl_pos",       "OPEN POSITIONS",     "POSITIONS OUVERTES",   "POSICIONES ABIERTAS");
+    AddTr("shl_lot",       "SUGGESTED LOT",      "LOT CONSEILLE",        "LOTE SUGERIDO");
+    AddTr("shl_news",      "NEWS WINDOW",        "FENETRE NEWS",         "VENTANA NOTICIAS");
+    AddTr("shl_disc",      "DISCIPLINE",         "DISCIPLINE",           "DISCIPLINA");
+    AddTr("shl_cpt",       "ACCOUNT",            "COMPTE",               "CUENTA");
+    AddTr("shl_cfg",       "SETTINGS",           "REGLAGES",             "AJUSTES");
+    AddTr("shl_help",      "LEGEND",             "LEGENDE",              "LEYENDA");
+    AddTr("shl_limhead",   "LIMIT USAGE",        "CONSOMMATION DES LIMITES", "USO DE LIMITES");
+    AddTr("shl_survhead",  "SURVIVAL ROOM",      "MARGE DE SURVIE",      "MARGEN DE SUPERVIVENCIA");
+    AddTr("shl_room",      "Room to the limit",  "Marge avant limite",   "Margen hasta el limite");
+    AddTr("shl_budget80",  "One trade (80%)",    "Budget d'un trade (80%)", "Presupuesto por op. (80%)");
+    AddTr("shl_nolimit",   "No active limit on this profile.",
+                           "Aucune limite active sur ce profil.",
+                           "Sin limite activo en este perfil.");
+    AddTr("shl_posnone",   "No open position.",  "Aucune position ouverte.", "Sin posiciones abiertas.");
+    AddTr("shl_pospnl",    "Floating P&L",       "P&L flottant total",   "P&L flotante total");
+    AddTr("shl_nosl",      "NO SL",              "SANS SL",              "SIN SL");
+    AddTr("shl_lotfrom",   "WHERE THIS LOT COMES FROM", "D'OU VIENT CE LOT", "DE DONDE SALE ESTE LOTE");
+    AddTr("shl_lotbudget", "Trade budget",       "Budget du trade",      "Presupuesto de la op.");
+    AddTr("shl_lotn",      "Planned trades (N)", "Trades prevus (N)",    "Ops previstas (N)");
+    AddTr("shl_lotcost",   "SYMBOL COST",        "COUT DU SYMBOLE",      "COSTE DEL SIMBOLO");
+    AddTr("shl_newssrc",   "Source",             "Source",               "Fuente");
+    AddTr("shl_newsstate", "State",              "Etat",                 "Estado");
+    AddTr("shl_newswin",   "Window",             "Fenetre",              "Ventana");
+    AddTr("shl_newsnext",  "UPCOMING",           "A VENIR",              "PROXIMOS");
+    AddTr("shl_discstate", "STATE",              "ETAT",                 "ESTADO");
+    AddTr("shl_discday",   "TODAY",              "ACTIVITE DU JOUR",     "ACTIVIDAD DE HOY");
+    AddTr("shl_split",     "Split",              "Split",                "Reparto");
+    AddTr("shl_mindays",   "Min days",           "Jours mini",           "Dias min");
     // --- v2.13 FEATURE B : SL-vs-limit survival guard (20% margin) ---
     AddTr("slguard",
           "SL too low - breach risk : raise the SL to keep a 20% margin",
@@ -7646,6 +8039,10 @@ void ApplySettingsChange(void) {
     }
     LoadOrSeedPeakBalance(); // v2.02.05 : self-heal a poisoned first seed after a size/plan change
     DestroyAllObjects();
+    // v3 SHELL : DestroyAllObjects wipes the WHOLE "RC_" namespace - the shell's
+    // canvases included (RC_V3_*). Recreate them here or the rail would vanish
+    // until the next chart change (seen on the lock -> clear transition).
+    if (InpShellV2 && g_shell.Created()) g_shell.OnChartChange();
     BuildPanel();
     MovePanelBy(0, 0); // v2.01 : geometry may have GROWN (risktools ON = +264px) -
                        // re-clamp against the fresh g_panel_height so the panel
