@@ -107,16 +107,22 @@ def run(root):
     zenum = re.search(r'enum ERCZone \{(.*?)\};', shell, re.S).group(1)
     zids = re.findall(r'\b(RZ_\w+)\b', zenum)
     zidx = {n: i for i, n in enumerate(zids)}
-    drawn = set()
-    for m in re.finditer(r'ZAdd\([^;]*?\b(RZ_\w+)\b\s*(\+\s*\w+)?\s*\)', shell, re.S):
-        base, off = m.group(1), m.group(2)
-        if not off:
-            drawn.add(base)
-        else:
-            span = 8 if ('FLT' in base or 'POS' in base) else 12
-            for k in range(span):
-                if zidx[base] + k < len(zids):
-                    drawn.add(zids[zidx[base] + k])
+    # A zone is DRAWN as soon as render code names it - directly in ZAdd, or as
+    # an argument to a helper that calls ZAdd (Toggle, LimRow, KV, Stepper...).
+    # Counting only the literals inside ZAdd() hid three toggles that were drawn
+    # and never dispatched, while the gate reported '119/119 handled'.
+    render = shell[:shell.index('bool OnClick(')]           # everything before the dispatcher
+    render = re.sub(r'//[^\n]*', '', render)
+    drawn = set(re.findall(r'\b(RZ_[A-Z0-9_]+)\b', render)) - {'RZ_NONE'}
+    for m in re.finditer(r'\b(RZ_\w+)\s*\+\s*(\w+)', render):   # RZ_X0 + i : a family
+        base = m.group(1)
+        if base not in zidx:
+            continue
+        span = 8 if ('FLT' in base or 'POS' in base) else 12
+        for k in range(span):
+            if zidx[base] + k < len(zids):
+                drawn.add(zids[zidx[base] + k])
+    drawn &= set(zids)
     body = shell[shell.index('bool OnClick('):]
     handled = set(re.findall(r'case\s+(RZ_\w+)\s*:', body))
     handled |= set(re.findall(r'hit\s*==\s*(RZ_\w+)', body))
@@ -180,10 +186,14 @@ def run(root):
 
     # 9. PUBLIC repo : nothing personal, in the sources or in the binary.
     #    The binary check needs its positive control first.
-    pats = [("chemin local", r"C:\\\\Users\\\\|F:\\\\_Home"),
+    # One or TWO backslashes : source code escapes them, markdown and comments
+    # do not. The old pattern demanded two and therefore matched nothing.
+    # A USER path leaks ; C:\Program Files is standard build documentation.
+    pats = [("chemin local", r"[A-Za-z]:\\{1,2}(?:Users|_Home)"),
+            ("dossier terminal", r"Terminal\\{1,2}[0-9A-F]{32}"),
             ("token telegram", r"\d{8,10}:[A-Za-z0-9_-]{30,}"),
             ("email perso", r"(?i)[\w.+-]+@(?:gmail|yahoo|hotmail|outlook)\.[a-z]{2,}"),
-            ("login MT5", r"(?i)\blogin\s*:?\s*\d{6,10}\b|\bcompte\s+\d{7,10}\b")]
+            ("login MT5", r"(?i)\b(?:login|account|acct|compte|MT5)\W{0,3}\d{6,10}\b")]
     leaks = []
     # every text file, not a hand-picked list : the leak that got through was in
     # HISTORY.md - the changelog that described its own removal.

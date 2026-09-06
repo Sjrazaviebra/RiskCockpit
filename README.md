@@ -37,7 +37,9 @@ single native button on the chart.
 
 ## Install
 
-1. Copy `Indicators/RiskCockpit.mq5` → `<MT5>/MQL5/Indicators/`
+1. Copy `Indicators/RiskCockpit.mq5`, `RiskCockpit.ico` and
+   `RiskCockpit_logo.bmp` → `<MT5>/MQL5/Indicators/` — the source embeds both
+   resources, so compiling without them fails.
 2. Copy `Libraries/*.mqh` → `<MT5>/MQL5/Libraries/`
 3. Copy `Services/RCNewsFeeder.mq5` → `<MT5>/MQL5/Services/`
 4. In MetaEditor, compile both (**F7**, 0 errors).

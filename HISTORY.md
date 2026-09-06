@@ -17,7 +17,7 @@ folder that holds the includes and the resource in those exact places.
 
 | Role | Path |
 |---|---|
-| Build tree (MT5 data folder) | `%APPDATA%\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\MQL5\` |
+| Build tree (MT5 data folder) | `%APPDATA%\MetaQuotes\Terminal\<TERMINAL-ID>\MQL5\` |
 | Compiled source | `…\MQL5\Indicators\mql5_market\RiskCockpit\RiskCockpit.mq5` |
 | Includes (all four) | `…\MQL5\Libraries\` : `CChallengeProfileCatalog.mqh`, `CPyramidEngine.mqh`, `JR_CanvasUI.mqh`, `RC_ShellUI.mqh` |
 | Embedded resource | `RiskCockpit_logo.bmp`, next to the `.mq5` |

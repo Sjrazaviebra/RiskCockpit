@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.17"
+#property version "3.18"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.17"
+#define RC_VERSION_STR "3.18"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1086,13 +1086,17 @@ int OnInit(void) {
         g_shell.Init();
         g_shell.SetThemeIdx((int)InpPalette * 2 + (EffectiveTheme() == RC_THEME_GLASS_DARK ? 0 : 1));
         g_shell.SetTipDelay(InpShellTipMs);
-        g_shell.Create(RC_PREFIX + "V3_");
-        {   // restore where the floating positions table was left, per login
-            double fx = 0.0, fy = 0.0;
+        {   // WHERE the floating table was left, per login - read BEFORE Create()
+            // so the first frame is drawn at the restored spot. Setting it after
+            // left the bitmap at the default place with its click zones elsewhere.
+            double fx = 0.0, fy = 0.0, fh = 0.0;
             GVGetLogin("RC_v3_fltx", fx);
             GVGetLogin("RC_v3_flty", fy);
+            GVGetLogin("RC_v3_flthid", fh);
             g_shell.SetFloatPos((int)fx, (int)fy);
+            g_shell.SetFloatHidden(fh != 0.0);   // a hidden table stayed hidden
         }
+        g_shell.Create(RC_PREFIX + "V3_");
         ShellPushLabels();   // the shell's chrome speaks the product's language
         ShellRefresh();
     }
@@ -1200,6 +1204,9 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
     if (g_shell.Created()) {
         if (id == CHARTEVENT_CLICK) {
             g_shell.OnClick((int)lparam, (int)dparam);
+            // hiding the floating table survived a reload as "shown" : the cross
+            // undid itself at every TF switch. Persist it next to its position.
+            GVSetLogin("RC_v3_flthid", g_shell.FloatHidden() ? 1.0 : 0.0);
             if (g_shell.PendKillTake()) {          // navbar X : remove this instance
                 int kwin2 = ChartWindowFind();
                 if (kwin2 < 0) kwin2 = 0;
@@ -1882,8 +1889,8 @@ void ShellApplyCycle(const int field, const int dir) {
     if (field == 0) y = (int)MathMax(2020.0, MathMin(2099.0, (double)y + dir));
     else if (field == 1) m = ((m - 1 + dir) % 12 + 12) % 12 + 1;
     else                 dd = ((dd - 1 + dir) % 31 + 31) % 31 + 1;
-    if (m == 2 && dd > 28) dd = 28;                          // never build an impossible date
-    if ((m == 4 || m == 6 || m == 9 || m == 11) && dd > 30) dd = 30;
+    const int dim = DaysInMonth(y, m);      // shared with RC_Math : leap years included
+    if (dd > dim) dd = dim;                 // never build an impossible date
     g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
     GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd);
 }
@@ -4940,13 +4947,13 @@ void InitI18n(void) {
         "Version",
         "Version",
         "Versión");
-    AddTr("shl_newssrc",
+    AddTr("shl_newssource",
         "News source",
         "Source news",
         "Fuente noticias");
     AddTr("shl_hro1",
         "MONITORING tool : it never opens, changes",
-        "Outil de SUIVI : il n ouvre, ne modifie et",
+        "Outil de SUIVI : il n'ouvre, ne modifie et",
         "Herramienta de SEGUIMIENTO : no abre, no");
     AddTr("shl_hro2",
         "or closes ANY trade. No signal.",

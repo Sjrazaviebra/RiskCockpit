@@ -1831,6 +1831,14 @@ public:
          return true;
       }
       // config toggles : the SHELL never mutates the model - the host applies it
+      // These three sit AFTER the add-ons in the enum, outside the contiguous
+      // RZ_CFG_PAL..RZ_CFG_RTOOLS block below : their clicks were swallowed and
+      // the host was never called. Drawn, clickable, and dead - and the zone
+      // audit could not see it because Toggle() passes the id as a parameter.
+      if(hit == RZ_CFG_MVIOL || hit == RZ_CFG_RVIOL || hit == RZ_CFG_BE) {
+         m_pendCfg = hit;
+         return true;
+      }
       if(hit >= RZ_CFG_PAL && hit <= RZ_CFG_RTOOLS) {
          if(hit == RZ_CFG_PAL) {                            // theme + mode are view-only
             const int pal2 = m_themeIdx / 2, lgt2 = m_themeIdx % 2;
@@ -1976,7 +1984,23 @@ public:
    }
    bool Dragging(void) const { return m_drag; }
    void FloatPos(int &x, int &y) const { x = m_fltX; y = m_fltY; }
-   void SetFloatPos(const int x, const int y) { if(x > 0 || y > 0) { m_fltX = x; m_fltY = y; } }
+   //--- Restoring the position AFTER Create() left the bitmap at its default
+   //--- spot while the click zones moved to the restored one : the table was
+   //--- visible in one place and clickable in another. Re-anchor on the spot.
+   void SetFloatPos(const int x, const int y) {
+      if(x <= 0 && y <= 0) return;
+      m_fltX = x; m_fltY = y;
+      if(m_fltX > m_chW - m_fltW) m_fltX = m_chW - m_fltW;
+      if(m_fltX < 0) m_fltX = 0;
+      if(m_fltY > m_chH - m_fltH) m_fltY = m_chH - m_fltH;
+      if(m_fltY < 0) m_fltY = 0;
+      if(m_created) {
+         ObjectSetInteger(0, m_pfx + "flt", OBJPROP_XDISTANCE, m_fltX);
+         ObjectSetInteger(0, m_pfx + "flt", OBJPROP_YDISTANCE, m_fltY);
+         ZReset();
+         RenderAll();
+      }
+   }
    bool FloatHidden(void) const { return m_fltHidden; }
    void SetFloatHidden(const bool h) { m_fltHidden = h; }
 
