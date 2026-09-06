@@ -103,6 +103,7 @@ struct RCDeckData {
    string pyrText;                      // the advisor line, already formatted
    int    pyrStat;                      // 0 ok, 1 warn, 2 neutral
    bool   weekendHold;                  // open positions into the week-end close
+   bool   unlockArmed;                  // a release click is armed (5 s window)
    // v3.11 : controls the host CANNOT act on in the current state. They stay
    // visible (the setting exists) but are drawn disabled, with the reason.
    bool   rtoolsLocked;                 // prop plan : the toolkit is always on
@@ -183,6 +184,7 @@ enum ERCZone {
    RZ_CFG_PAL, RZ_CFG_MODE, RZ_CFG_LANG, RZ_CFG_NEWSH, RZ_CFG_NEWSM,
    RZ_CFG_SOUND, RZ_CFG_TG, RZ_CFG_COMFORT, RZ_CFG_DISC, RZ_CFG_RTOOLS,
    RZ_TIP_CPT, RZ_TIP_HELP, RZ_TIP_LIM_QS, RZ_TIP_MAXLOT, RZ_TIP_TARGET, RZ_TIP_MSGS, RZ_TIP_NEWSTR,
+   RZ_TIP_HYPER,
    RZ_LOT_EDIT,                                // copy-lot native edit : click = no-op (never collapses)
    // --- floating positions table (appears as soon as a trade is open) ---
    RZ_FLT_GRIP, RZ_FLT_HIDE,
@@ -202,7 +204,7 @@ enum ERCZone {
    // --- v3.04 : add-ons, violation flags, self-lock, cycle date, BE, copy max
    RZ_ADDON0, RZ_ADDON1, RZ_ADDON2, RZ_ADDON3, RZ_ADDON4, RZ_ADDON5, RZ_ADDON6,
    RZ_CFG_MVIOL, RZ_CFG_RVIOL, RZ_CFG_BE,
-   RZ_SELFLOCK,
+   RZ_SELFLOCK, RZ_UNLOCK,
    RZ_CYC_PREV0, RZ_CYC_PREV1, RZ_CYC_PREV2,
    RZ_CYC_NEXT0, RZ_CYC_NEXT1, RZ_CYC_NEXT2,
    RZ_MAXLOT_EDIT
@@ -231,7 +233,7 @@ enum ERCLabel {
    RCL_PAYOUT, RCL_HYPER, RCL_ELIG, RCL_TAG_MARG, RCL_TAG_ROOM, RCL_TAG_FREE,
    RCL_CPT_PROFILE, RCL_TAB_RISK, RCL_TAB_DISC, RCL_TAB_ADV, RCL_TAB_DISP,
    RCL_CYCLE, RCL_YEAR, RCL_MONTH, RCL_DAY, RCL_DISC_VIOL, RCL_VIOL_M, RCL_VIOL_R,
-   RCL_LOCK_ARM, RCL_LOCK_ASK, RCL_LOCK_ON, RCL_BE, RCL_CLOSE_EA,
+   RCL_LOCK_ARM, RCL_LOCK_ASK, RCL_LOCK_ON, RCL_BE, RCL_CLOSE_EA, RCL_UNLOCK, RCL_LOCK_TG,
    RCL_RAIL_CPT, RCL_RAIL_HELP, RCL_FLOOR_HINT, RCL_MORE_RESIZE, RCL_PYRAMID, RCL_LOT_NOROOM,
    RCL_LOT_CAP80, RCL_SRC_MT, RCL_INACTIVE, RCL_NEWS_ACT_EL, RCL_IN_MIN, RCL_NEWS_NONE24,
    RCL_RULE40, RCL_CHECKFN, RCL_SLG_ON, RCL_TILT_ON, RCL_ALLCLEAR, RCL_SELFLOCK_T,
@@ -318,6 +320,7 @@ private:
    int        m_pendAddon;       // host consumes : add-on row toggled, -1 = none
    int        m_pendCyc;         // host consumes : cycle field * 10 + dir, -1 = none
    bool       m_pendSelfLock;    // host consumes : ARM the self-lock (confirmed)
+   bool       m_pendUnlock;      // host consumes : RELEASE an active self-lock
    bool       m_lockArm;         // first click : the button asks for confirmation
    bool       m_maxEditOn;       // second copy box (max lot)
    int        m_maxEditX, m_maxEditY;
@@ -926,21 +929,28 @@ private:
       {
          const bool armed = m_lockArm;
          const string txt = (m_d.discLocked
-                             ? L(RCL_LOCK_ON, "LOCK ACTIVE")
+                             ? (m_d.unlockArmed ? L(RCL_LOCK_ASK, "CONFIRM ?")
+                                                : L(RCL_UNLOCK, "RELEASE THE LOCK"))
                              : (armed ? L(RCL_LOCK_ASK, "CONFIRM ?")
                                       : L(RCL_LOCK_ARM, "ARM THE LOCK") + "  " +
                                         IntegerToString(m_d.selfLockH) + " h"));
          const color bc = (m_d.discLocked ? m_t.dim : (armed ? m_t.red : m_t.warn));
          m_side.Capsule(18, y, RCS_SIDE_W - 36, 24, Mix(m_t.surface, bc, 0.30));
          m_side.Text(RCS_SIDE_W / 2, y + 5, txt, A(bc), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
-         if(!m_d.discLocked) ZAdd(m_sideX + 18, m_sideY + y, RCS_SIDE_W - 36, 24, RZ_SELFLOCK);
+         // Locked : the SAME capsule becomes the RELEASE control (two clicks within
+         // 5 s, host-side). A pact you cannot leave is a trap, not discipline - the
+         // legacy had an unlock button and the purge dropped it with the panel.
+         ZAdd(m_sideX + 18, m_sideY + y, RCS_SIDE_W - 36, 24,
+              (m_d.discLocked ? RZ_UNLOCK : RZ_SELFLOCK));
          y += 30;
       }
       // v3.01 parity : hyperactivity + server messages, the two "too much
       // activity" rules the prop firm scores - they belong with discipline.
       if(m_d.tradesCap > 0) {
          const double hy = 100.0 * m_d.tradesToday / m_d.tradesCap;
-         y = LimRow(y, L(RCL_HYPER, "Hyperactivity"), hy, 100.0, true, RZ_NONE);
+         // RZ_NONE reads as "no hit" in OnClick : clicking this row fell through to
+         // the click-away rule and CLOSED the section. It gets its own hover id.
+         y = LimRow(y, L(RCL_HYPER, "Hyperactivity"), hy, 100.0, true, RZ_TIP_HYPER);
       }
       if(m_d.msgsCap > 0) {
          const double mp = 100.0 * m_d.msgsToday / m_d.msgsCap;
@@ -965,7 +975,10 @@ private:
    //--- look like one that can.
    int Toggle(int y, const string k, const bool on, const int zid,
               const bool locked = false, const string why = "") {
-      m_side.Text(18, y, (locked ? ShortToString((ushort)0x1F512) + " " + k : k),
+      // U+1F512 is OUTSIDE the BMP and ShortToString takes a ushort : the padlock
+      // was truncated to U+F512 (private use) and drew a tofu box. The dimmed
+      // styling plus the reason line already say "locked" without a glyph.
+      m_side.Text(18, y, k,
                   A(locked ? m_t.dim : m_t.text), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       const int px = RCS_SIDE_W - 18 - 34;
       if(locked)  m_side.CapsuleStroke(px, y, 34, 16, Mix(m_t.surface, m_t.dim, 0.25),
@@ -1113,7 +1126,11 @@ private:
       y += 4;
       SecHead(L(RCL_ALERTS, "ALERTS"), y);
       y = Toggle(y, L(RCL_SOUND, "Sound"), m_d.cfgSound, RZ_CFG_SOUND);
-      y = Toggle(y, "Telegram", m_d.cfgTelegram, RZ_CFG_TG);
+      // MQL5 forbids WebRequest inside an INDICATOR : the message can never leave.
+      // The setting stays visible (it is real, and the EA/service build uses it) but
+      // it is drawn INERT with the reason - the same rule as every other dead control.
+      y = Toggle(y, "Telegram", m_d.cfgTelegram, RZ_CFG_TG,
+                 true, L(RCL_LOCK_TG, "An indicator cannot send : WebRequest is blocked."));
       y += 4;
       SecHead(L(RCL_COMFORT_H, "COMFORT"), y);
       y = Toggle(y, L(RCL_COMFORT_S, "Comfort scale"), m_d.cfgComfort, RZ_CFG_COMFORT);
@@ -1278,6 +1295,8 @@ private:
          case RZ_CFG_TAB2:     t = "Advanced";     d = "Comfort, refresh, post-violation caps."; return true;
          case RZ_CFG_TAB3:     t = "Display";  d = "Theme, language, news, alerts.";                    return true;
          case RZ_SELFLOCK:     t = "Self-lock";  d = "Two clicks : arms a full STOP for the set duration."; return true;
+         case RZ_UNLOCK:       t = "Release";    d = "Two clicks within 5 s to end the self-lock early."; return true;
+         case RZ_TIP_HYPER:    t = "Hyperactivity"; d = "Trades today / the plan's daily cap."; return true;
          case RZ_CFG_MVIOL:    t = "Margin violation"; d = "Tightened margin cap after a violation.";   return true;
          case RZ_CFG_RVIOL:    t = "Risk violation"; d = "Tightened risk cap after a violation.";  return true;
          case RZ_CFG_BE:       t = "Break-even";  d = "Draws the basket break-even line.";           return true;
@@ -1579,6 +1598,7 @@ public:
       m_relayout = false;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
+      m_pendUnlock = false;
       m_maxEditOn = false; m_maxEditX = 0; m_maxEditY = 0;
       m_d.addonN = 0; m_d.violMargin = false; m_d.violRisk = false; m_d.beLines = false;
       m_d.selfLockH = 4; m_d.cycY = 0; m_d.cycM = 0; m_d.cycD = 0;
@@ -1613,6 +1633,7 @@ public:
    }
    int  PendAddonTake(void) { const int r = m_pendAddon; m_pendAddon = -1; return r; }
    bool PendSelfLockTake(void) { const bool r = m_pendSelfLock; m_pendSelfLock = false; return r; }
+   bool PendUnlockTake(void)   { const bool r = m_pendUnlock;   m_pendUnlock   = false; return r; }
    bool PendCycTake(int &field, int &dir) {
       if(m_pendCyc < 0) return false;
       field = m_pendCyc / 10; dir = ((m_pendCyc % 10) == 1 ? 1 : -1); m_pendCyc = -1; return true;
@@ -1782,6 +1803,11 @@ public:
          if(inRail && !(id >= RZ_RAIL_LIM && id <= RZ_RAIL_CHEVRON)) continue;
          // x full-rect + y TOP-only : a panel zone overflowing at the bottom on a
          // small chart stays clickable, navbar chips (y < m_sideY-4) stay excluded.
+         // The navbar is drawn FIRST, so its zones are registered first and win the
+         // break below. With the panel clamped to the top (m_sideY = 0) the navbar
+         // overlaps its header : a click meant for the panel's close cross could
+         // land on the navbar's REMOVE cross and delete the indicator.
+         if(inSide && id >= RZ_NAV_LOGO && id <= RZ_NAV_KILL) continue;
          if(inSide && !(m_z[i].x >= m_sideX - 4 && m_z[i].x + m_z[i].w <= m_sideX + RCS_SIDE_W + 4 &&
                         m_z[i].y >= m_sideY - 4 && m_z[i].y <= m_sideY + m_sideH)) continue;
          if(px >= m_z[i].x && px <= m_z[i].x + m_z[i].w && py >= m_z[i].y && py <= m_z[i].y + m_z[i].h)
@@ -1823,6 +1849,7 @@ public:
       if(hit != RZ_SELFLOCK && m_lockArm) m_lockArm = false;
       // hover-only info zones : swallow the click, never collapse the section
       if(hit >= RZ_TIP_LIM_ROOM && hit <= RZ_TIP_LIM_M3) return true;
+      if(hit == RZ_TIP_HYPER) return true;                  // hover-only, never collapses
       if(hit >= RZ_POS_ROW0 && hit <= RZ_BAND) return true;   // info rows + safety band
       // every hover-only info row, as ONE contiguous range : a zone added here
       // and forgotten in OnClick would fall through to the auto-collapse and
@@ -1859,6 +1886,7 @@ public:
          else { m_lockArm = false; m_pendSelfLock = true; }    // second : the host arms it
          return true;
       }
+      if(hit == RZ_UNLOCK) { m_pendUnlock = true; return true; }   // host arms / confirms
       if(hit == RZ_MAXLOT_EDIT) return true;                  // native edit : no-op zone
       if(hit >= RZ_FLT_ROW0 && hit <= RZ_FLT_ROW7) return true;   // position rows : read-only
       if(hit >= RZ_FLT_CLOSE0 && hit <= RZ_FLT_CLOSE7) {          // disabled on purpose

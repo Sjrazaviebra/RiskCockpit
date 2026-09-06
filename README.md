@@ -14,7 +14,9 @@
 - **Drawdown guards** — daily loss and max drawdown tracking, including the *trailing floor* of instant-funding accounts, with clear on-chart warnings.
 - **News windows** — ForexFactory-aligned classification of restricted events, with the countdown to the next binding one.
 - **Discipline tools** — tilt detection, cooldown, and a two-click self-lock you cannot undo before it expires.
-- **Optional Telegram alerts** — you supply your own bot token (nothing is hard-coded).
+- **Sound alerts** on every status change, with the file names you choose.
+  *(Telegram alerts exist in the code but an indicator cannot send them — MQL5
+  blocks `WebRequest` outside EAs and services, so the toggle is shown locked.)*
 - **Multi-language UI** — EN / FR / ES.
 
 ## The interface (v3)

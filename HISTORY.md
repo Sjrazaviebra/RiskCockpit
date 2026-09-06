@@ -86,6 +86,52 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.17.29 - ce qu'une relecture adversariale a trouvé dans MON code
+
+Sept relecteurs indépendants ont lu le diff `main..dev` (16 versions livrées en
+un jour, zéro test utilisateur), puis chaque constat est passé en
+contre-expertise. J'ai re-vérifié chacun dans le code avant de toucher quoi que
+ce soit. Huit défauts confirmés, tous introduits par la réécriture :
+
+1. **La section AIDE mentait sur la version** : `d.version` était la chaîne
+   codée en dur `"3.02"` alors que le binaire était `3.16`. **L'instruction de
+   test que j'avais donnée à JR — « AIDE doit dire 3.16 » — était donc fausse :
+   il aurait lu 3.02 et conclu que l'indicateur n'avait pas rechargé.** Une
+   seule constante désormais, `RC_VERSION_STR`, posée à côté du `#property`.
+2. **Toutes les alertes sonnaient PLUS TARD qu'avant la purge** : l'ancien code
+   avertissait à 70 % (risque, journalier, total), **50 % sur un total
+   *trailing*** — celui qui tue le compte — et 75 % (hyperactivité, msgs).
+   `ShellRuleAlerts` avait tout aplati à 80 %. Les seuils par règle sont
+   rétablis. Un outil de risque n'a pas le droit d'avertir plus tard.
+3. **Le self-lock n'avait plus aucune sortie** : le bouton de déverrouillage
+   est parti avec l'ancien panneau et rien ne l'a remplacé — jusqu'à 72 h
+   enfermé. La capsule devient le contrôle de libération quand le verrou est
+   actif (deux clics en 5 s, comme l'ancien double-confirm).
+4. **La ligne « Hyperactivité » enregistrait `RZ_NONE`** : `RZ_NONE` signifie
+   « rien touché », donc cliquer dessus tombait dans la règle du clic-à-côté
+   et **refermait la section**. Elle a son propre identifiant de survol.
+5. **Le cadenas était un carré vide** : `U+1F512` est hors du plan multilingue
+   de base et `ShortToString` prend un `ushort` — tronqué en `U+F512` (zone
+   privée). Le glyphe est retiré ; la teinte éteinte et la ligne de raison
+   disaient déjà « verrouillé ».
+6. **Un clic dans le panneau pouvait SUPPRIMER l'indicateur** : la navbar est
+   dessinée en premier, donc ses zones gagnent la première correspondance. Le
+   panneau collé en haut (`m_sideY = 0`) recouvre la navbar, et sa croix de
+   fermeture tombe à quelques pixels de la croix **RETIRER**. Les zones de
+   navbar sont maintenant exclues de tout clic qui atterrit dans le panneau.
+7. **`RC_show_news` était lue au démarrage et plus jamais écrite** : un
+   utilisateur v2 ayant coupé les news restait sans news pour toujours, sans
+   aucun contrôle pour les rallumer. La clé est supprimée au démarrage.
+8. **Le README promettait des alertes Telegram impossibles** : MQL5 interdit
+   `WebRequest` dans un indicateur (c'est exactement pourquoi `RCNewsFeeder`
+   est un *service*). L'envoi était tenté à chaque alerte et échouait en
+   `err=4014`. La bascule est désormais dessinée **verrouillée avec sa raison**,
+   l'appel est neutralisé, et le README le dit.
+
+Reste à trancher : 46 autres constats de gravité moyenne ou faible, et
+**29 contre-expertises n'ont jamais tourné** (limite de session atteinte en
+plein run) — ce lot n'est pas vérifié.
+
 ### v3.16.28 - les formules de risque deviennent testables
 
 Les douze contrôles statiques ne regardent que la mécanique. **Le cœur — les

@@ -20,7 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.16"
+#property version "3.17"
+// The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
+// panel lied about which binary was loaded - the one thing a user checks to
+// know whether the indicator reloaded. One constant now, next to the property.
+#define RC_VERSION_STR "3.17"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -634,7 +638,10 @@ void InitEffectiveSettings(void) {
     if (GlobalVariableCheck("RC_tp_pct"))     g_eff_tp_pct        = GlobalVariableGet("RC_tp_pct");
     if (GlobalVariableCheck("RC_mm_pt"))      g_eff_max_margin_pt = GlobalVariableGet("RC_mm_pt");
     if (GlobalVariableCheck("RC_mr_pt"))      g_eff_max_risk_pt   = GlobalVariableGet("RC_mr_pt");
-    if (GlobalVariableCheck("RC_show_news"))  g_eff_show_news     = (GlobalVariableGet("RC_show_news")  != 0.0);
+    // RC_show_news was written by the v2 modal, which no longer exists : reading
+    // it meant a user who switched news OFF in v2 could never switch them back on.
+    // The two level toggles (HIGH / MEDIUM) govern the display now.
+    if (GlobalVariableCheck("RC_show_news")) GlobalVariableDel("RC_show_news");
     if (GlobalVariableCheck("RC_news_high"))  g_eff_news_high     = (GlobalVariableGet("RC_news_high")  != 0.0);
     if (GlobalVariableCheck("RC_news_med"))   g_eff_news_med      = (GlobalVariableGet("RC_news_med")   != 0.0);
     if (GlobalVariableCheck("RC_comfort"))    g_eff_comfort       = (GlobalVariableGet("RC_comfort")    != 0.0);
@@ -1422,6 +1429,7 @@ void BuildDeckData(RCDeckData &d) {
     d.discLocked = (g_selflock_until > TimeCurrent());
     d.selfLock   = d.discLocked;
     d.lockMinsLeft = (d.discLocked ? (int)((g_selflock_until - TimeCurrent()) / 60) + 1 : 0);
+    d.unlockArmed  = (g_unlock_arm > 0 && TimeCurrent() - g_unlock_arm <= 5);
     d.discTilt   = (g_eff_discipline && ((g_eff_tilt_n > 0 && g_disc_trades_win > g_eff_tilt_n) || g_disc_revenge));
     d.tiltTrades = g_disc_trades_win;
     d.tiltN      = g_eff_tilt_n;
@@ -1582,7 +1590,7 @@ void BuildDeckData(RCDeckData &d) {
     d.cfgComfort    = g_eff_comfort;
     d.cfgDiscipline = g_eff_discipline;
     d.lang          = g_lang;
-    d.version       = "3.02";
+    d.version       = RC_VERSION_STR;
     // v3.04 : add-ons VALID for this plan, violation flags, self-lock, cycle date
     {
         int    flags[7]; string names[7];
@@ -1669,6 +1677,8 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_CPT_SPLIT, Tr("shl_split"));
     g_shell.SetLabel(RCL_CPT_DAYS,  Tr("shl_mindays"));
     g_shell.SetLabel(RCL_CLOSE_EA,  Tr("shl_closeea"));
+    g_shell.SetLabel(RCL_UNLOCK,    Tr("shl_unlock"));
+    g_shell.SetLabel(RCL_LOCK_TG,   Tr("shl_locktg"));
     g_shell.SetLabel(RCL_PAYOUT,    Tr("shl_payout"));
     g_shell.SetLabel(RCL_TARGET,    Tr("shl_target"));
     g_shell.SetLabel(RCL_LOCK_RTOOLS, Tr("shl_lockrtools"));
@@ -1878,6 +1888,21 @@ void ShellApplyCycle(const int field, const int dir) {
     GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd);
 }
 // v3.04 : arm the self-lock (the shell already asked for confirmation twice).
+// Two clicks within 5 s release the lock - the Ulysses pact keeps its friction
+// but stops being a trap : the legacy unlock button was purged with the panel
+// and nothing replaced it, so an armed lock ran its full 72 h.
+void ShellReleaseSelfLock(void) {
+    const datetime now = TimeCurrent();
+    if (g_unlock_arm > 0 && now - g_unlock_arm <= 5) {
+        g_selflock_until = 0;
+        g_unlock_arm     = 0;
+        GlobalVariableSet("RC_selflock_until", 0.0);
+        Print("RiskCockpit : self-lock released by the user (double confirm).");
+        ApplySettingsChange();
+    } else {
+        g_unlock_arm = now;              // armed ; a 2nd click within 5 s confirms
+    }
+}
 void ShellArmSelfLock(void) {
     g_selflock_until = TimeCurrent() + (datetime)MathMax(1, g_eff_selflock_h) * 3600;
     GlobalVariableSet("RC_selflock_until", (double)g_selflock_until);
@@ -2112,7 +2137,15 @@ void ShellRuleAlerts(const RCDeckData &d) {
         g_rows[i].value_pct  = used;     // the registry stays the ONE source the
         g_rows[i].max_pct    = cap;      // Telegram message is built from
         g_rows[i].value_text = txt;
-        g_rows[i].status     = ComputeRangeStatus(used, cap, 0.80, 1.00);
+        // The legacy rows did NOT share one threshold : risk / daily / overall
+        // warned at 70 %, a TRAILING overall at 50 % (it is the account killer),
+        // hyper / msgs at 75 %. Flattening everything to 80 % made every alert
+        // fire later than it used to - a risk tool must not warn later.
+        double warn = 0.80;
+        if (k == "rule_risk_cum" || k == "rule_daily_dd") warn = 0.70;
+        else if (k == "rule_overall_dd") warn = (d.trailing ? 0.50 : 0.70);
+        else if (k == "rule_hyper" || k == "rule_msgs")   warn = 0.75;
+        g_rows[i].status     = ComputeRangeStatus(used, cap, warn, 1.00);
         TryFireSoundAlert(i, g_rows[i].status);
     }
 }
@@ -2126,6 +2159,7 @@ void ShellRefresh(void) {
         if (g_shell.PendCycTake(row, dir))  ShellApplyCycle(row, dir);
         ShellApplyAddon(g_shell.PendAddonTake());
         if (g_shell.PendSelfLockTake())     ShellArmSelfLock();
+        if (g_shell.PendUnlockTake())       ShellReleaseSelfLock();
     }
     RCDeckData d;
     BuildDeckData(d);
@@ -3455,7 +3489,9 @@ void TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status) {
     }
 
     // --- Telegram (remote, rate-limited per rule) ---
-    if (g_eff_telegram && (new_status == RC_STATUS_WARN || new_status == RC_STATUS_RED)) {
+    // WebRequest is unavailable in an indicator : attempting the send only fills
+    // the journal with err=4014 on every alert. The code stays for the EA build.
+    if (false && g_eff_telegram && (new_status == RC_STATUS_WARN || new_status == RC_STATUS_RED)) {
         const datetime now = TimeCurrent();
         if (now - g_last_telegram_alert[idx] >= RC_TELEGRAM_COOLDOWN_SEC) {
             g_last_telegram_alert[idx] = now;
@@ -4585,6 +4621,14 @@ void InitI18n(void) {
         "Profit target",
         "Objectif de profit",
         "Objetivo de beneficio");
+    AddTr("shl_unlock",
+        "RELEASE THE LOCK",
+        "LEVER LE VERROU",
+        "LEVANTAR EL BLOQUEO");
+    AddTr("shl_locktg",
+        "An indicator cannot send : WebRequest is blocked.",
+        "Un indicateur ne peut pas envoyer : WebRequest est bloqué.",
+        "Un indicador no puede enviar : WebRequest está bloqueado.");
     AddTr("shl_lockrtools",
         "Always on for a prop plan.",
         "Toujours actif sur un plan prop.",
