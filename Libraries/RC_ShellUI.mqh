@@ -103,6 +103,7 @@ struct RCDeckData {
    double budgetPct, freeMarginPct;
    // news (cell NEWS)
    bool   newsHasEvt, newsHigh, newsActive, newsFF;
+   bool   newsApplies;      // v3.37 : this profile HAS a news rule at all
    int    newsMins;
    // discipline (cell DISC)
    bool   discLocked, discTilt, slGuard;
@@ -282,7 +283,7 @@ enum ERCLabel {
    RCL_NAV_ROOM, RCL_NAV_LOT, RCL_NAV_NEWS, RCL_NAV_FIT,
    RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
    RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
-   RCL_LOT_MARGSHORT, RCL_LOT_REDUCE
+   RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -691,7 +692,13 @@ private:
          m_rail.CapsuleStroke(W / 2 - 5, cy + 8, 10, 10, Mix(m_t.surface, m_t.dim, 0.45), Mix(m_t.surface, clrBlack, 0.06));
          m_rail.Text(W / 2, cy + 30, "NEWS", A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       }
-      m_rail.Text(W / 2, cy + 42, (m_d.newsFF ? "FF" : "MT"), A(m_d.newsFF ? m_t.accent : m_t.dim), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
+      // v3.40 : the badge names the SOURCE of a rule. With no rule on this
+      // profile it named a source for nothing - the events still show, the
+      // claim of a binding source does not.
+      m_rail.Text(W / 2, cy + 42,
+                  (!m_d.newsApplies ? "-" : (m_d.newsFF ? "FF" : "MT")),
+                  A(m_d.newsApplies && m_d.newsFF ? m_t.accent : m_t.dim),
+                  RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
       ZAdd(m_railX, m_railY + cy, W, ch, RZ_RAIL_NEWS);
       // --- DISC : lock / SL guard / tilt / trades today -------------------
       cy = CellY(RZ_RAIL_DISC); ch = CellH(RZ_RAIL_DISC);
@@ -855,8 +862,20 @@ private:
                      A(pnlc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
          y += 15;
          string sub = IntegerToString(m_d.posAge[i] / 60) + " min";
-         if(!m_d.posHasSl[i]) sub += "   " + L(RCL_NOSL, "NO SL");
-         m_side.Text(30, y, sub, A(m_d.posHasSl[i] ? m_t.dim : m_t.red), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+         // v3.39 : FundedNext gives THREE MINUTES to place a stop. The label
+         // used to be the same red NO SL at second 2 and at minute 40 - the
+         // difference between "place your stop" and "you are in violation".
+         color slc = m_t.dim;
+         if(!m_d.posHasSl[i]) {
+            const int left = 180 - m_d.posAge[i];
+            sub += "   " + L(RCL_NOSL, "NO SL");
+            if(left > 0) {
+               sub += " " + IntegerToString(left / 60) + ":" +
+                      (left % 60 < 10 ? "0" : "") + IntegerToString(left % 60);
+               slc = m_t.warn;
+            } else slc = m_t.red;
+         }
+         m_side.Text(30, y, sub, A(slc), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
          ZAdd(m_sideX + 18, m_sideY + y - 15, RCS_SIDE_W - 36, 28, RZ_POS_ROW0 + i);
          y += 16;
       }
@@ -984,6 +1003,15 @@ private:
    //--- NEWS : the RULE (red) vs the VIGILANCE (amber), and the source ------
    int SecNews(int y) {
       SecHead(L(RCL_SEC_NEWS, "NEWS WINDOW"), y);
+      // v3.37 : on a profile with NO news rule, this section used to print a
+      // source, a state, a window and a countdown - a rule invented for the
+      // reader. One honest line instead, and nothing else.
+      if(!m_d.newsApplies) {
+         m_side.Text(18, y, L(RCL_NEWS_NORULE, "No news rule on this profile."),
+                     A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+         ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_NEWS_RULE);
+         return y + 22;
+      }
       m_side.Text(18, y, L(RCL_NEWS_SRC, "Source"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       m_side.Text(RCS_SIDE_W - 18, y, (m_d.newsFF ? "ForexFactory [FF]" : L(RCL_SRC_MT, "MT5 calendar [MT]")),
                   A(m_d.newsFF ? m_t.accent : m_t.dim), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
@@ -1361,12 +1389,21 @@ private:
       // The heading was hardcoded "40% RULE" while the body prints the profile's
       // REAL share : a personal account read "40% RULE / only 100% counts". The
       // heading now carries the number it is talking about.
-      SecHead(L(RCL_HELP_R40, "NEWS RULE") + "  " +
-              DoubleToString(m_d.newsSharePct, 0) + "%", y);
+      // v3.40 : the section already says "no news rule on this profile" ; this
+      // page kept explaining which share of the profit counts. Two surfaces,
+      // one fact, two answers - the reader believes whichever they saw last.
+      SecHead(L(RCL_HELP_R40, "NEWS RULE") +
+              (m_d.newsApplies ? "  " + DoubleToString(m_d.newsSharePct, 0) + "%" : ""), y);
+      if(!m_d.newsApplies) {
+         m_side.Text(18, y, L(RCL_NEWS_NORULE, "No news rule on this profile."),
+                     A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+         y += 14;
+      } else {
       m_side.Text(18, y, L(RCL_HELP_R40A, "News window : only ") + DoubleToString(m_d.newsSharePct, 0) + "%",
                   A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
       y += 14;
       m_side.Text(18, y, L(RCL_HELP_R40B, "of the profit counts ; losses count 100%."), A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+      }
       y += 22;
       SecHead(L(RCL_HELP_SURV, "SURVIVAL MARGIN"), y);
       m_side.Text(18, y, L(RCL_HELP_SURVA, "A trade never risks more than 80% of"), A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
@@ -1764,8 +1801,17 @@ private:
                       A(pc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, FW_BOLD);
          y += 14;
          string sub = IntegerToString(m_d.posAge[i] / 60) + " min";
-         if(!m_d.posHasSl[i]) sub += "   " + L(RCL_NOSL, "NO SL");
-         m_float.Text(22, y, sub, A(m_d.posHasSl[i] ? m_t.dim : m_t.red), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+         color slc2 = m_t.dim;                     // v3.39 : same grace countdown
+         if(!m_d.posHasSl[i]) {
+            const int left2 = 180 - m_d.posAge[i];
+            sub += "   " + L(RCL_NOSL, "NO SL");
+            if(left2 > 0) {
+               sub += " " + IntegerToString(left2 / 60) + ":" +
+                      (left2 % 60 < 10 ? "0" : "") + IntegerToString(left2 % 60);
+               slc2 = m_t.warn;
+            } else slc2 = m_t.red;
+         }
+         m_float.Text(22, y, sub, A(slc2), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
          // CLOSE, drawn DISABLED (JR) : an indicator cannot send an order, and
          // this product never will. The button says where closing lives - it is
          // wired to a message, never to a trade call.

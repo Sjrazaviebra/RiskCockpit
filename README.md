@@ -8,12 +8,24 @@
 
 ## Features
 
-- **Live risk read-out** — current exposure, open risk, and distance to your daily and overall loss limits, updated tick-by-tick.
+- **Live risk read-out** — current exposure, open risk, and distance to your
+  daily and overall loss limits, updated tick-by-tick — including the **locked
+  risk**, the figure FundedNext actually scores (it locks to the stop posed at
+  opening, so trailing a stop does not lower it).
+- **The top bar answers the only question that matters before a click** — room
+  to the nearest limit, advised lot, next news — each coloured by its own rule's
+  warning threshold, not a single flat one.
 - **Prop-firm rule profiles** — built-in challenge catalog (FundedNext Stellar 1-Step / 2-Step / Lite / Instant), and compatible with FTMO, E8, The5ers, MyFundedFX-style rules.
 - **Lot sizer** — computes position size from your risk-per-trade and stop distance, capped to keep a survival margin.
 - **Drawdown guards** — daily loss and max drawdown tracking, including the *trailing floor* of instant-funding accounts, with clear on-chart warnings.
 - **News windows** — ForexFactory-aligned classification of restricted events, with the countdown to the next binding one.
-- **Discipline tools** — tilt detection, cooldown, and a two-click self-lock you cannot undo before it expires.
+- **Discipline tools** — a three-step lock ladder: your own **self-lock**
+  (armed in two clicks, releasable in two more — a pact you cannot leave is a
+  trap, not discipline), a hard lock when the **daily drawdown** reaches 80% of
+  its cap, and a **cooldown** after N consecutive losses. Plus tilt detection
+  (rapid entries or revenge sizing). While a lock holds, the controls that would
+  end it or loosen a limit are disabled — including the button that removes the
+  tool from the chart.
 - **Sound alerts** on every status change, with the file names you choose.
   *(Telegram alerts exist in the code but an indicator cannot send them — MQL5
   blocks `WebRequest` outside EAs and services, so the toggle is shown locked.)*
@@ -25,7 +37,10 @@ The old fixed panel is gone. What stays on the chart is a **36 px rail** glued
 to the right edge — one cell per domain (limits, positions, lot, news,
 discipline, account, settings, help), each showing a live micro-state. Click a
 cell and a **340 px panel** opens in front of it; click it again and it closes.
-A chevron stacks every section into a full sidebar.
+A chevron stacks every section into a full sidebar, where each section is a
+fold-out: click a header to open or close it. What you leave open is remembered
+per account, and survives a timeframe change. If a section still does not fit,
+the panel says so instead of quietly cutting it off.
 
 A small **floating table** shows your open positions with their P&L, age and
 missing-stop flag, plus a quick-access strip (room to the nearest limit,

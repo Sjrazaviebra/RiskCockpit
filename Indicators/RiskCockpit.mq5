@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.36"
+#property version "3.40"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.36"
+#define RC_VERSION_STR "3.40"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1502,7 +1502,13 @@ void BuildDeckData(RCDeckData &d) {
     d.warnRisk    = RuleWarnRatio("rule_risk_cum",   d.trailing);
     d.warnDaily   = RuleWarnRatio("rule_daily_dd",   d.trailing);
     d.warnOverall = RuleWarnRatio("rule_overall_dd", d.trailing);
-    d.warnQuick   = RuleWarnRatio("rule_qs",         d.trailing);
+    // v3.39 : the catalogue carries Quick Strike's OWN warning band
+    // (warn_pct / violate_pct) and the legacy row used it. Use it when the
+    // profile defines one ; fall back to the generic threshold otherwise.
+    d.warnQuick   = ((g_profile.quick_strike_warn_pct > 0.0 &&
+                      g_profile.quick_strike_violate_pct > 0.0)
+                     ? g_profile.quick_strike_warn_pct / g_profile.quick_strike_violate_pct
+                     : RuleWarnRatio("rule_qs", d.trailing));
     d.warnHyper   = RuleWarnRatio("rule_hyper",      d.trailing);
     // worst = raw consumption (what a BAR must show) ; sev = consumption
     // measured against each rule's OWN warning threshold (what a COLOUR must
@@ -1712,6 +1718,7 @@ void BuildDeckData(RCDeckData &d) {
     // ordered by time, capped at 6 (the section states the cap honestly).
     d.newsWinMin   = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5);
     d.newsSharePct = g_profile.news_profit_share_pct;
+    d.newsApplies  = g_profile.news_rule_applies;   // v3.37 : say N/A, don't invent
     d.newsN        = 0;
     {
         datetime ct[64]; string cc[64]; bool cr[64];
@@ -1914,6 +1921,7 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_LOT_MARGBOUND, Tr("shl_lotmargbound"));
     g_shell.SetLabel(RCL_LOT_MARGSHORT, Tr("shl_lotmargshort"));
     g_shell.SetLabel(RCL_LOT_REDUCE,    Tr("shl_lotreduce"));
+    g_shell.SetLabel(RCL_NEWS_NORULE,   Tr("shl_newsnorule"));
     g_shell.SetLabel(RCL_SEC_CPTST,  Tr("shl_cptstate"));
     g_shell.SetLabel(RCL_CPT_FIRM,   Tr("shl_cptfirm"));
     g_shell.SetLabel(RCL_CPT_SERVER, Tr("shl_cptserver"));
@@ -3331,6 +3339,17 @@ bool NewsCcyAffectsSymbol(const string sym, const string ccy) {
     if (jpy && ccy == "JPY") return true;
     if (aud && ccy == "AUD") return true;
     if (cad && ccy == "CAD") return true;
+    // v3.37 : FAIL SAFE. This used to return false for anything it did not
+    // recognise - and `ccy` comes from a JSON file the indicator does not
+    // control. A corrupt, renamed or falsified token silently switched the
+    // whole news rule OFF during the exact minutes it exists for. A token that
+    // is not a currency we can reason about now COUNTS : a false "you are in a
+    // news window" costs a missed trade, a false "you are clear" costs the
+    // account.
+    if (ccy != "USD" && ccy != "EUR" && ccy != "GBP" && ccy != "JPY" &&
+        ccy != "AUD" && ccy != "CAD" && ccy != "CHF" && ccy != "NZD" &&
+        ccy != "CNY" && ccy != "CNH")
+        return true;
     return false;
 }
 
@@ -3763,6 +3782,14 @@ void LoadOrSeedPeakBalance(void) {
     const double seed = MathMax(g_profile.initial_balance, AccountInfoDouble(ACCOUNT_BALANCE));
     if (GlobalVariableCheck(k_pb)) {
         g_peak_balance = GlobalVariableGet(k_pb);
+        // v3.38 : this value is an UNAUTHENTICATED GlobalVariable - any script,
+        // any EA, any hand edit in the terminal's own Global Variables window
+        // can change it. It drives the trailing floor, floor = min(peak -
+        // permitted, initial), so a peak LOWER than reality lowers the floor and
+        // the panel reports MORE room to lose than the account really has. That
+        // is the one direction a risk tool must never be wrong in. Floor it by
+        // the two things the terminal can observe by itself.
+        if (g_peak_balance < seed) g_peak_balance = seed;
         if (GlobalVariableCheck(k_sd)) {
             const double sd = GlobalVariableGet(k_sd);
             if (g_peak_balance <= sd + 0.005 && seed < sd - 0.005) { // never grew + smaller profile -> heal
@@ -3935,8 +3962,15 @@ bool FFRestrictedOverride(const string ccy, const string title) {
 // `\"` (escaped quote) and `\\"` (escaped backslash + real quote) both parse right.
 string FFJsonStr(const string json, const string key, const int from, const int until, int &next_pos) {
     next_pos = from;
-    const int k = StringFind(json, "\"" + key + "\"", from);
-    if (k < 0 || k >= until) return "";
+    // v3.38 : the search used to run over the WHOLE remaining file and only
+    // then compare the hit with `until` - so a key missing from one event cost
+    // a full scan of everything after it, once per missing field, on a file
+    // this indicator does not control. Look inside the object's own slice.
+    if (until <= from) return "";
+    const int kk = StringFind(StringSubstr(json, from, until - from), "\"" + key + "\"");
+    if (kk < 0) return "";
+    const int k = from + kk;
+    if (k >= until) return "";
     const int c = StringFind(json, ":", k);
     if (c < 0 || c >= until) return "";
     const int q1 = StringFind(json, "\"", c);
@@ -4139,6 +4173,10 @@ datetime FFNextEvt(const bool restricted_class) {
     return (best == 0 ? 0 : best + srv_off);
 }
 bool FFInNewsWindow(void) {
+    // v3.37 : the three MT5 paths all check news_rule_applies ; this one did
+    // not, so switching to the ForexFactory feed brought the rule back to life
+    // on a profile where FundedNext does not apply it at all.
+    if (!g_profile.news_rule_applies) return false;
     if (!g_eff_news_high) return false; // same toggle contract as the MT5 fallback body
     const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
     const datetime now_utc = TimeGMT();
@@ -5054,6 +5092,10 @@ void InitI18n(void) {
         "Pause après pertes",
         "Pausa tras pérdidas");
     AddTr("shl_losses", "losses", "pertes", "pérdidas");
+    AddTr("shl_newsnorule",
+        "No news rule on this profile.",
+        "Aucune règle news sur ce profil.",
+        "Sin regla de noticias en este perfil.");
     AddTr("shl_limlocked",
         "Locked risk (scored)",
         "Risque verrouillé (noté)",

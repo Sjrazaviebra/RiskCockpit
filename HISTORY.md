@@ -86,6 +86,57 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.37.49 -> v3.40.52 — la regle news : a qui elle s'applique, et ce qu'un jeton inconnu veut dire
+
+🔴 **ECHEC OUVERT SUR UNE ENTREE NON FIABLE.** `NewsCcyAffectsSymbol()` rendait
+**faux** pour tout code devise qu'elle ne reconnaissait pas, et `FFInNewsWindow`
+ignorait ces evenements. Or `country` vient d'un fichier JSON que l'indicateur ne
+controle pas : une valeur corrompue, renommee ou falsifiee **eteignait
+silencieusement toute la regle news pendant les minutes exactes pour lesquelles
+elle existe**. Un outil de risque doit echouer du cote SUR : un jeton qui n'est
+pas une devise dont on sait raisonner **COMPTE** desormais. Un faux « tu es dans
+une fenetre news » coute un trade manque ; un faux « tu es tranquille » coute le
+compte.
+
+**Le chemin ForexFactory ignorait `news_rule_applies`.** Les trois chemins du
+calendrier MT5 le verifiaient tous ; `FFInNewsWindow` non. Sur un profil ou
+FundedNext n'applique pas la regle, **basculer sur le flux ForexFactory la
+ramenait a la vie**. Et le panneau l'affichait quand meme : une source, un etat,
+une fenetre et un compte a rebours **pour une regle inventee pour le lecteur**.
+Il dit maintenant N/A, une fois. La v3.40 aligne la page LEGENDE, qui continuait
+d'expliquer quelle part du profit compte sur un compte ou rien ne compte : deux
+surfaces, un fait, deux reponses — le lecteur croit celle qu'il a vue en dernier.
+
+**v3.38 — deux entrees non fiables, et un README qui promettait ce que le code
+refusait.**
+- 🔴 **Le pic de balance est une GlobalVariable NON AUTHENTIFIEE.** C'est le
+  point haut dont depend le plancher glissant : `plancher = min(pic − permis,
+  initial)`. N'importe quel script, n'importe quel EA, une edition a la main dans
+  la fenetre des variables globales du terminal peut **l'abaisser** — et un pic
+  plus bas que la realite **abaisse le plancher**, donc le panneau annonce **PLUS
+  de marge de perte** que le compte n'en a. C'est la seule direction dans
+  laquelle un outil de risque n'a pas le droit de se tromper. La valeur restauree
+  est desormais bornee par ce que le terminal observe tout seul.
+- `FFJsonStr` **bornait sa recherche APRES l'avoir faite** : une cle absente d'un
+  evenement coutait un balayage de tout le reste du fichier, une fois par champ
+  manquant — sur un fichier que l'indicateur ne controle pas, c'est l'entree qui
+  choisit la charge du thread d'interface.
+- Le **README promettait un auto-verrou « you cannot undo before it expires »**.
+  Le code a toujours eu un relachement (deux clics en 5 s), **volontairement** :
+  un pacte dont on ne peut pas sortir est un piege. Le README dit desormais ce
+  que le code fait, et gagne l'echelle de verrous restauree en v3.33.
+
+**v3.39 — deux nombres que le profil connaissait et que le panneau aplatissait.**
+- **Quick Strike** avait perdu sa propre bande d'alerte : le catalogue porte
+  `quick_strike_warn_pct` et `quick_strike_violate_pct`, et l'ancienne ligne
+  avertissait sur leur RATIO. La v3.31 a rendu son seuil a chaque regle, mais
+  Quick Strike recevait le 0,80 generique. Sa bande est reprise du profil.
+- **« NO SL » etait une etiquette figee.** FundedNext donne **trois minutes** pour
+  poser un stop — le code le dit la ou il calcule le risque — et le panneau
+  affichait le meme rouge a la seconde 2 et a la minute 40. La ligne decompte
+  desormais le sursis, en ambre tant qu'il dure et en rouge une fois passe :
+  c'est la difference entre « pose ton stop » et « tu es deja en violation ».
+
 ### v3.33.45 -> v3.36.48 — la DISCIPLINE etait declaree et n'etait plus nourrie
 
 🔴 **Le moteur de discipline ne tournait plus du tout.** `g_disc_consec`,
