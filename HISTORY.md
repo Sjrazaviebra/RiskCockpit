@@ -86,6 +86,59 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.26.38 — passe de SECURITE
+
+Revue adversariale a 53 agents (fuite de donnees, garantie lecture seule,
+parsing de donnees non fiables, systeme de fichiers, interference entre
+indicateurs, ressources, distribution). Chaque constat a ete **reverifie dans le
+code** avant d'etre touche : un rapport d'agent est une donnee, pas un ordre.
+
+**Fuite reelle, dans le depot PUBLIC.** `HISTORY.md` portait un vrai numero de
+compte MT5 (demo, mais la regle est **zero**). Il est masque. Le controle du gate
+**ne pouvait pas le voir** : son motif exigeait le mot « compte »/« login » a
+moins de 3 caracteres des chiffres, et la ligne disait « compte **demo** Ava,
+<numero> » — quatorze caracteres plus loin. C'est la **deuxieme fois** que ce
+controle rend OK sur le fichier qui porte la fuite. Il signale desormais **toute
+suite de 8 a 10 chiffres** hors d'une liste blanche explicite (ids d'articles
+FundedNext, une date), et le binaire recoit la meme regle. L'injection du
+self-test a ete refaite dans la forme qui passait : `8/8` detectes.
+⚠️ **Deux messages de commit deja pousses portent encore un numero de compte.**
+Un fichier se corrige, un message de commit demande une **reecriture d'historique
+public** : c'est la decision de JR, pas la mienne.
+
+**Le jeton Telegram etait un `input string` en clair.** MQL5 **interdit**
+`WebRequest` dans un indicateur : ce build ne peut donc **jamais** envoyer un
+message — pendant que MT5 recopie chaque `input` dans des `.set` et des modeles
+de graphique qu'aucun garde-fou ne scanne. Un reglage qui ne peut pas servir et
+ne peut que fuir n'a pas lieu d'exister : les deux entrees sont retirees.
+
+**Le solde de POINTE du compte partait dans le journal Experts** a chaque
+session, sans condition — et un journal Experts est ce qu'un trader colle dans un
+fil de support. Passe derriere `InpVerboseLog`.
+
+**Une bascule dessinee VERROUILLEE restait cliquable** : `ZAdd` etait appele meme
+quand `locked` etait vrai. Les deux bascules « apres violation » resserraient
+donc reellement les plafonds tout en affirmant au lecteur qu'elles ne pouvaient
+rien. Un controle qui ne peut pas agir ne doit pas etre cliquable.
+
+**Le calendrier ForexFactory etait charge UNE fois et jamais relu**
+(`if (ArraySize(g_ff_events) == 0)`). Un terminal laisse ouvert un week-end
+gardait les evenements de la semaine precedente pendant que le service
+compagnon reecrivait le fichier toutes les heures. Tout etant passe, le panneau
+annoncait « rien dans les 24 h » **badge [FF] allume**, et `g_ff_active`, jamais
+remis a false, gardait le calendrier MT5 hors-jeu : **les deux filets tombaient
+ensemble**. Desormais : relecture des que la date de modification bouge, et un
+cache sans aucun evenement courant ou futur est traite comme une **PANNE de
+source** (badge eteint, la regle news repart sur le calendrier MT5), jamais comme
+« pas de news ».
+
+**Entrees non fiables bornees.** Aucun plafond n'existait sur le nombre
+d'evenements analyses : un fichier de 4 Mo allouait sans limite, puis payait un
+tri O(n2) et un objet graphique par evenement **a chaque rafraichissement**
+(plafond 512). Et `FFParseIso8601Utc` ne validait que la date : l'heure, la
+minute, la seconde, la borne haute de l'annee et le decalage horaire passaient
+tels quels — un decalage aberrant deplacait un evenement de plusieurs jours.
+
 ### v3.24.36 / v3.25.37 — quatre defauts vus a l'ecran par JR
 
 **1. Les boites « copier » disparaissaient des qu'on bougeait le graphique.**
@@ -126,7 +179,7 @@ marge utilisee, marge libre.
 
 ### v3.22.34 / v3.23.35 — première vérification À L'ÉCRAN
 
-JR a autorisé l'ouverture de son terminal (compte **démo** Ava, 101717457).
+JR a autorisé l'ouverture de son terminal (un compte **démo** Ava).
 L'indicateur a été attaché à EURUSD M15 et piloté à la souris : c'est la
 première fois que ce shell est **vu tourner**.
 

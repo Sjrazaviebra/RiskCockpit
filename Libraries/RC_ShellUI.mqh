@@ -1002,7 +1002,11 @@ private:
       else        m_side.CapsuleStroke(px, y, 34, 16, Mix(m_t.surface, m_t.dim, 0.45), Mix(m_t.surface, clrBlack, 0.10));
       m_side.Capsule(on ? px + 20 : px + 3, y + 3, 10, 10,
                      A(locked ? Mix(m_t.surface, m_t.dim, 0.55) : (on ? m_t.bg : m_t.dim)));
-      ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 20, zid);
+      // v3.26 : the zone used to be registered even when LOCKED, so a switch
+      // drawn inert was still clickable and still moved the setting - the two
+      // "after a violation" toggles really tightened the caps while telling the
+      // reader they could not. A control that cannot act must not be clickable.
+      if(!locked) ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 20, zid);
       y += 22;
       if(locked && StringLen(why) > 0) {
          m_side.Text(30, y - 4, why, A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);

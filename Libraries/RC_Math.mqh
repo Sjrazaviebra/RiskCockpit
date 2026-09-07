@@ -106,14 +106,26 @@ datetime FFParseIso8601Utc(const string s) {
     dt.hour = (int)StringToInteger(StringSubstr(s, 11, 2));
     dt.min  = (int)StringToInteger(StringSubstr(s, 14, 2));
     dt.sec  = (int)StringToInteger(StringSubstr(s, 17, 2));
-    if (dt.year < 2000 || dt.mon < 1 || dt.mon > 12 || dt.day < 1 || dt.day > 31) return 0;
+    // v3.26 : the date was checked and nothing else - hour, minute, second and
+    // the upper year bound all went through, so "2026-01-01T99:99:99Z" parsed
+    // into a stamp far from the real event. The feed is untrusted input.
+    if (dt.year < 2000 || dt.year > 2099) return 0;
+    if (dt.mon  < 1 || dt.mon  > 12) return 0;
+    if (dt.day  < 1 || dt.day  > DaysInMonth(dt.year, dt.mon)) return 0;
+    if (dt.hour < 0 || dt.hour > 23) return 0;
+    if (dt.min  < 0 || dt.min  > 59) return 0;
+    if (dt.sec  < 0 || dt.sec  > 60) return 0;   // 60 = leap second
     datetime t = StructToTime(dt); // naive stamp -> epoch as-if-UTC
     if (StringLen(s) >= 25) {      // +HH:MM / -HH:MM -> local = UTC + off => UTC = local - off
         const ushort sign = StringGetCharacter(s, 19);
-        const int off = (int)StringToInteger(StringSubstr(s, 20, 2)) * 3600 +
-                        (int)StringToInteger(StringSubstr(s, 23, 2)) * 60;
-        if      (sign == '+') t -= off;
-        else if (sign == '-') t += off;
+        const int oh = (int)StringToInteger(StringSubstr(s, 20, 2));
+        const int om = (int)StringToInteger(StringSubstr(s, 23, 2));
+        // a bogus offset must not silently move an event by days
+        if (oh >= 0 && oh <= 14 && om >= 0 && om <= 59) {
+            const int off = oh * 3600 + om * 60;
+            if      (sign == '+') t -= off;
+            else if (sign == '-') t += off;
+        }
     }
     return t;
 }

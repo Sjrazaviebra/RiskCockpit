@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.25"
+#property version "3.26"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.25"
+#define RC_VERSION_STR "3.26"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -163,9 +163,12 @@ input bool   InpEnableSound      = true;          // Sound alert on warn/red tra
 input string InpSoundOK          = "alert.wav";   // Sound file : back to OK
 input string InpSoundWarn        = "alert2.wav";  // Sound file : warning
 input string InpSoundRed         = "stops.wav";   // Sound file : breach / red
-input bool   InpEnableTelegram   = false;         // Telegram alerts (V2)
-input string InpTelegramBotToken = "";            // Telegram bot token
-input string InpTelegramChatId   = "";            // Telegram chat id
+// v3.26 : the bot token and chat id used to be `input string` in clear. MQL5
+// FORBIDS WebRequest inside an INDICATOR, so this build can never send a
+// message - while MT5 persists every input into .set files and chart
+// templates that no guard scans. An input that cannot work and can only leak
+// has no reason to exist : the credentials belong to the EA / service build.
+input bool   InpEnableTelegram   = false;         // Telegram alerts (EA build only)
 
 #ifdef __MQL5__
 input group "6 - TRADING-DAYS COUNTER"
@@ -1067,7 +1070,7 @@ int OnInit(void) {
 
     // Telegram setup hint (B1) - cheap one-time message at attach time.
     if (g_eff_telegram) {
-        if (InpTelegramBotToken == "" || InpTelegramChatId == "") {
+        if (true) {   // v3.26 : no credentials in an indicator, ever
             Print("RiskCockpit : Telegram enabled but bot token / chat id empty - alerts will not fire.");
         } else if (InpVerboseLog) { // LOG CLEANUP : one-time info, gated (the empty-token WARNING above stays ungated)
             Print("RiskCockpit : Telegram alerts ON. ",
@@ -2711,8 +2714,11 @@ double Live_OverallDdPct(void) {
         // at which the account is lost cannot have two versions.
         const double permitted = (g_profile.max_loss_pct / 100.0) * init;
         const double floorv    = RC_TrailingFloor(g_peak_balance, init, g_profile.max_loss_pct);
+        // v3.26 : this wrote the account's PEAK BALANCE into the Experts log on
+        // every session, ungated - and an Experts log is what a trader pastes
+        // into a support thread. Behind the verbose flag, like every diagnostic.
         static bool s_floor_logged = false; // acceptance : must match the FN dashboard
-        if (!s_floor_logged) {
+        if (!s_floor_logged && InpVerboseLog) {
             PrintFormat("RiskCockpit Instant floor: floor=%.2f permitted=%.2f peak_bal=%.2f",
                         floorv, permitted, g_peak_balance);
             s_floor_logged = true;
@@ -3672,13 +3678,13 @@ string EscapeJson(const string s) {
 bool SendTelegramMessage(const string text) {
     if (!g_eff_telegram)
         return false;
-    if (InpTelegramBotToken == "" || InpTelegramChatId == "")
+    if (true)   // v3.26 : the token inputs are gone - see the note on InpEnableTelegram
         return false;
 
-    const string url = "https://api.telegram.org/bot" + InpTelegramBotToken + "/sendMessage";
+    const string url = "https://api.telegram.org/bot" + "" + "/sendMessage";
     string body;
     StringConcatenate(body,
-                      "{\"chat_id\":\"", InpTelegramChatId,
+                      "{\"chat_id\":\"", "",
                       "\",\"text\":\"", EscapeJson(text), "\"}");
 
     char post[], result[];
@@ -3783,6 +3789,11 @@ int FFParseCalendar(const string json) {
         n++;
     }
     if (n == 0) return 0; // empty/HTML error page -> caller keeps the old state
+    // v3.26 : the feed is untrusted input and nothing bounded it. A crafted or
+    // corrupt 4 MB file allocated without limit, then paid an O(n2) sort and a
+    // chart object per event on EVERY refresh. One week of HIGH+MEDIUM events
+    // is ~150 ; 512 is generous and finite.
+    if (n > 512) n = 512;
     ArrayResize(g_ff_events, n);
     for (int i = 0; i < n; ++i) g_ff_events[i] = parsed[i];
     return n;
@@ -3794,10 +3805,26 @@ int FFParseCalendar(const string json) {
 // EAs / scripts / services only), so a companion service/EA or any external
 // scheduler can drop/refresh this file and the indicator stays FN-aligned.
 // Stale guard : a file older than 8 days is ignored (feed = this week).
+// v3.26 : true while the cache still holds an event that has not already
+// passed. A cache that can no longer answer anything is a source FAILURE, not
+// a quiet week : it must hand the rule back to the MT5 calendar instead of
+// reporting "nothing in the next 24 h" under a lit [FF] badge.
+bool FFHasLiveEvent(void) {
+    const datetime now = TimeGMT();
+    for (int i = 0; i < ArraySize(g_ff_events); ++i)
+        if (g_ff_events[i].t_utc >= now - 3600) return true;
+    return false;
+}
+datetime g_ff_fmod = 0;        // modify date of the parsed file : re-read on change
 bool FFLoadFromFile(void) {
     const int h = FileOpen("ff_calendar_thisweek.json", FILE_READ | FILE_BIN | FILE_SHARE_READ | FILE_SHARE_WRITE);
     if (h == INVALID_HANDLE) return false;
     const datetime fmod = (datetime)FileGetInteger(h, FILE_MODIFY_DATE);
+    // nothing new on disk and a cache already parsed : do not re-parse 200 KB
+    if (fmod > 0 && fmod == g_ff_fmod && ArraySize(g_ff_events) > 0) {
+        FileClose(h);
+        return true;
+    }
     const int sz = (int)FileSize(h);
     if (sz <= 2 || sz > 4 * 1024 * 1024 || (fmod > 0 && TimeCurrent() - fmod > 8 * 24 * 3600)) {
         FileClose(h);
@@ -3810,6 +3837,7 @@ bool FFLoadFromFile(void) {
     if ((int)rd != sz) return false;
     const string json = CharArrayToString(bytes, 0, sz, CP_UTF8);
     const int n = FFParseCalendar(json);
+    if (n > 0) g_ff_fmod = fmod;
     if (n > 0 && !g_ff_active) {
         g_ff_active = true;
         Print("RiskCockpit : ForexFactory feed ACTIVE via the file bridge (", n,
@@ -3826,10 +3854,29 @@ void FFSaveToFile(const string json) { // warm cache for the next re-init (best 
     FileClose(h);
 }
 void FetchFFCalendar(void) {
-    // (a) instant, network-free : repopulate the cache from the file bridge after
-    // a re-init (TF switch / input change wipes the globals).
-    if (ArraySize(g_ff_events) == 0)
+    // (a) the file bridge. This used to be `if (ArraySize(g_ff_events) == 0)` :
+    // the cache was loaded ONCE and never looked at again, so a terminal left
+    // open over a week-end kept last week's events while the companion service
+    // rewrote the file every hour. Everything in the past, nothing matches, and
+    // the panel announced "nothing in the next 24 h" with the [FF] badge lit -
+    // while g_ff_active, never cleared, kept the MT5 calendar locked out. Both
+    // safety nets fell together. Re-read on a cheap modify-date check.
+    static datetime s_ffRead = 0;
+    if (TimeCurrent() - s_ffRead >= 60) {
+        s_ffRead = TimeCurrent();
         FFLoadFromFile();
+        // a cache with nothing current or future cannot answer : say so and
+        // give the rule back to the MT5 calendar instead of saying "no news".
+        if (g_ff_active && !FFHasLiveEvent()) {
+            g_ff_active = false;
+            static bool s_ffDead = false;
+            if (!s_ffDead) {
+                s_ffDead = true;
+                Print("RiskCockpit : the ForexFactory cache holds no current event - ",
+                      "feed marked DOWN, the MT5 calendar takes the news rule back.");
+            }
+        }
+    }
     // (b) throttled web attempt : 1 / 60 min, stamp PERSISTED so re-inits do not
     // re-block the UI thread ; 3 s timeout bounds the worst case.
     if (g_ff_last_try == 0 && GlobalVariableCheck("RC_ff_lasttry"))

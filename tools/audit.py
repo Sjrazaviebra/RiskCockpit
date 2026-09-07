@@ -193,7 +193,33 @@ def run(root):
             ("dossier terminal", r"Terminal\\{1,2}[0-9A-F]{32}"),
             ("token telegram", r"\d{8,10}:[A-Za-z0-9_-]{30,}"),
             ("email perso", r"(?i)[\w.+-]+@(?:gmail|yahoo|hotmail|outlook)\.[a-z]{2,}"),
-            ("login MT5", r"(?i)\b(?:login|account|acct|compte|MT5)\W{0,3}\d{6,10}\b")]
+            ("login MT5", None)]   # handled below : see NUM_OK
+    # A PUBLIC repo : eight to ten consecutive digits ARE an account number
+    # until proven otherwise. The old pattern wanted the word compte/login
+    # within three characters of the digits - and the leak that actually
+    # shipped read "compte **demo** Ava, <number>", fourteen characters away,
+    # so this control returned OK on the very file that carried the number.
+    # An allowlist forces a CONSCIOUS decision for every new number instead.
+    NUM_OK = {
+        # FundedNext help-centre article ids, cited as sources in the catalogue
+        "8020351", "10256545", "10701447", "10816539", "10816788",
+        "11641614", "11982271", "11982604", "12840751",
+        "20260509",    # a YYYYMMDD date, RC_Math + its self-test
+        "100000000",   # a round guard value, not an identifier
+    }
+    NUM_RX = re.compile(r"(?<![\d.])\d{8,10}(?![\d.])")
+
+    def num_leaks(text, where):
+        # an id quoted as a documentation SOURCE is not a leak : the only shape
+        # accepted is a URL path, e.g. help.fundednext.com/en/articles/12840751
+        out = []
+        for m in NUM_RX.finditer(text):
+            if m.group(0) in NUM_OK:
+                continue
+            if "articles/" in text[max(0, m.start() - 40):m.start()]:
+                continue
+            out.append("%s:login MT5 (%s)" % (where, m.group(0)))
+        return out
     leaks = []
     # every text file, not a hand-picked list : the leak that got through was in
     # HISTORY.md - the changelog that described its own removal.
@@ -209,8 +235,11 @@ def run(root):
         if txt is None:
             continue
         for label, rx in pats:
+            if rx is None:
+                continue
             for m in re.finditer(rx, txt):
                 leaks.append("%s:%s" % (os.path.basename(rel), label))
+        leaks += num_leaks(txt, os.path.basename(rel))
     ex5 = read(root, EX5, binary=True)
     if ex5 is None:
         report("fuite de donnees perso", None, "pas de .ex5 a scanner")
@@ -223,8 +252,12 @@ def run(root):
             for enc in ('latin-1', 'utf-16-le'):
                 txt = ex5.decode(enc, 'ignore')
                 for label, rx in pats:
+                    if rx is None:
+                        continue
                     if re.search(rx, txt):
                         leaks.append("RiskCockpit.ex5:" + label)
+                # the compiled binary gets the same bare-number rule as the text
+                leaks += num_leaks(txt, "RiskCockpit.ex5")
             report("fuite de donnees perso", not leaks,
                    ("%d fichiers + binaire scannes" % len(scanned)) if not leaks
                    else " | ".join(sorted(set(leaks))))
