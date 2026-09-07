@@ -86,6 +86,45 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.22.34 / v3.23.35 — première vérification À L'ÉCRAN
+
+JR a autorisé l'ouverture de son terminal (compte **démo** Ava, 101717457).
+L'indicateur a été attaché à EURUSD M15 et piloté à la souris : c'est la
+première fois que ce shell est **vu tourner**.
+
+**Ce qui marche, vérifié à l'image** — navbar complète (`RC | EURUSD | M15 |
+SAIN 100/100 | $10174.11 | 0 pos | EMER | D | 00:33 | ✕`), rail collé au bord
+avec ses 8 cellules et leurs micro-états, tableau flottant en **état vide**
+(« Aucune position ouverte », bandeau d'accès rapide, mention « Fermeture :
+version EA »), sidebar complète empilant toutes les sections, infobulle sur
+**2 lignes** (correctif v3.20), sections repliées/dépliées au clic, tableau des
+réglages avec ses 4 onglets et ses 6 steppers, `N/A` honnête là où une limite
+ne s'applique pas au profil personnel.
+
+**Chaîne fonctionnelle prouvée de bout en bout** : deux clics sur le `+` de
+« Distance SL % » → `1.00 %` devient `1.20 %`, deux clics sur `−` la ramènent à
+`1.00 %`. Les **deux** clics comptent, ce qui valide aussi le correctif v3.19
+(avant, deux clics dans une même période de rafraîchissement n'en faisaient
+qu'un). Clic → zone → intention → hôte → mutation → GlobalVariable → re-rendu.
+
+**Trois défauts que quinze contrôles statiques n'ont pas pu voir :**
+
+1. **Deux lignes dessinées l'une SUR l'autre** dans « D'OÙ VIENT CE LOT » :
+   la ligne « Marge libre » n'incrémentait jamais `y`, donc « Lot max autorisé »
+   se peignait par-dessus — libellés et valeurs mélangés en une bouillie
+   illisible (`Mlangeakilanetorisé`, `ma0g%`). Une ligne manquante, `y += 18`.
+2. **« Marge avant limite » débordait sa colonne** de 80 px dans le bandeau
+   d'accès rapide du flottant et mordait sur la colonne LOT : le libellé du
+   PANNEAU était réutilisé dans une cellule six fois plus étroite. Libellé court
+   dédié (`ROOM` / `MARGE` / `MARGEN`).
+3. **L'aide se contredisait** : titre « RÈGLE 40% » et corps « seuls **100%** du
+   profit comptent » sur un profil personnel. Le titre porte désormais le
+   nombre dont il parle. Et « LÉGENDE » était écrit deux fois de suite.
+
+⚠️ **Constat de méthode** : MT5 **ne recharge pas** l'indicateur à la
+recompilation. Il faut changer d'unité de temps (ou le détacher/rattacher) —
+sinon on regarde l'ancien binaire en croyant tester le nouveau.
+
 ### v3.21.33 — la queue de la relecture
 
 - **Cliquer une ligne de position ramène le graphique sur son symbole** — le

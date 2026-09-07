@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.21"
+#property version "3.23"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.21"
+#define RC_VERSION_STR "3.23"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1730,6 +1730,8 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_CLOSE_EA,  Tr("shl_closeea"));
     g_shell.SetLabel(RCL_UNLOCK,    Tr("shl_unlock"));
     g_shell.SetLabel(RCL_LOCK_TG,   Tr("shl_locktg"));
+    g_shell.SetLabel(RCL_ROOM_SHORT, Tr("shl_roomshort"));
+    g_shell.SetLabel(RCL_HELP_COLOURS, Tr("shl_colours"));
     g_shell.SetLabel(RCL_PAYOUT,    Tr("shl_payout"));
     g_shell.SetLabel(RCL_TARGET,    Tr("shl_target"));
     g_shell.SetLabel(RCL_LOCK_RTOOLS, Tr("shl_lockrtools"));
@@ -4734,6 +4736,14 @@ void InitI18n(void) {
         "basket",
         "panier",
         "cesta");
+    AddTr("shl_colours",
+        "COLOURS",
+        "COULEURS",
+        "COLORES");
+    AddTr("shl_roomshort",
+        "ROOM",
+        "MARGE",
+        "MARGEN");
     AddTr("shl_unlock",
         "RELEASE THE LOCK",
         "LEVER LE VERROU",
@@ -5022,9 +5032,9 @@ void InitI18n(void) {
         "BREACH - limite atteinte",
         "BREACH - límite alcanzado");
     AddTr("shl_hr40",
-        "40% RULE",
-        "RÈGLE 40%",
-        "REGLA 40%");
+        "NEWS RULE",
+        "RÈGLE NEWS",
+        "REGLA NEWS");
     AddTr("shl_hr40a",
         "News window : only ",
         "Fenêtre news : seuls ",

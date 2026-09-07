@@ -189,8 +189,8 @@ enum ERCZone {
    // --- floating positions table (appears as soon as a trade is open) ---
    RZ_FLT_GRIP, RZ_FLT_HIDE,
    RZ_FLT_ROW0, RZ_FLT_ROW1, RZ_FLT_ROW2, RZ_FLT_ROW3,
-   RZ_FLT_ROW4, RZ_FLT_ROW5, RZ_FLT_ROW6, RZ_FLT_ROW7,
-   RZ_FLT_CLOSE0, RZ_FLT_CLOSE1, RZ_FLT_CLOSE2, RZ_FLT_CLOSE3,
+   RZ_FLT_ROW4, RZ_FLT_ROW5, RZ_FLT_ROW6, RZ_FLT_ROW7,
+   RZ_FLT_CLOSE0, RZ_FLT_CLOSE1, RZ_FLT_CLOSE2, RZ_FLT_CLOSE3,
    RZ_FLT_CLOSE4, RZ_FLT_CLOSE5, RZ_FLT_CLOSE6, RZ_FLT_CLOSE7,
    RZ_FLT_QLIM, RZ_FLT_QLOT, RZ_FLT_QNEWS,
    // --- v3.02 : settings tabs + steppers + plan cascade -----------------
@@ -234,6 +234,7 @@ enum ERCLabel {
    RCL_CPT_PROFILE, RCL_TAB_RISK, RCL_TAB_DISC, RCL_TAB_ADV, RCL_TAB_DISP,
    RCL_CYCLE, RCL_YEAR, RCL_MONTH, RCL_DAY, RCL_DISC_VIOL, RCL_VIOL_M, RCL_VIOL_R,
    RCL_LOCK_ARM, RCL_LOCK_ASK, RCL_LOCK_ON, RCL_BE, RCL_CLOSE_EA, RCL_UNLOCK, RCL_LOCK_TG,
+   RCL_ROOM_SHORT, RCL_HELP_COLOURS,
    RCL_RAIL_CPT, RCL_RAIL_HELP, RCL_FLOOR_HINT, RCL_MORE_RESIZE, RCL_PYRAMID, RCL_LOT_NOROOM,
    RCL_LOT_CAP80, RCL_SRC_MT, RCL_INACTIVE, RCL_NEWS_ACT_EL, RCL_IN_MIN, RCL_NEWS_NONE24,
    RCL_RULE40, RCL_CHECKFN, RCL_SLG_ON, RCL_TILT_ON, RCL_ALLCLEAR, RCL_SELFLOCK_T,
@@ -267,7 +268,7 @@ struct RCZone { int x, y, w, h, id; };
 #define RCS_BAND_H      26      // full-width blocking banner (hard lock / SL guard / tilt)
 #define RCS_FLT_W      256      // floating positions table (shown while trades are open)
 #define RCS_FLT_HEAD    24
-#define RCS_FLT_ROW     30
+#define RCS_FLT_ROW     30
 #define RCS_FLT_QUICK   28      // quick-access strip (room / lot / news)
 
 //--- font scale (POINTS) ----------------------------------------------------
@@ -303,7 +304,7 @@ private:
    int        m_fltX, m_fltY, m_fltW, m_fltH;
    bool       m_fltOn, m_fltHidden, m_drag;
    bool       m_lastLeft;        // previous button state : a drag needs a TRANSITION
-   int        m_pendTheme;       // host consumes : new theme index, -1 = none
+   int        m_pendTheme;       // host consumes : new theme index, -1 = none
    bool       m_closeNotice;     // a disabled CLOSE was clicked : highlight the EA line
    // v3.09 : measured height of each section (0 = never drawn yet). The panel
    // surface is sized from it, so a body can no longer be painted outside its
@@ -803,6 +804,7 @@ private:
       m_side.Text(18, y, L(RCL_LOT_FREE, "Free margin"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.freeMarginPct, 0) + "%", A(m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_LOT_FREE);
+      y += 18;      // this row never advanced y : the NEXT one was painted ON TOP
       // v3.01 parity : "Max lot allowed" - the biggest lot the caps still allow,
       // and WHICH cap binds (target margin / cumulative room / broker free margin).
       if(m_d.maxLot >= 0.0) {
@@ -1146,7 +1148,8 @@ private:
    }
    //--- AIDE : the legend, and what this tool is (and is not) --------------
    int SecHelp(int y) {
-      SecHead(L(RCL_SEC_HELP, "LEGEND"), y);
+      // the panel title already says LEGEND : this one was a duplicate line
+      SecHead(L(RCL_HELP_COLOURS, "COLOURS"), y);
       m_side.Capsule(18, y + 4, 8, 8, A(m_t.ok));
       m_side.Text(34, y, L(RCL_HELP_SAFE, "SAFE - below 80% of the limit"), A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
       y += 17;
@@ -1156,7 +1159,11 @@ private:
       m_side.Capsule(18, y + 4, 8, 8, A(m_t.red));
       m_side.Text(34, y, L(RCL_HELP_BREACH, "BREACH - limit reached"), A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
       y += 22;
-      SecHead(L(RCL_HELP_R40, "40% RULE"), y);
+      // The heading was hardcoded "40% RULE" while the body prints the profile's
+      // REAL share : a personal account read "40% RULE / only 100% counts". The
+      // heading now carries the number it is talking about.
+      SecHead(L(RCL_HELP_R40, "NEWS RULE") + "  " +
+              DoubleToString(m_d.newsSharePct, 0) + "%", y);
       m_side.Text(18, y, L(RCL_HELP_R40A, "News window : only ") + DoubleToString(m_d.newsSharePct, 0) + "%",
                   A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
       y += 14;
@@ -1467,7 +1474,9 @@ private:
       {
          const int qy = RCS_FLT_HEAD + 3, cw = (W - 16) / 3;
          const color rc2 = (m_d.limRatio >= 1.0 ? m_t.red : (m_d.limRatio >= 0.80 ? m_t.warn : m_t.ok));
-         m_float.Text(8 + cw / 2, qy, L(RCL_ROOM, "Room to the limit"), A(m_t.dim), RCS_F_SMALL,
+         // the PANEL wording ("Room to the limit" / "Marge avant limite") overflows
+         // an 80 px column and ran into its neighbour : the strip needs its own word
+         m_float.Text(8 + cw / 2, qy, L(RCL_ROOM_SHORT, "ROOM"), A(m_t.dim), RCS_F_SMALL,
                       "Segoe UI", TA_CENTER | TA_TOP);
          m_float.Text(8 + cw / 2, qy + 11,
                       (m_d.roomMoney >= 0.0 ? DoubleToString(m_d.roomMoney, 0) + " $" : "--"),
@@ -1614,7 +1623,7 @@ public:
       m_navY = 0; m_bandOn = false;
       m_lotEditOn = false; m_lotEditX = 0; m_lotEditY = 0; m_lotEditW = 0; m_lotEditH = 0;
       m_fltX = -1; m_fltY = -1; m_fltW = RCS_FLT_W; m_fltH = RCS_FLT_HEAD + 40;
-      m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
+      m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
       m_closeNotice = false;
       m_lastLeft = false; m_pendTheme = -1;
       for(int si = 0; si < 8; si++) m_secH[si] = 0;
