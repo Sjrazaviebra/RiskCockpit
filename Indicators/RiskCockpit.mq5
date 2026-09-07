@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.18"
+#property version "3.19"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.18"
+#define RC_VERSION_STR "3.19"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1207,6 +1207,10 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
             // hiding the floating table survived a reload as "shown" : the cross
             // undid itself at every TF switch. Persist it next to its position.
             GVSetLogin("RC_v3_flthid", g_shell.FloatHidden() ? 1.0 : 0.0);
+            // Consume the click NOW : the pending intents are single slots read only
+            // by the timer, so two clicks inside one refresh period collapsed into
+            // one and the value did not move until the next tick.
+            ShellRefresh();
             if (g_shell.PendKillTake()) {          // navbar X : remove this instance
                 int kwin2 = ChartWindowFind();
                 if (kwin2 < 0) kwin2 = 0;
@@ -2128,8 +2132,11 @@ void ShellRuleAlerts(const RCDeckData &d) {
         string txt = "";
         const string k = g_rows[i].key;
         if (k == "rule_margin_cum")      { used = d.marginPct; cap = d.marginCap; }
-        else if (k == "rule_margin_pt")  { used = Live_PerTradeMarginPct();
-                                           cap  = g_profile.margin_recommended_per_trade_max_pct; }
+        // rule_margin_pt was a TEXT row in the legacy panel (status N/A, never
+        // alerting) : its cap is a RECOMMENDED band (20-30 %), not a violation rule.
+        // Alerting on it fired RED against a number no screen shows, about a
+        // per-trade margin the user is allowed to set higher.
+        else if (k == "rule_margin_pt")  { g_last_status[i] = RC_STATUS_NA; continue; }
         else if (k == "rule_risk_cum")   { used = d.riskPct;   cap = d.riskCap; }
         else if (k == "rule_daily_dd")   { if (!d.dailyApplies) { g_last_status[i] = RC_STATUS_NA; continue; }
                                            used = d.dailyPct;  cap = d.dailyCap; }
@@ -2167,6 +2174,20 @@ void ShellRefresh(void) {
         ShellApplyAddon(g_shell.PendAddonTake());
         if (g_shell.PendSelfLockTake())     ShellArmSelfLock();
         if (g_shell.PendUnlockTake())       ShellReleaseSelfLock();
+        {   // The theme picked in the shell used to die with the frame : never
+            // persisted (a regression against the legacy panel) and the chart-side
+            // lines kept the previous palette.
+            const int th = g_shell.PendThemeTake();
+            if (th >= 0) {
+                g_active_palette_idx = th / 2;
+                g_active_theme_idx   = th % 2;
+                GlobalVariableSet("RC_palette_override", (double)g_active_palette_idx);
+                GlobalVariableSet("RC_theme_override",   (double)g_active_theme_idx);
+                InitTheme();
+                RefreshSlLines();
+                if (g_be_visible) DrawBreakevenLines();
+            }
+        }
     }
     RCDeckData d;
     BuildDeckData(d);

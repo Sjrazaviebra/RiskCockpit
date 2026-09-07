@@ -301,7 +301,9 @@ private:
    int        m_lotEditX, m_lotEditY, m_lotEditW, m_lotEditH;
    // floating positions table : draggable, position persisted by the host
    int        m_fltX, m_fltY, m_fltW, m_fltH;
-   bool       m_fltOn, m_fltHidden, m_drag;
+   bool       m_fltOn, m_fltHidden, m_drag;
+   bool       m_lastLeft;        // previous button state : a drag needs a TRANSITION
+   int        m_pendTheme;       // host consumes : new theme index, -1 = none
    bool       m_closeNotice;     // a disabled CLOSE was clicked : highlight the EA line
    // v3.09 : measured height of each section (0 = never drawn yet). The panel
    // surface is sized from it, so a body can no longer be painted outside its
@@ -1594,6 +1596,7 @@ public:
       m_fltX = 0; m_fltY = 0; m_fltW = RCS_FLT_W; m_fltH = RCS_FLT_HEAD + 40;
       m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
       m_closeNotice = false;
+      m_lastLeft = false; m_pendTheme = -1;
       for(int si = 0; si < 8; si++) m_secH[si] = 0;
       m_relayout = false;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
@@ -1634,6 +1637,7 @@ public:
    int  PendAddonTake(void) { const int r = m_pendAddon; m_pendAddon = -1; return r; }
    bool PendSelfLockTake(void) { const bool r = m_pendSelfLock; m_pendSelfLock = false; return r; }
    bool PendUnlockTake(void)   { const bool r = m_pendUnlock;   m_pendUnlock   = false; return r; }
+   int  PendThemeTake(void)    { const int  r = m_pendTheme;    m_pendTheme    = -1;    return r; }
    bool PendCycTake(int &field, int &dir) {
       if(m_pendCyc < 0) return false;
       field = m_pendCyc / 10; dir = ((m_pendCyc % 10) == 1 ? 1 : -1); m_pendCyc = -1; return true;
@@ -1843,11 +1847,13 @@ public:
          if(hit == RZ_CFG_PAL) {                            // theme + mode are view-only
             const int pal2 = m_themeIdx / 2, lgt2 = m_themeIdx % 2;
             m_themeIdx = (((pal2 + 1) % 3) * 2) + lgt2;
-            RC_ThemeGet(m_themeIdx, m_t); RenderAll(); return true;
+            RC_ThemeGet(m_themeIdx, m_t);
+            m_pendTheme = m_themeIdx; RenderAll(); return true;
          }
          if(hit == RZ_CFG_MODE) {
             m_themeIdx = (m_themeIdx % 2 == 0 ? m_themeIdx + 1 : m_themeIdx - 1);
-            RC_ThemeGet(m_themeIdx, m_t); RenderAll(); return true;
+            RC_ThemeGet(m_themeIdx, m_t);
+            m_pendTheme = m_themeIdx; RenderAll(); return true;
          }
          m_pendCfg = hit;                                   // host consumes on its next refresh
          return true;
@@ -1928,11 +1934,15 @@ public:
          case RZ_NAV_PALETTE: {
             const int pal = m_themeIdx / 2, lgt = m_themeIdx % 2;
             m_themeIdx = (((pal + 1) % 3) * 2) + lgt;
-            RC_ThemeGet(m_themeIdx, m_t); RenderAll(); return true;
+            RC_ThemeGet(m_themeIdx, m_t);
+            m_pendTheme = m_themeIdx;   // the host persists it and retints the chart
+            RenderAll(); return true;
          }
          case RZ_NAV_MODE:
             m_themeIdx = (m_themeIdx % 2 == 0 ? m_themeIdx + 1 : m_themeIdx - 1);
-            RC_ThemeGet(m_themeIdx, m_t); RenderAll(); return true;
+            RC_ThemeGet(m_themeIdx, m_t);
+            m_pendTheme = m_themeIdx;
+            RenderAll(); return true;
          case RZ_NAV_KILL:
             m_pendKill = true; return true;                 // the host removes the indicator
          case RZ_NAV_TF: case RZ_NAV_SYM: {                  // chips open their dropdown
@@ -1953,6 +1963,7 @@ public:
    void OnMouseDrag(const int mx, const int my, const bool leftDown) {
       if(!m_created) return;
       if(!leftDown) {
+         m_lastLeft = false;
          if(m_drag) {
             m_drag = false;
             ChartSetInteger(0, CHART_MOUSE_SCROLL, true);  // give the chart its pan back
@@ -1961,6 +1972,12 @@ public:
          return;
       }
       if(!m_drag) {
+         // Only a press that STARTS on the header grabs the table. Without this,
+         // a chart pan already under way that merely CROSSED the 24 px header
+         // captured the table and cut the chart's scroll until the user let go.
+         const bool wasDown = m_lastLeft;
+         m_lastLeft = leftDown;
+         if(wasDown) return;                            // button already held elsewhere
          if(!m_fltOn) return;
          if(!(mx >= m_fltX && mx <= m_fltX + m_fltW - 24 && my >= m_fltY && my <= m_fltY + RCS_FLT_HEAD))
             return;                                        // press started outside the header

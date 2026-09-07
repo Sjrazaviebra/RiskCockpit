@@ -43,10 +43,11 @@ void OnStart() {
            RC_TrailingFloor(1950.0, 2000.0, 6.0), 1830.0);
     // day one : peak == initial
     CheckD("plancher : premier jour", RC_TrailingFloor(2000.0, 2000.0, 6.0), 1880.0);
-    // a losing account : losses never lower the floor, only the PEAK matters
-    CheckD("plancher : les pertes ne le baissent pas",
-           RC_TrailingFloor(2100.0, 2000.0, 6.0),
-           RC_TrailingFloor(2100.0, 2000.0, 6.0));
+    // Losses never lower the floor - only the PEAK moves it. The first version
+    // of this case passed the SAME call on both sides of the comparison : it
+    // could not fail. A test that cannot say no proves nothing.
+    CheckD("plancher : suit le pic, pas la balance courante",
+           RC_TrailingFloor(2100.0, 2000.0, 6.0), 1980.0);
     // guards : nothing configured yet must not produce a bogus level
     CheckD("plancher : balance initiale nulle", RC_TrailingFloor(2000.0, 0.0, 6.0), 0.0);
     CheckD("plancher : pourcentage nul", RC_TrailingFloor(2000.0, 2000.0, 0.0), 0.0);
