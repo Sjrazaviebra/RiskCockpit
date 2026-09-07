@@ -86,6 +86,44 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.24.36 / v3.25.37 — quatre defauts vus a l'ecran par JR
+
+**1. Les boites « copier » disparaissaient des qu'on bougeait le graphique.**
+La v3.24 accusait `Destroy()` / `ObjectsDeleteAll`. **Ce diagnostic etait FAUX** :
+`OnChartChange()` n'appelle jamais `ObjectsDeleteAll`, et le timer re-synchronise
+les boites deux fois par seconde. Les boites ne sont jamais supprimees, elles sont
+**RECOUVERTES** : MT5 peint les objets d'un graphique dans l'**ordre de creation**
+(`OBJPROP_ZORDER` ne classe que les clics), donc un bitmap de panneau re-cree passe
+devant un `OBJ_EDIT` plus ancien. `ShellSyncLotEdit` trouvait l'objet et se
+contentait de le DEPLACER — il restait dessous pour toujours. Le shell compte
+desormais ses generations de surfaces (`SurfGen()`) et l'hote supprime les deux
+boites apres chaque reconstruction, pour que la synchro suivante les re-cree
+au-dessus. **Prouve a l'ecran** : 8 barres de defilement, deux zooms, PgUp/PgDn —
+les deux boites (`0.01` et `0.75`) restent presentes.
+
+**2. Le panneau COMPLET etait haut de 740 px en dur.** La pile de sections
+debordait : « A VENIR » etait le dernier titre dessine et son contenu tombait
+hors du bitmap. Le panneau **mesure** maintenant sa pile et grandit jusqu'a la
+hauteur du graphique. Mesure a l'ecran : 730 px -> **990 px**, et « A VENIR »
+affiche enfin sa ligne (« Rien dans les 24 h. »). La ligne d'honnetete
+« +N sections : agrandir la fenetre » etait elle-meme peinte AU curseur `y`,
+c'est-a-dire exactement la ou le bitmap se termine : la seule ligne chargee de
+dire « il y a la suite » n'etait jamais visible. Elle est desormais peinte a
+position fixe, en bas du panneau.
+
+**3. L'echelle confort avait une bascule a sens unique.** La rallumer appelait
+`ApplyComfortScale(false)`, qui **refuse** d'agir sur une echelle fixe qui n'est
+pas la notre : le clic ne faisait donc **rien**. L'eteindre ne rendait pas non
+plus le graphique, fige sur notre propre echelle. ON force maintenant ; OFF rend
+l'echelle native, mais seulement si elle est encore la notre (jamais de zoom
+manuel ecrase). Trouve a l'ecran : la bascule etait persistee sur OFF, ce qui
+explique le graphique colle en haut et en bas dont JR se plaignait.
+
+**4. La section COMPTE portait le plan, pas le COMPTE.** Ni courtier, ni serveur,
+ni levier, ni equite, ni marge — l'ancien onglet « Compte » les avait. Bloc
+TERMINAL ajoute, en lecture seule : courtier, serveur, levier, solde, equite,
+marge utilisee, marge libre.
+
 ### v3.22.34 / v3.23.35 — première vérification À L'ÉCRAN
 
 JR a autorisé l'ouverture de son terminal (compte **démo** Ava, 101717457).

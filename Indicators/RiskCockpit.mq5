@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.23"
+#property version "3.25"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.23"
+#define RC_VERSION_STR "3.25"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -255,6 +255,8 @@ int     g_fx_h  = 0;
 RCShellUI g_shell;
 void BuildDeckData(RCDeckData &d);
 void ShellRefresh(void);
+void ShellReSyncEdits(void);
+void ShellEditsTopmost(void);
 
 // LOT D : the settings modal draws on its OWN canvas - shell (rounded card + shadow +
 // glow) AND, since D-FULL step 2, every control face (buttons / pills / steppers).
@@ -1268,7 +1270,10 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
         }
         // v3 SHELL : surfaces are destroyed + recreated (the zones moved) and the
         // hover state is reset - the playbook's OnChartChange rule.
-        if (g_shell.Created()) g_shell.OnChartChange();
+        if (g_shell.Created()) {
+            g_shell.OnChartChange();
+            ShellReSyncEdits();      // Destroy() took the copy boxes with it
+        }
         ChartRedraw(0);
         return;
     }
@@ -1639,6 +1644,14 @@ void BuildDeckData(RCDeckData &d) {
     d.cfgSound      = g_eff_sound;
     d.cfgTelegram   = g_eff_telegram;
     d.cfgComfort    = g_eff_comfort;
+    // v3.25 : the terminal's own account facts, read-only, for the ACCOUNT
+    // section (the legacy Account tab had them ; v3 had dropped them all).
+    d.acctFirm      = AccountInfoString(ACCOUNT_COMPANY);
+    d.acctServer    = AccountInfoString(ACCOUNT_SERVER);
+    d.acctCurr      = AccountInfoString(ACCOUNT_CURRENCY);
+    d.acctLev       = (int)AccountInfoInteger(ACCOUNT_LEVERAGE);
+    d.marginUsed    = AccountInfoDouble(ACCOUNT_MARGIN);
+    d.freeMargin    = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
     d.cfgDiscipline = g_eff_discipline;
     d.lang          = g_lang;
     d.version       = RC_VERSION_STR;
@@ -1732,6 +1745,14 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_LOCK_TG,   Tr("shl_locktg"));
     g_shell.SetLabel(RCL_ROOM_SHORT, Tr("shl_roomshort"));
     g_shell.SetLabel(RCL_HELP_COLOURS, Tr("shl_colours"));
+    g_shell.SetLabel(RCL_SEC_CPTST,  Tr("shl_cptstate"));
+    g_shell.SetLabel(RCL_CPT_FIRM,   Tr("shl_cptfirm"));
+    g_shell.SetLabel(RCL_CPT_SERVER, Tr("shl_cptserver"));
+    g_shell.SetLabel(RCL_CPT_LEV,    Tr("shl_cptlev"));
+    g_shell.SetLabel(RCL_CPT_BAL,    Tr("shl_cptbal"));
+    g_shell.SetLabel(RCL_CPT_EQ,     Tr("shl_cpteq"));
+    g_shell.SetLabel(RCL_CPT_MUSED,  Tr("shl_cptmused"));
+    g_shell.SetLabel(RCL_CPT_FREEM,  Tr("shl_cptfreem"));
     g_shell.SetLabel(RCL_PAYOUT,    Tr("shl_payout"));
     g_shell.SetLabel(RCL_TARGET,    Tr("shl_target"));
     g_shell.SetLabel(RCL_LOCK_RTOOLS, Tr("shl_lockrtools"));
@@ -1877,7 +1898,19 @@ void ShellApplyCfg(const int id) {
     } else if (id == g_shell.CfgIdComfort()) {
         g_eff_comfort = !g_eff_comfort;
         GlobalVariableSet("RC_comfort", g_eff_comfort ? 1.0 : 0.0);
-        ApplyComfortScale(false);
+        // v3.25 : this was ApplyComfortScale(false), which REFUSES to touch a
+        // fixed scale that is not ours - so switching the padding back ON did
+        // nothing at all, and switching it OFF left the chart locked on our
+        // own frozen scale. ON forces ; OFF gives the chart back, but only if
+        // the scale still is the one we set (never clobber a manual zoom).
+        if (g_eff_comfort) ApplyComfortScale(true);
+        else if (g_cs_max > g_cs_min) {
+            const double tol0 = (g_cs_max - g_cs_min) * 1e-3;
+            if (MathAbs(ChartGetDouble(0, CHART_FIXED_MIN) - g_cs_min) < tol0 &&
+                MathAbs(ChartGetDouble(0, CHART_FIXED_MAX) - g_cs_max) < tol0)
+                ChartSetInteger(0, CHART_SCALEFIX, false);
+            g_cs_min = 0.0; g_cs_max = 0.0;
+        }
     } else if (id == g_shell.CfgIdDiscipline()) {
         g_eff_discipline = !g_eff_discipline;
         GlobalVariableSet("RC_discipline", g_eff_discipline ? 1.0 : 0.0);
@@ -1969,7 +2002,18 @@ void ShellArmSelfLock(void) {
 // to be an OBJ_EDIT. The shell reserves the rect (and a no-op click zone under
 // it) ; the host owns the object, so its lifecycle stays with the other
 // RC_-prefixed objects and it dies with the shell.
+// v3.25 - the boxes are never deleted, they are COVERED. MT5 paints chart
+// objects in CREATION order, so a re-created sidebar bitmap paints over the
+// older OBJ_EDIT ; the sync below finds the object and only MOVES it, so it
+// stays underneath for good. (v3.24 blamed Destroy()/ObjectsDeleteAll - that
+// was wrong : OnChartChange never calls it.) ShellEditsTopmost() deletes them
+// after every surface rebuild so the sync re-creates them on top. The last
+// values are kept so a rebuild can restore both without a model pass.
+double g_last_sug_lot = 0.0;  int g_last_sug_dig = 2;
+double g_last_max_lot = 0.0;  int g_last_max_dig = 2;
+
 void ShellSyncLotEdit(const double lot, const int digits) {
+    g_last_sug_lot = lot; g_last_sug_dig = digits;
     const string id = RC_PREFIX + "V3_copylot";
     int x, y, w, h;
     if (!g_shell.LotEditRect(x, y, w, h)) {
@@ -2135,6 +2179,7 @@ void ShellApplyCascade(const int row, const int dir) {
 }
 // v3.04 : the MAX lot gets its own copy box, right under the suggested one.
 void ShellSyncMaxEdit(const double lot, const int digits) {
+    g_last_max_lot = lot; g_last_max_dig = digits;
     const string id = RC_PREFIX + "V3_copymax";
     int x, y, w, h;
     if (!g_shell.MaxEditRect(x, y, w, h)) {
@@ -2161,6 +2206,26 @@ void ShellSyncMaxEdit(const double lot, const int digits) {
     ObjectSetInteger(0, id, OBJPROP_BGCOLOR, g_shell.EditBackColor());
     ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_shell.EditLineColor());
     ObjectSetString (0, id, OBJPROP_TEXT, DoubleToString(lot, digits));
+}
+
+// One call restores both copy boxes after the shell has been re-created.
+void ShellReSyncEdits(void) {
+    ShellEditsTopmost();
+    ShellSyncLotEdit(g_last_sug_lot, g_last_sug_dig);
+    ShellSyncMaxEdit(g_last_max_lot, g_last_max_dig);
+}
+
+// The shell re-created its canvases : they now paint OVER the two native edit
+// boxes. Deleting them here makes the next sync re-create them, i.e. newest,
+// i.e. on top. Cheap : it only fires when the generation actually moved.
+void ShellEditsTopmost(void) {
+    static int s_gen = -1;
+    if (!g_shell.Created()) return;
+    const int gen = g_shell.SurfGen();
+    if (gen == s_gen) return;
+    s_gen = gen;
+    ObjectDelete(0, RC_PREFIX + "V3_copylot");
+    ObjectDelete(0, RC_PREFIX + "V3_copymax");
 }
 // v3.06 PARITY : status-change alerts (sound + Telegram) used to ride inside
 // UpdateRow, in the legacy refresh the shell short-circuits - so they had gone
@@ -2247,6 +2312,7 @@ void ShellRefresh(void) {
     }
     ShellRuleAlerts(d);                  // v3.06 : sound + Telegram were silent under v3
     if (g_shell.Created()) g_shell.Tick();
+    ShellEditsTopmost();                       // a rebuilt canvas would cover them
     ShellSyncLotEdit(d.sugLot, d.lotDigits);   // AFTER the render : the rect is known
     ShellSyncMaxEdit(d.maxLot, d.maxLotDigits);
 }
@@ -4736,6 +4802,14 @@ void InitI18n(void) {
         "basket",
         "panier",
         "cesta");
+    AddTr("shl_cptstate",  "TERMINAL",   "TERMINAL",    "TERMINAL");
+    AddTr("shl_cptfirm",   "Broker",     "Courtier",    "Bróker");
+    AddTr("shl_cptserver", "Server",     "Serveur",     "Servidor");
+    AddTr("shl_cptlev",    "Leverage",   "Levier",      "Apalancamiento");
+    AddTr("shl_cptbal",    "Balance",    "Solde",       "Saldo");
+    AddTr("shl_cpteq",     "Equity",     "Équité",      "Patrimonio");
+    AddTr("shl_cptmused",  "Margin used","Marge utilisée", "Margen usado");
+    AddTr("shl_cptfreem",  "Free margin","Marge libre", "Margen libre");
     AddTr("shl_colours",
         "COLOURS",
         "COULEURS",
@@ -5803,7 +5877,7 @@ void ApplySettingsChange(void) {
     // v3 SHELL : DestroyAllObjects wipes the WHOLE "RC_" namespace - the shell's
     // canvases included (RC_V3_*). Recreate them here or the rail would vanish
     // until the next chart change (seen on the lock -> clear transition).
-    if (g_shell.Created()) g_shell.OnChartChange();
+    if (g_shell.Created()) { g_shell.OnChartChange(); ShellReSyncEdits(); }
     // V1.29 S : CHART elements live on the price area (NOT the panel), so a popup
     // change must reflect on them IMMEDIATELY - refresh them ALWAYS (no modal
     // bleed-through, they're off-panel). Only RefreshPanel (the panel rows) stays

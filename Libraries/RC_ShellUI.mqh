@@ -64,6 +64,11 @@ struct RCDeckData {
    string planTag, sizeTag; // "INST" / "2K"
    int    splitPct;
    bool   riskTools;        // the prop toolkit is ON (Personal can switch it off)
+   // account state : what the terminal itself says about this login. The
+   // legacy Account tab showed it ; the v3 panel had dropped all of it.
+   string acctFirm, acctServer, acctCurr;
+   int    acctLev;                       // 1:N
+   double marginUsed, freeMargin;        // $ ; the % lives in freeMarginPct
    // limits (cell LIM)
    double limRatio;         // 0..1 : worst consumption among the ACTIVE limits
    double roomMoney;        // $ to the nearest active limit (-1 = no limit applies)
@@ -246,7 +251,9 @@ enum ERCLabel {
    RCL_NEWS_SOURCE, RCL_HELP_RO1, RCL_HELP_RO2, RCL_SECS_RESIZE, RCL_RTOOLS_OFF,
    RCL_BAND_WKND, RCL_MINS_LEFT, RCL_BAND_RAISE, RCL_BAND_SLLOW, RCL_BAND_LOCKED,
    RCL_BAND_TRADES, RCL_BAND_SLOW,
-   RCL_NEWS_HI, RCL_NEWS_MED, RCL_LOCK_RTOOLS, RCL_LOCK_VIOL
+   RCL_NEWS_HI, RCL_NEWS_MED, RCL_LOCK_RTOOLS, RCL_LOCK_VIOL,
+   RCL_SEC_CPTST, RCL_CPT_FIRM, RCL_CPT_SERVER, RCL_CPT_LEV, RCL_CPT_BAL,
+   RCL_CPT_EQ, RCL_CPT_MUSED, RCL_CPT_FREEM
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -290,6 +297,8 @@ private:
    RCTheme    m_t;
    string     m_pfx;
    bool       m_created, m_haveData;
+   int        m_surfGen;     // bumped by CreateSurfaces : the host re-creates
+                             // its native edit boxes so they stay ON TOP
    int        m_themeIdx;        // 0..5 (palette*2 + light)
    int        m_state;           // 0 = rail only, 1 = one section, 2 = full sidebar
    int        m_sec;             // active section = its RZ_RAIL_* id
@@ -309,7 +318,7 @@ private:
    // v3.09 : measured height of each section (0 = never drawn yet). The panel
    // surface is sized from it, so a body can no longer be painted outside its
    // own bitmap - the defect that made the floating table vanish.
-   int        m_secH[8];
+   int        m_secH[9];        // 0..7 = one section ; 8 = the FULL stack
    bool       m_relayout;        // a measurement moved : re-create the surfaces
    int        m_dragOffX, m_dragOffY;
    int        m_sideX, m_sideY, m_sideH;
@@ -462,7 +471,7 @@ private:
       const int msec = (m_state == 1 ? SecIdx(m_sec) : -1);
       const int meas = (msec >= 0 ? m_secH[msec] : 0);
       m_sideH = (meas > 0 ? meas
-               : (m_state == 2 ? RCS_SIDE_FULLH
+               : (m_state == 2 ? (m_secH[8] > 0 ? m_secH[8] : RCS_SIDE_FULLH)
                  : ((m_state == 1 && (m_sec == RZ_RAIL_CFG || m_sec == RZ_RAIL_CPT))
                     ? RCS_SIDE_TALLH : RCS_SIDE_SECH)));
       if(m_sideH > m_chH - 24) m_sideH = m_chH - 24;
@@ -1060,6 +1069,26 @@ private:
                 IntegerToString(m_d.minDaysDone) + " / " + IntegerToString(m_d.minDays),
                 (m_d.minDaysDone >= m_d.minDays ? m_t.ok : m_t.warn));
       y = KV(y, L(RCL_ACCOUNT_N, "Account"), IntegerToString((int)m_d.login), m_t.dim);
+      // v3.25 : what the TERMINAL says about this login. The legacy Account
+      // tab carried it and the v3 panel had dropped all of it (JR : the account
+      // facts used to be in the menu and are not there any more).
+      y += 6;
+      SecHead(L(RCL_SEC_CPTST, "TERMINAL"), y);
+      if(StringLen(m_d.acctFirm) > 0)
+         y = KV(y, L(RCL_CPT_FIRM, "Broker"), m_d.acctFirm, m_t.text);
+      if(StringLen(m_d.acctServer) > 0)
+         y = KV(y, L(RCL_CPT_SERVER, "Server"), m_d.acctServer, m_t.text);
+      if(m_d.acctLev > 0)
+         y = KV(y, L(RCL_CPT_LEV, "Leverage"), "1:" + IntegerToString(m_d.acctLev), m_t.text);
+      y = KV(y, L(RCL_CPT_BAL, "Balance"),
+             DoubleToString(m_d.balance, 2) + " " + m_d.acctCurr, m_t.text);
+      y = KV(y, L(RCL_CPT_EQ, "Equity"),
+             DoubleToString(m_d.equity, 2) + " " + m_d.acctCurr,
+             (m_d.equity < m_d.balance ? m_t.warn : m_t.ok));
+      y = KV(y, L(RCL_CPT_MUSED, "Margin used"),
+             DoubleToString(m_d.marginUsed, 2) + " " + m_d.acctCurr, m_t.text);
+      y = KV(y, L(RCL_CPT_FREEM, "Free margin"),
+             DoubleToString(m_d.freeMargin, 2) + " " + m_d.acctCurr, m_t.text);
       // v3.01 parity : profit target - on a trailing (Instant) profile it is the
       // PAYOUT eligibility threshold, not a challenge target to pass.
       if(m_d.targetCap > 0.0) {
@@ -1219,14 +1248,27 @@ private:
          order[4] = RZ_RAIL_DISC; order[5] = RZ_RAIL_CPT;  order[6] = RZ_RAIL_CFG;  order[7] = RZ_RAIL_HELP;
          int shown = 0;
          for(int i = 0; i < 8; i++) {
-            if(y > H - 60) {                               // honest truncation, never overflow
-               m_side.Text(18, y, "+" + IntegerToString(8 - shown) + " " + L(RCL_SECS_RESIZE, "sections : enlarge the window"),
-                           A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
-               break;
-            }
+            if(y > H - 60) break;      // no room left : the notice is drawn below
             y = SecBody(order[i], y) + 8;
             shown++;
          }
+         // The notice used to be drawn AT y - that is, exactly where the bitmap
+         // ends - so the one line whose job is to say "there is more" was itself
+         // cut off. A section can also overflow from the inside (its body is
+         // drawn in one go), so count what is missing and say it at a FIXED spot.
+         if(shown < 8)
+            m_side.Text(W / 2, H - 15, ShortToString((ushort)0x25BC) + " +" +
+                        IntegerToString(8 - shown) + " " +
+                        L(RCL_SECS_RESIZE, "sections : enlarge the window"),
+                        A(m_t.warn), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
+         // MEASURE the stack. Everything fitted : take the exact height.
+         // Something was cut and the chart still has room : grow a step and
+         // re-lay out. Already at the chart ceiling : stop growing and let
+         // the "+N sections" line above say so - a silent loop here would
+         // re-create the surfaces on EVERY frame.
+         const int wantF = (shown >= 8 ? y + 14
+                            : (m_sideH < m_chH - 24 ? m_sideH + 200 : m_secH[8]));
+         if(wantF > 0 && wantF != m_secH[8]) { m_secH[8] = wantF; m_relayout = true; }
       } else {
          y = SecBody(m_sec, y);
          // MEASURE : the first frame of a section may be drawn at the default
@@ -1582,11 +1624,14 @@ private:
       m_band.Create(m_pfx + "band", 0, 0, m_chW, RCS_BAND_H); // safety band : above the UI
       m_band.Begin(); m_band.Commit();
       m_tip.Create(m_pfx + "tip", 0, 0, RCS_TIP_W, RCS_TIP_H); // created LAST = above everything
+      m_surfGen++;   // every canvas here is now NEWER than any object the host
+                     // created before : MT5 paints in creation order, so the
+                     // host must re-create its OBJ_EDIT to get back on top.
    }
 
 public:
    void Init(void) {
-      m_created = false; m_haveData = false; m_pfx = "";
+      m_created = false; m_haveData = false; m_pfx = ""; m_surfGen = 0;
       m_themeIdx = 0; m_state = 0; m_sec = RZ_RAIL_LIM;
       m_zn = 0; m_pendKill = false;
       m_chW = 1200; m_chH = 800;
@@ -1626,7 +1671,7 @@ public:
       m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
       m_closeNotice = false;
       m_lastLeft = false; m_pendTheme = -1;
-      for(int si = 0; si < 8; si++) m_secH[si] = 0;
+      for(int si = 0; si < 9; si++) m_secH[si] = 0;
       m_relayout = false;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
@@ -1723,6 +1768,11 @@ public:
    int ZidCfg(const int i)   const { return RZ_CFG_PAL + i; }         // 0..9
    int ZidCptTip(void) const { return RZ_TIP_CPT; }
    int ZidHelpTip(void) const { return RZ_TIP_HELP; }
+   //--- how many times the canvases have been (re-)created. The host watches
+   //--- this : a re-created bitmap PAINTS OVER an older OBJ_EDIT (creation
+   //--- order rules painting ; OBJPROP_ZORDER only ranks mouse hits), so the
+   //--- copy boxes must be deleted and re-made after every rebuild.
+   int  SurfGen(void) const { return m_surfGen; }
    //--- copy-lot : true + rect when the host must show its native edit box ----
    bool LotEditRect(int &x, int &y, int &w, int &h) const {
       if(!m_lotEditOn) return false;
