@@ -17,7 +17,7 @@ folder that holds the includes and the resource in those exact places.
 
 | Role | Path |
 |---|---|
-| Build tree (MT5 data folder) | `%APPDATA%\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\MQL5\` |
+| Build tree (MT5 data folder) | `%APPDATA%\MetaQuotes\Terminal\<TERMINAL-ID>\MQL5\` |
 | Compiled source | `…\MQL5\Indicators\mql5_market\RiskCockpit\RiskCockpit.mq5` |
 | Includes (all four) | `…\MQL5\Libraries\` : `CChallengeProfileCatalog.mqh`, `CPyramidEngine.mqh`, `JR_CanvasUI.mqh`, `RC_ShellUI.mqh` |
 | Embedded resource | `RiskCockpit_logo.bmp`, next to the `.mq5` |
@@ -85,6 +85,463 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 ## 2. Log
 
 ## 3.x — the v3 shell becomes the interface
+
+### v3.21.33 — la queue de la relecture
+
+- **Cliquer une ligne de position ramène le graphique sur son symbole** — le
+  comportement de l'ancien panneau. La réécriture avait rangé ces lignes dans
+  un fourre-tout « lignes d'information » qui se contente d'avaler le clic.
+  Vaut pour la section POSITIONS et pour le tableau flottant.
+- **Le conseiller pyramide parlait français quelle que soit la langue** : ses
+  neuf phrases étaient écrites en dur. Elles passent par la table i18n.
+- **Les drapeaux « 2e strike » étaient globaux** alors que la taille, la phase
+  et le plan sont par login : une violation suivait le trader sur tous ses
+  autres comptes. Ils sont désormais écrits et lus par login, avec la valeur
+  globale comme graine de migration.
+- **(0,0) est un coin légitime** : le tableau flottant y était traité comme
+  « jamais placé » et revenait à sa position par défaut dès qu'on l'y déposait.
+  Sentinelle à −1.
+- **`CHART_EVENT_MOUSE_MOVE` est rendu à `OnDeinit`** : le drapeau était pris à
+  l'attachement et jamais restitué.
+
+**Ce qui reste ouvert et qui n'est pas de mon ressort** :
+
+- l'identifiant de compte est toujours dans **l'historique git** des deux
+  branches (le purger = réécriture + `force-push`, donc casse des clones) ;
+- la **LICENSE** (« évaluation seule, non commerciale, aucun usage dans un
+  produit ») contredit le README, qui explique comment installer l'outil et
+  trader avec — et ne dit rien du `.ex5` fourni. Un texte juridique ne se
+  corrige pas en passant.
+
+### v3.20.32 — le travail lourd deux fois par seconde, et les infobulles coupées
+
+- **Les lignes SL/TP étaient reconstruites sur TOUS les graphiques ouverts à
+  chaque rafraîchissement** (500 ms), et depuis v3.19 à chaque clic en plus.
+  C'est exactement la charge que l'ancien code plafonnait à 30 s en la
+  qualifiant de « cause n°1 de gel ». Cadence ramenée à 2 s ; un changement de
+  position les rafraîchit toujours immédiatement via `OnTradeTransaction`.
+- **Le bloc news scannait le calendrier trois fois par appel** et reconstruisait
+  une liste de 64 entrées, à 2 Hz, dans le thread d'interface. Cache de 15 s,
+  avec le compte à rebours qui continue de descendre entre deux scans — il est
+  affiché en minutes, la mise en cache est invisible.
+- **Les infobulles étaient tronquées en plein milieu** : la description était
+  écrite sur UNE ligne dans un bitmap fixe de 236 px, donc coupée au-delà d'une
+  cinquantaine de caractères — dans les trois langues, et le français est plus
+  long que l'anglais. Deux lignes avec retour sur espace, bulle à 58 px, et une
+  marque explicite si ça déborde encore.
+
+### v3.18.30 / v3.19.31 — la suite des 46 constats
+
+**Le gate avait deux faux OK, corrigés en premier** — un instrument qui ment est
+pire que pas d'instrument :
+
+- le motif « chemin local » exigeait des **backslashes doubles** : un chemin
+  utilisateur écrit normalement rendait **False**. Le contrôle de fuite le plus
+  important d'un dépôt public ne matchait rien, et l'auto-test ne l'exerçait
+  jamais — il n'injectait qu'une chaîne « login ». Motif réécrit (un OU deux
+  backslashes, identifiant de terminal ajouté), injection ajoutée à l'auto-test.
+- le contrôle des zones ne voyait que `ZAdd(..., RZ_LITTÉRAL)` : **toute zone
+  passée en paramètre d'un helper** (`Toggle`, `LimRow`, `KV`, `Stepper`) lui
+  était invisible. Il annonçait 119/119 alors qu'il y en a **149**.
+
+Ce que le gate réparé a trouvé dans la seconde :
+
+1. **Trois bascules dessinées, cliquables et MORTES** — `RZ_CFG_MVIOL`,
+   `RZ_CFG_RVIOL`, `RZ_CFG_BE` sont déclarées **après** les add-ons, hors du
+   bloc contigu du dispatch : leur clic était avalé, l'hôte jamais appelé.
+   ⚠️ **Correction de v3.11** : j'y écrivais que l'hôte *ignorait* les deux
+   « Violation » sur un profil non restreignable. C'était faux — **leur clic ne
+   l'atteignait jamais**. Diagnostic plausible, et faux.
+2. **L'identifiant du terminal MT5** était publié dans HISTORY.md → masqué.
+
+Autres correctifs du même lot :
+
+- **position du tableau flottant** restaurée *après* `Create()` : le bitmap
+  restait à sa place par défaut pendant que les zones de clic partaient à la
+  position mémorisée — visible ici, cliquable là. Lue avant `Create`, ré-ancrée.
+- **état masqué** persisté (la croix s'annulait à chaque changement de TF) ·
+  **cycleur de jour** basé sur `DaysInMonth` partagé (les années bissextiles
+  étaient fausses) · **`RiskCockpit_logo.bmp` livré** : le README demandait de
+  compiler sans la ressource que la source embarque · clé i18n dupliquée ·
+  apostrophe manquante dans le texte de conformité.
+- **le drag exige désormais une TRANSITION d'appui** : un pan du graphique qui
+  traversait la bande de 24 px de l'en-tête capturait le tableau et coupait le
+  défilement jusqu'au relâchement.
+- **le thème choisi dans le shell mourait avec la frame** : jamais persisté
+  (régression contre l'ancien panneau) et les lignes du graphique gardaient
+  l'ancienne palette. Il remonte à l'hôte, qui l'écrit et reteinte le chart.
+- **fausse alerte RED** : `rule_margin_pt` était une ligne de TEXTE sans alerte
+  dans l'ancien code ; je l'avais mise à alerter contre une bande *recommandée*
+  (20-30 %) — régler sa marge par trade à 40 % déclenchait un son RED contre un
+  chiffre qu'aucun écran n'affiche.
+- **les clics sont consommés immédiatement** : les intentions sont des slots
+  uniques lus au timer, donc deux clics dans une même période de rafraîchissement
+  n'en faisaient qu'un, sans retour visuel.
+
+⚠️ **Et un défaut dans MON PROPRE test** : le cas « les pertes ne baissent pas
+le plancher » comparait `RC_TrailingFloor(2100, 2000, 6)` **à lui-même** — il
+passait quelle que soit l'implémentation. Remplacé par une vraie attente
+(1980,00). Le script n'a toujours **jamais été exécuté**.
+
+### v3.17.29 - ce qu'une relecture adversariale a trouvé dans MON code
+
+Sept relecteurs indépendants ont lu le diff `main..dev` (16 versions livrées en
+un jour, zéro test utilisateur), puis chaque constat est passé en
+contre-expertise. J'ai re-vérifié chacun dans le code avant de toucher quoi que
+ce soit. Huit défauts confirmés, tous introduits par la réécriture :
+
+1. **La section AIDE mentait sur la version** : `d.version` était la chaîne
+   codée en dur `"3.02"` alors que le binaire était `3.16`. **L'instruction de
+   test que j'avais donnée à JR — « AIDE doit dire 3.16 » — était donc fausse :
+   il aurait lu 3.02 et conclu que l'indicateur n'avait pas rechargé.** Une
+   seule constante désormais, `RC_VERSION_STR`, posée à côté du `#property`.
+2. **Toutes les alertes sonnaient PLUS TARD qu'avant la purge** : l'ancien code
+   avertissait à 70 % (risque, journalier, total), **50 % sur un total
+   *trailing*** — celui qui tue le compte — et 75 % (hyperactivité, msgs).
+   `ShellRuleAlerts` avait tout aplati à 80 %. Les seuils par règle sont
+   rétablis. Un outil de risque n'a pas le droit d'avertir plus tard.
+3. **Le self-lock n'avait plus aucune sortie** : le bouton de déverrouillage
+   est parti avec l'ancien panneau et rien ne l'a remplacé — jusqu'à 72 h
+   enfermé. La capsule devient le contrôle de libération quand le verrou est
+   actif (deux clics en 5 s, comme l'ancien double-confirm).
+4. **La ligne « Hyperactivité » enregistrait `RZ_NONE`** : `RZ_NONE` signifie
+   « rien touché », donc cliquer dessus tombait dans la règle du clic-à-côté
+   et **refermait la section**. Elle a son propre identifiant de survol.
+5. **Le cadenas était un carré vide** : `U+1F512` est hors du plan multilingue
+   de base et `ShortToString` prend un `ushort` — tronqué en `U+F512` (zone
+   privée). Le glyphe est retiré ; la teinte éteinte et la ligne de raison
+   disaient déjà « verrouillé ».
+6. **Un clic dans le panneau pouvait SUPPRIMER l'indicateur** : la navbar est
+   dessinée en premier, donc ses zones gagnent la première correspondance. Le
+   panneau collé en haut (`m_sideY = 0`) recouvre la navbar, et sa croix de
+   fermeture tombe à quelques pixels de la croix **RETIRER**. Les zones de
+   navbar sont maintenant exclues de tout clic qui atterrit dans le panneau.
+7. **`RC_show_news` était lue au démarrage et plus jamais écrite** : un
+   utilisateur v2 ayant coupé les news restait sans news pour toujours, sans
+   aucun contrôle pour les rallumer. La clé est supprimée au démarrage.
+8. **Le README promettait des alertes Telegram impossibles** : MQL5 interdit
+   `WebRequest` dans un indicateur (c'est exactement pourquoi `RCNewsFeeder`
+   est un *service*). L'envoi était tenté à chaque alerte et échouait en
+   `err=4014`. La bascule est désormais dessinée **verrouillée avec sa raison**,
+   l'appel est neutralisé, et le README le dit.
+
+Reste à trancher : 46 autres constats de gravité moyenne ou faible, et
+**29 contre-expertises n'ont jamais tourné** (limite de session atteinte en
+plein run) — ce lot n'est pas vérifié.
+
+### v3.16.28 - les formules de risque deviennent testables
+
+Les douze contrôles statiques ne regardent que la mécanique. **Le cœur — les
+chiffres qui décident si un compte est perdu — n'avait aucun test**, et le
+plancher trailing n'était vérifié que par un commentaire.
+
+- `Libraries/RC_Math.mqh` : les **8 fonctions pures** (aucun global, aucun
+  compte, aucun symbole) sortent de l'indicateur — seuils de statut, dates de
+  cycle, horodatages ISO 8601 du flux news, formats — plus
+  **`RC_TrailingFloor()`**, extrait de deux copies inline de la formule. Il
+  n'existe désormais qu'**une seule** implémentation du niveau où le compte est
+  perdu ; les deux appelants l'utilisent.
+- `Scripts/RC_SelfTest.mq5` : **30 cas**, à attacher à n'importe quel graphique.
+  Aucun compte requis, rien n'est modifié, une ligne par cas dans le journal.
+  Il inclut **le même** `RC_Math.mqh` que l'indicateur : ce qui est testé est
+  ce qui tourne, pas une réimplémentation — une vérification qui ne franchit
+  pas la frontière de langage ne vérifie rien.
+- Couverture : oracle FN Instant 2K (pic 2003.28 → plancher 1883.28), plafond
+  au break-even, pic sous la balance initiale, premier jour, garde-fous à zéro,
+  add-on 10 % ; les bornes 79/80/99/100 des statuts ; bascules de mois, d'année
+  et années bissextiles ; ISO 8601 avec décalage `-04:00` et forme `Z`.
+
+⚠️ **Le script compile (0/0) mais n'a jamais été exécuté** — MT5 est fermé
+depuis le crash. Sa première exécution en dira autant sur le test que sur le
+code : une attente fausse s'y verra comme un FAIL. J'ai relu chaque attente
+contre l'implémentation (seuils, bissextiles, sens des décalages horaires),
+mais relire n'est pas exécuter.
+
+### v3.15.27 - un numéro de compte MT5 traînait dans le dépôt PUBLIC
+
+Contrôle déclenché par l'ajout du `.ex5` au dépôt en v3.13 : un binaire est
+décompilable, donc il fallait savoir ce qu'il embarque. Scan des sources **et**
+du binaire (ASCII + UTF-16), avec contrôle positif préalable — sans lui, un
+verdict « propre » ne vaut rien.
+
+- **Trouvé** : un commentaire portait un **numéro de compte MT5 en clair**
+  (masqué ici : un changelog qui cite la valeur la republie), avec la taille et
+  son equity, dans un commentaire du dépôt public. Le mandat l'interdit
+  explicitement. Retiré ; l'information utile (l'oracle de calcul du plancher)
+  reste, l'identifiant part.
+- **Rien dans le `.ex5`** : les commentaires ne sont pas compilés, et le scan
+  binaire ne remonte aucun jeton, chemin local, e-mail ni identifiant.
+- Les 12 autres nombres à 8 chiffres sont des **numéros d'articles
+  `help.fundednext.com`** cités en source des règles — pas des secrets.
+
+⚠️ **L'historique git contient toujours ce numéro** (commits antérieurs). Le
+retirer demanderait une réécriture d'historique + `push --force` sur un dépôt
+public, ce qui casse les clones existants : **décision de JR, pas la mienne.**
+Portée réelle : un login MT5 seul n'ouvre aucun accès (il faut le mot de passe
+et le serveur), mais il identifie un compte prop et n'a rien à faire là.
+
+### v3.14.26 - trois réglages qui ne faisaient plus rien, et des infobulles muettes
+
+**Réglages morts** (un réglage qui n'agit pas est un bug vu du siège de
+l'utilisateur — même famille que `InpAnchorX` retiré avec l'ancien panneau) :
+
+- **`InpEnablePyramidSafe` — régression de ma part** : en v3.06 j'ai ramené le
+  conseiller pyramide dans le shell **sans redemander si l'utilisateur l'avait
+  activé**. Il s'affichait donc même désactivé. L'interrupteur est réhonoré.
+- **`InpSoundOK`** : le fichier son « retour à OK » était réglable et n'a
+  **jamais** été joué — `TryFireSoundAlert` ne connaissait que WARN et RED. Il
+  sonne maintenant quand une règle repasse sous sa limite (jamais au démarrage :
+  l'armement des alertes garde sa temporisation).
+- **`InpRowHeight`** : géométrie d'un panneau qui n'existe plus → retiré.
+  Audit : **45 inputs, 0 mort.**
+
+**Infobulles de famille muettes** : `SetTip` est indexé par zone, donc une aide
+poussée sur le premier membre (`tip_posrow` sur `RZ_POS_ROW0`) laissait les
+rangs 1..7 **silencieux** — survoler la 1re position expliquait, survoler la 2e
+n'affichait rien. `TipText` normalise désormais les familles (positions,
+lignes flottantes, boutons CLOSE) sur leur premier membre. Cinq zones qui
+n'avaient **aucune** aide en ont une (champ de copie du lot, poignée de
+déplacement, croix de masquage, objectif de payout, msgs serveur).
+
+Restent sans aide **60 zones qui n'en ont pas besoin** : items de menu (le nom
+*est* l'aide), `+`/`−` des steppers et des cyclers, add-ons nommés en clair.
+
+Le service compagnon `RCNewsFeeder` a été recompilé au passage : `0 errors`.
+
+### v3.13.25 - ménage post-purge, et un trou i18n que le rituel a débusqué
+
+Nettoyage de ce que la suppression de l'ancien shell avait laissé derrière :
+
+- **105 clés i18n mortes** retirées (sur 336) — 4 chaînes chacune, dans un
+  binaire public décompilable — plus **21 déclarations mortes** (`struct
+  RCHit`, les 7 `RCF_*`, `VerdictResult`, `g_settings_tab`, `g_chip_*`,
+  `RC_TITLE_HEIGHT`…) et 5 `SetLabel` que plus aucun `L()` ne lisait.
+  **5753 → 5570 lignes.**
+- Critère de suppression prudent : une clé n'est morte que si son littéral
+  n'apparaît **nulle part** ailleurs (un `Tr(cond ? "a" : "b")` échappe à une
+  recherche sur `Tr("x")`) et qu'aucun préfixe dynamique ne peut la construire.
+
+**Deux erreurs attrapées par les contrôles, pas par le compilateur** — `Tr()`
+renvoie la clé brute en secours, donc rien n'échoue à la compilation :
+
+1. Ma boucle de suppression cherchait une ligne finissant par `);` ; les
+   entrées suivies d'un commentaire (`); // E2 : was WARN`) ne matchaient pas,
+   et la boucle **avalait les entrées voisines** — `chip_red`, `chip_warn` et
+   `ins_tip_floor`, bien vivantes, étaient parties avec. Le contrôle « toute
+   clé demandée existe-t-elle ? » les a rendues.
+2. La sonde d'accents du rituel est tombée à **0** sur « Éligibilité ». En
+   creusant : `RCL_PAYOUT` et `RCL_TARGET` **n'avaient jamais eu de
+   traduction** depuis leur création — le shell les appelle dans un ternaire
+   (`L(trailing ? RCL_PAYOUT : RCL_TARGET, …)`), angle mort de mon audit.
+   En FR et en ES, la section COMPTE affichait donc de l'anglais. Corrigé, et
+   l'audit des libellés parcourt désormais l'expression entière : **131 ids
+   demandés, 131 poussés**.
+
+`Result: 0 errors, 0 warnings` · 0 clé demandée introuvable · 0 libellé sans
+traduction.
+
+### v3.12.24 - le plancher trailing alerte à l'approche
+
+Le plancher (`min(pic de balance − perte permise, balance initiale)`) est le
+niveau où **le compte est perdu**. Il s'affichait en gris neutre, quelle que
+soit la distance : la donnée la plus grave du panneau était la seule à ne rien
+signaler. Il prend maintenant la couleur du ratio de DD total — mêmes seuils
+80 % / 100 % que toutes les autres limites, aucune métrique inventée — et
+passe en gras dès la zone d'alerte.
+
+### v3.11.23 - deux boutons FANTÔMES : cliquables, sans effet, sans un mot
+
+Audit demandé par JR (« être sûr que tous les boutons marchent »), poussé au
+delà du câblage : non pas « la zone a-t-elle un handler » mais **« l'hôte
+agit-il vraiment, dans TOUS les états ? »**. Deux contrôles échouaient :
+
+- **« Outils de risque »** : `ShellApplyCfg` ne l'applique que
+  `if (PlanIsPersonal())`. Sur un plan prop — le cas de JR — le clic ne faisait
+  **rien**, et rien ne le disait.
+- **« Violation marge » / « Violation risque »** : sur un profil que
+  `ProfileCanBeRestricted()` refuse, la résolution suivante remet les deux
+  drapeaux à `false` : la bascule s'inversait puis revenait aussitôt.
+
+Correctif : `Toggle()` accepte un état **verrouillé** — cadenas, teinte éteinte,
+et la **raison écrite sous la ligne** (traduite EN/FR/ES). Le réglage garde sa
+place (il existe), mais il ne ressemble plus à un bouton qui agit. Même règle
+que le bouton CLOSE désactivé du tableau flottant.
+
+Le reste de l'audit ne trouve rien : steppers **6/6 · 5/5 · 4/4** lignes
+affichées ↔ appliquées, cascade **5/5**, cycle **3/3**, et les add-ons
+parcourent les 7 drapeaux dans le **même ordre** des deux côtés (un décalage
+aurait basculé un add-on à la place d'un autre, sans erreur visible).
+
+`Result: 0 errors, 0 warnings` · 129 libellés utilisés, **0 sans traduction**.
+
+### v3.10.22 - le panneau se dimensionne sur ce qu'il affiche
+
+Même mécanisme que le bug du tableau flottant signalé par JR, resté en place
+ailleurs : en mode **section unique**, `RenderSide` dessinait le corps sans
+jamais vérifier qu'il tenait. Tout ce qui dépassait `m_sideH` était peint
+**hors du bitmap** — invisible, sans un mot. Le mode sidebar, lui, tronquait
+déjà honnêtement ; c'est ce qui a masqué le trou.
+
+- Chaque section **se mesure** à son premier rendu (`m_secH[8]`), et cette
+  mesure dimensionne la surface pour toutes les frames suivantes. La boucle
+  converge en une frame : la hauteur mesurée devient la hauteur créée, qui
+  redonne la même mesure.
+- Si la section reste plus haute que le graphique ne le permet, elle **le
+  dit** (`▼ agrandis la fenêtre`) au lieu de perdre sa fin.
+- Les clics fantômes sont déjà couverts : le filtre de confinement borne les
+  zones à la hauteur peinte, donc une zone tronquée n'est pas cliquable.
+
+La section POSITIONS venait justement de grossir (conseiller pyramide), et
+c'est elle qui aurait débordé la première sur un petit graphique.
+
+Compilation `0 errors, 0 warnings` ; audits i18n inchangés (157/192 libellés,
+149/192 zones, 0 identifiant sans traduction).
+
+### v3.09.21 - les accents sont PROUVÉS, sans allumer le terminal
+
+La v3.08 laissait un doute assumé : impossible de vérifier que les accents
+survivaient au compilateur, faute d'instrument. Il en existait un.
+
+- **Les `#property` sont stockées EN CLAIR (UTF-16LE, non compressées) dans
+  l'en-tête du `.ex5`** — contrairement aux chaînes du corps, qui sont
+  compressées et rendaient ma première sonde muette dans les deux sens.
+- Protocole : `#property copyright` porte temporairement
+  `ENCPROBE RÈGLES Année señal boîte à outils`, compilation, puis recherche de
+  la chaîne dans le binaire **et** de sa variante mojibake (`utf-8` relu en
+  `latin-1`).
+- **Contrôle positif d'abord** : `ENCPROBE` doit être trouvé, sinon
+  l'instrument ne mesure rien et on ne conclut pas. Ce garde-fou a servi : la
+  1re tentative passait par `#property description`, qui **n'est pas** stockée
+  en clair → verdict INDÉTERMINÉ, aucune conclusion tirée.
+- **Résultat : chaîne accentuée trouvée telle quelle · variante mojibake
+  absente ⇒ MetaEditor lit bien la source en UTF-8 grâce au BOM.**
+- Les deux sondes sont retirées (`copyright` restauré à l'identique, `Print`
+  d'`OnInit` supprimé : la preuve statique vaut mieux qu'une ligne de journal
+  qui attend un rechargement).
+
+⚠️ Ce que cela ne prouve pas : le RENDU à l'écran (police, largeur des
+capsules). Ça, seule une capture de JR le dira.
+
+### v3.08.20 - les vrais accents en FR et en ES
+
+- **98 entrées de la table i18n ré-accentuées** (FR + ES) par table de mots +
+  surcharges de phrases pour les cas qu'un mot ne peut pas trancher : `a`/`à`,
+  `ou`/`où`, `esta`/`está`, `perdida` (adjectif) vs `pérdida` (nom).
+- **Le rapport a été relu ligne à ligne, et il contenait 6 faux positifs** que
+  la table de mots ne pouvait pas voir : `FundedNext recommande 20-30%` et
+  `resserre le plafond` sont des VERBES (pas d'accent), `cuenta perdida` est un
+  adjectif (pas `pérdida`), `Sección unica` devait être `única`, `no envia`
+  devait être `envía`, `seuil configure` devait être `configuré`. Corrigés par
+  surcharge, puis re-vérifiés un par un.
+- Fixes ponctuels : `boîte à outils`, `perdre à sa SL`, `À PROPOS`, `À VENIR`,
+  `(100 = sûr)`, `âge`, `présence`, `ámbar`, `Año`.
+
+⚠️ **La preuve bout-en-bout n'est PAS acquise.** J'ai sondé le `.ex5` pour y
+retrouver les chaînes accentuées : **aucune** — mais mon contrôle positif
+(chercher une chaîne ASCII connue) échoue aussi, donc **l'instrument ne mesure
+rien** : MQL5 compresse ses chaînes dans le binaire. Ce qui est établi : le BOM
+UTF-8 est bien unique (c'est la condition qui avait manqué en v2.14.06 et
+provoqué le mojibake), la compilation est propre, et le fichier portait déjà
+des accents rendus correctement en v2.x. Une sonde `Print` temporaire a été
+laissée dans `OnInit` : au prochain attachement, le journal MQL5 montrera
+`RÈGLES / PYRAMIDE / FENÊTRE NEWS` - accentué ou non. Elle sera retirée
+ensuite.
+
+🔎 **Constat de terrain : le terminal n'a PAS rechargé l'indicateur depuis
+13:48.** Le journal ne montre aucune ré-initialisation de RiskCockpit après
+cette heure, alors que 6 compilations ont suivi. JR teste donc un build
+antérieur à la parité, à la purge et à l'i18n : il faut retirer puis remettre
+l'indicateur (ou redémarrer le terminal) pour charger `3.08`.
+
+### v3.07.19 - i18n : tout ce que l'utilisateur lit devient traduisible
+
+Deux plafonds silencieux expliquaient l'essentiel du francais residuel :
+
+- **`RCS_L_MAX` valait 64 pour 95 identifiants de libelles** : `SetLabel()`
+  jetait sans un mot tout id >= 64, donc **31 libelles ne pouvaient PAS etre
+  traduits** et affichaient leur defaut francais dans les trois langues.
+- **`RCS_TIP_MAX` valait 96 pour 149 zones** : meme mecanique sur les
+  infobulles. Les deux gardes etaient des `if` sans `else` - un controle qui
+  echoue en silence n'est pas un controle. Plafonds portes a 192 **et** un
+  `Print` explicite si un id depasse.
+
+Ensuite le contenu :
+
+- **42 chaines codees en dur** passent par `L(id, "...")` : titres de sections,
+  etat discipline, section news, aide (legende, regle 40%, marge de survie,
+  mention read-only), reglages, messages du bandeau, cellules du rail.
+- **89 libelles pousses par l'hote en EN / FR / ES** (`AddTr`) - 62 nouveaux
+  identifiants + 27 qui existaient mais que l'hote n'avait jamais cables.
+- **Tous les defauts du code sont desormais en ANGLAIS** (regle JR : le code en
+  anglais), y compris les 58 infobulles de repli : l'anglais est la bonne
+  langue de repli pour un produit vendu surtout en anglais, et les traductions
+  arrivent de la table i18n de l'hote.
+- Deux infobulles mentaient encore ("selection : lot 2", promesse d'un lot
+  precedent) : les chips SYMBOLE et UNITE DE TEMPS ouvrent bien un menu.
+- `SecSoon` (placeholder mort depuis que chaque section a un corps) supprime.
+
+Audits : **157 ids <= 192**, **149 zones <= 192**, **0 id utilise sans
+traduction**, 0 cle `Tr()` sans `AddTr`, 0 langue vide, 1 seule chaine
+francaise restante corrigee. `Result: 0 errors, 0 warnings`.
+
+### v3.06.18 - suppression de l'ancien shell (ordre JR)
+
+> "si tu as tout recupere de toute facon on a l'ancienne version dans le git
+> donc supprime l'ancien shell"
+
+La parite ayant ete retablie en v3.06.17, l'ancien panneau est retire.
+
+- **70 fonctions supprimees** : canvas panel (`BuildPanel`, `RepaintCanvas`,
+  `DrawTitleBar`, `DrawAccountStrip`, `DrawRuleRow`, `DrawFooter`...), modal
+  de reglages (`DrawSettingsOverlay` et ses 12 helpers), moteur de hit-test
+  legacy (`HitAdd`/`HitTest`/`DrawFace`/`PaintFaces`), drag du panneau,
+  overlays (`DrawHardLock`, `DrawTiltBanner`), FX canvas, barres TF et
+  symboles recents, `UpdateRow`/`ComputeVerdict`/`UpdateClockBlinker`.
+- **26 globales mortes** retirees (ancre du panneau, etat du modal, tableau de
+  hit-test, canvases `g_kit`/`g_modal_kit`/`g_fx`, blinker...).
+- **4 inputs supprimes** : `InpShellV2` (l'interrupteur v2/v3 n'a plus de sens),
+  `InpAnchorX`, `InpAnchorY`, `InpPanelWidth` - un reglage qui ne fait plus rien
+  est un bug du point de vue de l'utilisateur.
+- `RefreshPanel()` ne fait plus que deleguer a `ShellRefresh()` : **un seul
+  chemin de rendu**, plus de garde `if (InpShellV2)` nulle part.
+- `CHARTEVENT_OBJECT_CLICK` n'a plus rien a router : le shell est 100 %
+  hit-testing, aucun controle natif ne subsiste (hors les 2 champs de copie).
+
+**Bilan : 8847 -> 5561 lignes (-3286, -37 %)**, `.ex5` 551 ko -> 406 ko (-26 %),
+compilation 14,0 s -> 6,8 s.
+
+Audits statiques apres purge : **119/119 zones cliquables gerees (0 orpheline)**,
+**124/124 champs du modele remplis**, 11/11 bascules de config avec leur branche
+hote, `Result: 0 errors, 0 warnings`.
+
+⚠️ Reste a valider par l'usage (JR) avant merge sur `main`.
+
+### v3.06.17 - parite : ce que la bascule v3 avait rendu MUET
+
+Audit demande par JR ("verifie que tu as bien ajoute tous les outils de
+l'ancien shell"). Trois fonctions vivaient DANS le corps legacy que la garde
+`if (InpShellV2) return;` court-circuite : elles ne bugguaient pas, elles ne
+tournaient plus du tout.
+
+- **Alertes son + Telegram MUETTES depuis la bascule** : elles etaient portees
+  par `UpdateRow()`, appele uniquement par l'ancien `RefreshPanel()`. Nouveau
+  `ShellRuleAlerts()` : memes seuils (80 % / 100 %), meme registre `g_rows`,
+  meme cooldown Telegram par regle, mais alimente par le modele du shell.
+- **Conseiller PYRAMIDE / panier perdu** : `RefreshPyramidLine()` ecrivait dans
+  `footer_l4`, un label qui n'existe plus. Refactorise en
+  `BuildPyramidLine(line, stat)` ; le shell l'affiche dans la section
+  POSITIONS (ou ajouter, ou remonter TOUS les SL, ce que ca verrouille).
+- **Risque de report week-end invisible** : l'horloge legacy clignotait
+  "WEEKEND HOLD / FLATTEN" et declenchait l'alerte. Le shell n'avait ni l'un
+  ni l'autre -> le bandeau de securite porte desormais l'avertissement, et
+  `FireWeekendAlert()` est appele depuis le chemin du shell.
+- **Lignes de break-even figees** : redessinees a chaque refresh du shell.
+- **Horloge de la navbar teintee** rouge/ambre quand un evenement contraignant
+  tombe dans l'heure (le compte a rebours, lui, reste dans la cellule NEWS).
+- Compilation : `Result: 0 errors, 0 warnings`.
+
+> Travail desormais sur la branche **dev** (regle JR du 04/09) ; `main` ne
+> recoit que les versions X.YZ abouties.
 
 ### v3.05.16 - le tableau flottant devient permanent (retour JR, 5 defauts)
 
