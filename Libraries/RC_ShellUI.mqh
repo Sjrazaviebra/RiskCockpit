@@ -381,6 +381,7 @@ private:
    int        m_tipZone, m_tipPendZone, m_tipDelayMs;
    int        m_tipPX, m_tipPY, m_tipPW, m_tipPH;
    uint       m_tipDue;
+   uint       m_tipShownAt;    // v3.43 : when the visible tooltip was promoted
    bool       m_tipsOn;
    int        m_lastMx, m_lastMy;
 
@@ -1667,11 +1668,22 @@ private:
       ChartRedraw();
    }
    void TipPendCheck(void) {
+      // v3.43 : a tooltip is hidden by OnMouseMove - and the moment the cursor
+      // leaves the CHART WINDOW, MT5 stops sending mouse-move events at all, so
+      // the last one stayed painted over the rows underneath for as long as the
+      // cursor was somewhere else on the screen. A tooltip is a hint, not a
+      // state : it expires on its own.
+      if(m_tipZone != RZ_NONE && m_tipShownAt != 0 &&
+         (int)(GetTickCount() - m_tipShownAt) > 6000) {
+         m_tipZone = RZ_NONE; m_tipShownAt = 0;
+         RenderTip(); ChartRedraw();
+      }
       if(m_tipPendZone == RZ_NONE || !m_tipsOn) return;
       if((int)(GetTickCount() - m_tipDue) < 0) return;      // uint arithmetic : safe across the 49d wrap
       if(!(m_lastMx >= m_tipPX && m_lastMx <= m_tipPX + m_tipPW &&
            m_lastMy >= m_tipPY && m_lastMy <= m_tipPY + m_tipPH)) { m_tipPendZone = RZ_NONE; return; }
       m_tipZone = m_tipPendZone; m_tipPendZone = RZ_NONE;
+      m_tipShownAt = GetTickCount();
       TipShowRect(m_tipPX, m_tipPY, m_tipPW, m_tipPH);
    }
 
@@ -1902,6 +1914,7 @@ public:
       m_navX = 0; m_navW = RCS_NAV_W;
       m_sideX = 0; m_sideY = 0; m_sideH = RCS_SIDE_SECH;
       m_tipZone = RZ_NONE; m_tipPendZone = RZ_NONE; m_tipDelayMs = 600; m_tipDue = 0;
+      m_tipShownAt = 0;
       m_tipPX = 0; m_tipPY = 0; m_tipPW = 0; m_tipPH = 0; m_tipsOn = true;
       m_lastMx = -1; m_lastMy = -1;
       // safe defaults before the first SetData

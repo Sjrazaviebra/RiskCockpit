@@ -86,6 +86,59 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.42.54 / v3.43.55 — le GLITCH news : un champ ajoute a l'instantane et a aucune des deux copies
+
+JR : « il y a un probleme de chargement sur la partie news et ca glitche entre FF
+et MT5 et c'est comme si ca recharge toutes les 2 secondes ».
+
+Le bloc news est calcule une fois puis **servi depuis un cache pendant 15 s** :
+la branche fraiche remplit les champs, la branche cachee les recopie depuis
+`s_newsCache`, et une reecriture les y remet. La v3.37 a ajoute `d.newsApplies`
+**a la branche fraiche et a AUCUNE des deux copies.**
+
+`d` est un local **remis a zero a chaque appel**. Donc :
+- **une image sur ~30** : `newsApplies` a sa vraie valeur ;
+- **toutes les autres** : `newsApplies` = false.
+
+Sur un profil ou la regle s'applique (**financé**), la section news, le titre de
+la legende et la pastille du rail basculaient donc entre « la regle et sa
+source » et « aucune regle news sur ce profil », **deux fois par seconde**. Et
+comme la **hauteur** de la section differe entre ces deux etats, le panneau se
+re-mesurait et **re-creait toutes ses surfaces a presque chaque image** — c'est
+la partie « ca recharge ».
+
+**Deux correctifs, et le second est celui qui compte :**
+
+1. `newsApplies` **sort du bloc cache**. C'est `g_profile.news_rule_applies`, un
+   champ de structure, **gratuit a lire**. Une valeur qui ne coute rien ne doit
+   jamais vivre derriere un cache : ca n'achete aucun temps et ca cree une facon
+   de se tromper.
+2. ⭐ **LE GATE APPREND CETTE CLASSE DE DEFAUT.** Un instantane est un
+   **contrat** : tout champ que la branche fraiche remplit doit etre lisible
+   depuis le cache **et** inscriptible dedans. Le compilateur n'en voit rien —
+   le champ existe, ca compile, et la valeur est simplement fausse cinq images
+   sur six. `audit.py` compare desormais les trois listes.
+   ⭐ **Le controle a attrape le defaut VIVANT avant sa correction** — il a dit
+   NON sur un vrai defaut, ce qui est la seule preuve qu'un instrument sait dire
+   non. Et l'injection ajoutee au self-test retire un champ de la reecriture :
+   **9 injections sur 9 detectees.**
+
+**Prouve a l'ecran** : profil bascule sur FundedNext / Stellar 1-Step /
+**Funded** (la ou la regle s'applique), section news ouverte, **14 images
+consecutives identiques** — source ForexFactory [FF], etat, fenetre, A VENIR.
+Le profil personnel de JR a ensuite ete **remis a l'identique**.
+
+**v3.43 — une infobulle qui ne partait jamais.** Une infobulle est cachee par
+`OnMouseMove`, quand le curseur entre dans une autre zone ou quitte toutes les
+zones. Mais des que le curseur quitte **la fenetre du graphique**, MT5 cesse
+d'envoyer le moindre evenement de souris : la derniere infobulle **restait
+peinte par-dessus les lignes du dessous**, aussi longtemps que le curseur etait
+ailleurs sur l'ecran. Vu en travaillant : une infobulle « Compte » posee sur les
+lignes du compte, et une infobulle « News » **recouvrant la ligne Source** — ce
+qui, vu de l'exterieur, ressemble exactement a « ca glitche entre FF et MT5 » :
+la valeur est la, une boite la cache, elle revient. Une infobulle est une aide,
+pas un etat : elle **expire toute seule au bout de 6 secondes**.
+
 ### v3.41.53 — le drawdown JOURNALIER etait reconstruit sur une somme incomplete
 
 `Live_DailyDdPct` reconstruit le solde de debut de journee comme
