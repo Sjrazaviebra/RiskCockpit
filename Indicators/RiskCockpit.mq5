@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.41"
+#property version "3.43"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.41"
+#define RC_VERSION_STR "3.43"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1670,6 +1670,14 @@ void BuildDeckData(RCDeckData &d) {
     // Three calendar scans + a 64-slot rebuild, at 2 Hz, in the UI thread. The
     // legacy code capped the same scan at 30 s because it froze the terminal.
     // The countdown is displayed in minutes : a 15 s cache is invisible.
+    // v3.42 : this one is read BEFORE the cache and outside it. It is a struct
+    // field, free to read - and v3.37 had put it inside the fresh branch and in
+    // neither copy, so it was true one frame in thirty and false the rest. The
+    // whole news area flipped between "the rule and its source" and "no news
+    // rule on this profile" twice a second, and the height change re-created
+    // every surface with it. A value that costs nothing must never sit behind a
+    // cache : it buys no time and creates a way to be wrong.
+    d.newsApplies = g_profile.news_rule_applies;
     static datetime s_newsScan = 0;
     static RCDeckData s_newsCache;
     if (TimeCurrent() - s_newsScan < 15 && s_newsScan > 0) {
@@ -1718,7 +1726,6 @@ void BuildDeckData(RCDeckData &d) {
     // ordered by time, capped at 6 (the section states the cap honestly).
     d.newsWinMin   = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5);
     d.newsSharePct = g_profile.news_profit_share_pct;
-    d.newsApplies  = g_profile.news_rule_applies;   // v3.37 : say N/A, don't invent
     d.newsN        = 0;
     {
         datetime ct[64]; string cc[64]; bool cr[64];

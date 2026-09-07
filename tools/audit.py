@@ -184,6 +184,35 @@ def run(root):
                if len(re.findall(r'\b' + m.group(1) + r'\b', code)) <= 1]
     report("reglages actifs", not dead_in, "" if not dead_in else "morts : " + " ".join(dead_in))
 
+    # 8b. A CACHED SNAPSHOT IS A CONTRACT. The news block computes its fields
+    #     once and serves them from s_newsCache for 15 s. Every field the fresh
+    #     branch fills must be readable OUT of the cache and writable INTO it.
+    #     Miss one and nothing complains : the field exists, it compiles, and the
+    #     value is wrong on every frame served from the cache. That is how
+    #     newsApplies came to flip twice a second between "there is a news rule"
+    #     and "there is none", re-laying out the whole panel with it.
+    blk = ""
+    m0 = re.search(r"static RCDeckData s_newsCache;", host)
+    m1 = re.search(r"end of the 15 s news cache", host)
+    if m0 and m1 and m1.start() > m0.start():
+        blk = host[m0.start():m1.start()]
+    if not blk:
+        report("instantane news complet", None, "bloc de cache news introuvable")
+    else:
+        rd = set(re.findall(r"d\.(news\w+)\s*=\s*s_newsCache\.", blk))
+        wr = set(re.findall(r"s_newsCache\.(news\w+)\s*=\s*d\.", blk))
+        # what the FRESH branch assigns : d.newsX = <anything that is not the cache>
+        fresh = set()
+        for f, rhs in re.findall(r"d\.(news\w+)\s*=\s*([^;\n]*)", blk):
+            if "s_newsCache" in rhs:
+                continue
+            fresh.add(f)
+        # array element writes (d.newsWhen[i] = ...) carry the base name already
+        missing = sorted((fresh - rd) | (fresh - wr))
+        report("instantane news complet", not missing,
+               ("%d champs, lus et ecrits" % len(fresh)) if not missing
+               else "absents du cache : " + " ".join(missing))
+
     # 9. PUBLIC repo : nothing personal, in the sources or in the binary.
     #    The binary check needs its positive control first.
     # One or TWO backslashes : source code escapes them, markdown and comments

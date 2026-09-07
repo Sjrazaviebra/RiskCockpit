@@ -42,6 +42,14 @@ def mut_ver(b):    return re.sub(rb'#property version "[\d.]+"',
                                  b'#property version "9.99"', b, count=1)  # source ahead of the binary
 
 
+def mut_snapshot(b):
+    # Drop ONE field from the cached snapshot's write-back. The field still
+    # exists, the code still compiles, and its value is simply wrong on every
+    # frame served from the cache - which is exactly how newsApplies came to
+    # flip twice a second between "there is a news rule" and "there is none".
+    return b.replace(b's_newsCache.newsWinMin = d.newsWinMin;', b'', 1)
+
+
 CASES = [
     ("BOM unique", mut_bom),
     ("reglages actifs", mut_input),
@@ -51,6 +59,7 @@ CASES = [
     ("accolades equilibrees", mut_brace),
     ("version du binaire", mut_ver),
     ("fuite de donnees perso", mut_path),   # the pattern that had rotted
+    ("instantane news complet", mut_snapshot),
 ]
 
 
