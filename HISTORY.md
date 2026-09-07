@@ -86,6 +86,386 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.41.53 — le drawdown JOURNALIER etait reconstruit sur une somme incomplete
+
+`Live_DailyDdPct` reconstruit le solde de debut de journee comme
+`solde_actuel - realise_du_jour`, et `realise_du_jour` ne comptait que
+`DEAL_ENTRY_OUT` et `DEAL_ENTRY_INOUT`. Deux choses passaient au travers :
+
+1. **`DEAL_ENTRY_OUT_BY`** — la cloture « close by », une position fermee CONTRE
+   une position opposee. L'outil tourne sur des comptes **hedge**, ou c'est une
+   facon ordinaire de se mettre a plat : son P&L disparaissait simplement de la
+   journee.
+2. 🔴 **Toute operation de SOLDE** — depot, **retrait**, credit, correction,
+   bonus. Elles deplacent `ACCOUNT_BALANCE` sans produire le moindre P&L de
+   trading, donc la soustraction ci-dessus est fausse **du montant exact
+   deplace**. Un retrait rendait le solde de debut de journee reconstruit trop
+   HAUT, et le panneau annoncait **un drawdown journalier qui n'avait pas eu
+   lieu** — potentiellement une breche un jour sans un seul trade perdant.
+
+Le premier rejoint la somme des P&L ; les operations de solde sont soustraites
+**a part**, parce qu'elles ne sont pas du P&L et ne doivent jamais etre comptees
+comme telles. Meme fenetre, meme cadence de 2 s : une passe bornee, jamais a
+chaque tick.
+
+**Et le gate affirmait plus qu'il ne prouve.** Son controle positif du scan
+binaire cherche la chaine `#property link` — or les `#property` sont stockees
+**NON COMPRESSEES** en UTF-16LE dans l'**en-tete** du `.ex5`, tandis que les
+chaines du corps sont compressees. Le controle prouvait donc qu'on sait lire
+**0,3 %** du fichier, et rien sur les 99,7 % ou une chaine fuitee vivrait
+vraiment — puis le rapport disait « 12 fichiers + binaire scannes », ce qui se
+lit « le binaire est propre ». **Ce n'est pas un verdict, c'est l'absence de
+verdict.** Le controle est desormais scinde : les **sources** portent le verdict
+(texte clair, aucun octet ne se cache), le **binaire** est rapporte a part et
+etiquete pour ce qu'il couvre — « en-tete lisible, corps COMPRESSE donc NON
+couvert ». 13 controles au lieu de 12.
+
+### v3.37.49 -> v3.40.52 — la regle news : a qui elle s'applique, et ce qu'un jeton inconnu veut dire
+
+🔴 **ECHEC OUVERT SUR UNE ENTREE NON FIABLE.** `NewsCcyAffectsSymbol()` rendait
+**faux** pour tout code devise qu'elle ne reconnaissait pas, et `FFInNewsWindow`
+ignorait ces evenements. Or `country` vient d'un fichier JSON que l'indicateur ne
+controle pas : une valeur corrompue, renommee ou falsifiee **eteignait
+silencieusement toute la regle news pendant les minutes exactes pour lesquelles
+elle existe**. Un outil de risque doit echouer du cote SUR : un jeton qui n'est
+pas une devise dont on sait raisonner **COMPTE** desormais. Un faux « tu es dans
+une fenetre news » coute un trade manque ; un faux « tu es tranquille » coute le
+compte.
+
+**Le chemin ForexFactory ignorait `news_rule_applies`.** Les trois chemins du
+calendrier MT5 le verifiaient tous ; `FFInNewsWindow` non. Sur un profil ou
+FundedNext n'applique pas la regle, **basculer sur le flux ForexFactory la
+ramenait a la vie**. Et le panneau l'affichait quand meme : une source, un etat,
+une fenetre et un compte a rebours **pour une regle inventee pour le lecteur**.
+Il dit maintenant N/A, une fois. La v3.40 aligne la page LEGENDE, qui continuait
+d'expliquer quelle part du profit compte sur un compte ou rien ne compte : deux
+surfaces, un fait, deux reponses — le lecteur croit celle qu'il a vue en dernier.
+
+**v3.38 — deux entrees non fiables, et un README qui promettait ce que le code
+refusait.**
+- 🔴 **Le pic de balance est une GlobalVariable NON AUTHENTIFIEE.** C'est le
+  point haut dont depend le plancher glissant : `plancher = min(pic − permis,
+  initial)`. N'importe quel script, n'importe quel EA, une edition a la main dans
+  la fenetre des variables globales du terminal peut **l'abaisser** — et un pic
+  plus bas que la realite **abaisse le plancher**, donc le panneau annonce **PLUS
+  de marge de perte** que le compte n'en a. C'est la seule direction dans
+  laquelle un outil de risque n'a pas le droit de se tromper. La valeur restauree
+  est desormais bornee par ce que le terminal observe tout seul.
+- `FFJsonStr` **bornait sa recherche APRES l'avoir faite** : une cle absente d'un
+  evenement coutait un balayage de tout le reste du fichier, une fois par champ
+  manquant — sur un fichier que l'indicateur ne controle pas, c'est l'entree qui
+  choisit la charge du thread d'interface.
+- Le **README promettait un auto-verrou « you cannot undo before it expires »**.
+  Le code a toujours eu un relachement (deux clics en 5 s), **volontairement** :
+  un pacte dont on ne peut pas sortir est un piege. Le README dit desormais ce
+  que le code fait, et gagne l'echelle de verrous restauree en v3.33.
+
+**v3.39 — deux nombres que le profil connaissait et que le panneau aplatissait.**
+- **Quick Strike** avait perdu sa propre bande d'alerte : le catalogue porte
+  `quick_strike_warn_pct` et `quick_strike_violate_pct`, et l'ancienne ligne
+  avertissait sur leur RATIO. La v3.31 a rendu son seuil a chaque regle, mais
+  Quick Strike recevait le 0,80 generique. Sa bande est reprise du profil.
+- **« NO SL » etait une etiquette figee.** FundedNext donne **trois minutes** pour
+  poser un stop — le code le dit la ou il calcule le risque — et le panneau
+  affichait le meme rouge a la seconde 2 et a la minute 40. La ligne decompte
+  desormais le sursis, en ambre tant qu'il dure et en rouge une fois passe :
+  c'est la difference entre « pose ton stop » et « tu es deja en violation ».
+
+### v3.33.45 -> v3.36.48 — la DISCIPLINE etait declaree et n'etait plus nourrie
+
+🔴 **Le moteur de discipline ne tournait plus du tout.** `g_disc_consec`,
+`g_disc_lastloss`, `g_disc_trades_win` et `g_disc_revenge` etaient **declares**,
+**lus** par le modele du panneau, et ecrits par **RIEN** :
+`ComputeDisciplineMetrics()` — l'unique balayage d'historique qui les
+remplissait — est parti avec l'ancien panneau en v3.06 et n'a jamais ete
+remplace. Consequences, toutes silencieuses :
+
+- **Le TILT ne partait jamais.** Le bandeau ambre et son son etaient morts, et le
+  panneau affichait « Fenetre tilt : 0 en 5 min (max 5) » — **un compteur qui ne
+  pouvait pas bouger**.
+- **La PAUSE apres N pertes consecutives n'existait pas du tout.** Le reglage
+  etait toujours la, toujours persiste, toujours reglable — et ne commandait
+  rien. C'est pire que pas de reglage.
+- **Le verrou dur sur le drawdown journalier (>= 80 % du plafond) avait disparu.**
+  Seul l'auto-verrou pouvait encore verrouiller.
+- **La bascule maitresse « Verrou discipline » ne commandait donc rien** : elle
+  gardait un tilt qui ne pouvait pas partir et un verrou qui n'existait plus.
+
+Et le bloc de commentaires au-dessus de l'etat **decrivait toujours l'echelle
+complete, dans l'ordre**. Le code n'en faisait rien. Pour un outil de discipline,
+une regle qui cesse silencieusement de s'appliquer est pire qu'une regle jamais
+promise. Le balayage est celui de l'ancien build (borne, cache 5 s, hors du
+chemin des 500 ms) ; l'echelle est celle de l'ancien build ; **seul le rendu
+change** — il alimente le bandeau de securite v3 au lieu de l'overlay supprime.
+
+**v3.34 — ce qu'un verrou doit reellement empecher.**
+- **RELACHER etait propose pour TOUS les verrous.** Depuis la v3.33 trois verrous
+  peuvent tenir : l'auto-verrou (le pacte du trader — relachable en deux clics,
+  sinon c'est un piege), le verrou de drawdown journalier et la pause apres une
+  serie de pertes. Les deux derniers sont des **REGLES**, pas des pactes :
+  offrir deux clics pour les congedier transformait la regle en suggestion.
+- **Un verrou dur laissait toutes les portes de sortie ouvertes.** Le bandeau
+  disait « VERROU DISCIPLINE ACTIF » pendant que la croix de la navbar retirait
+  encore l'outil du graphique et que **chaque reglage de risque pouvait encore
+  etre desserre**. Ce n'est pas un verrou, c'est une etiquette. Le shell avale
+  desormais les clics qui mettraient fin au verrou ou le desserreraient, garde
+  vivant tout ce qui ne fait que LIRE, et **dit** que le clic a ete refuse.
+- **`PersistViolationFlags()` existait, etait declaree, et n'etait appelee par
+  RIEN.** Les deux bascules de violation n'ecrivaient que la variable GLOBALE,
+  jamais la copie par login que le chargeur lit en premier : le drapeau fuyait
+  d'un compte a l'autre et n'etait jamais enregistre la ou on le cherche.
+
+**v3.35 — quatre choses que le code savait deja et ne disait pas.**
+- 🔴 **Le chiffre que FundedNext NOTE reellement n'etait pas a l'ecran.**
+  `Live_LockedRiskPct()` est definie, documentee, et appelee par **RIEN**. FN
+  verrouille la regle des 3 % de risque ouvert sur le stop pose **A
+  L'OUVERTURE** — deplacer le stop ensuite ne change pas ce qu'ils notent
+  (leur mail du 29/05/2026). Le panneau n'affichait que le risque cumule VIVANT,
+  qui baisse des qu'on suit le stop : **il pouvait afficher 1,2 % pendant que la
+  firme notait 3,1 %.** Les deux chiffres sont desormais cote a cote.
+- **Le statut d'une ligne de position suivait le SIGNE de son P&L.** Vert quand
+  ca monte, ambre quand ca descend — ce n'est pas une regle, c'est une humeur.
+  Une perte dans son risque prevu est normale ; **un trade GAGNANT qui porte tout
+  le budget est celui qui met fin au compte.** Le statut est desormais le risque
+  propre de la position face au budget par trade (plafond / N).
+- **Le conseiller de lot jetait ses drapeaux.** `below_min`, `over_budget`,
+  `margin_bound`, `margin_insufficient`, `reduce_flag` : tous calcules, aucun
+  transporte. Le panneau donnait un lot sans jamais pouvoir dire « votre marge
+  libre ne couvre meme pas le lot minimum du courtier ».
+- **Le rail pouvait s'ancrer HORS ECRAN.** Le plancher de 400 px sert aux
+  decisions de mise en page ; il atteignait l'ANCRE, donc sur un graphique plus
+  etroit le rail — **la seule surface permanente, celle qui ouvre tout le
+  reste** — etait place en dehors de la zone visible.
+- Et la **palette** : le shell demarrait toujours sur `InpPalette` alors que la
+  palette choisie par l'utilisateur, deja restauree, se trouvait deux lignes plus
+  haut.
+
+**v3.36** — 156 libelles pousses pour 155 demandes : `RCL_LOSSES` avait ete cree
+et jamais utilise. Il porte maintenant le nombre de pertes d'affilee qui a
+declenche la pause (« 12 min restantes » dit quand, jamais pourquoi). Et le
+plafond des libelles passe de 192 a **256** : 184 ids pour 192 slots, c'est
+exactement ainsi que revient le defaut de la v3.07, ou des ids etaient
+silencieusement jetes.
+
+### v3.31.43 / v3.32.44 — l'alarme et l'ecran disent enfin la meme chose
+
+Premier lot de la revue de PARITE (66 agents contre l'ancien panneau
+`v3.05.16`, 8803 lignes). Chaque constat a ete **reverifie ligne par ligne** ici
+avant d'etre touche.
+
+🔴 **Le seuil qui SONNE et le seuil qui COLORE n'etaient pas le meme nombre.**
+Le son utilisait un seuil **par regle** — 70 % pour le risque cumule et le DD
+journalier, **50 %** pour un DD total TRAILING (la regle qui tue le compte),
+75 % pour l'hyperactivite et les messages serveur — pendant que **cinq surfaces**
+comparaient les memes ratios a un **0,80 en dur**. Un DD journalier a 3,6 % d'un
+plafond de 5 % vaut 0,72 : **l'alarme part, la barre reste VERTE**. Sur un
+Instant, un DD total a 3,1 % de 6 % vaut 0,517 : l'alarme part a 0,50, la barre
+reste verte jusqu'a 4,8 % — **trente points d'ecart sur la regle qui met fin au
+compte**. Le trader entend une alarme, regarde un panneau qui dit que tout va
+bien, et conclut que l'alarme est un faux positif. Pire que l'un ou l'autre
+comportement pris seul.
+
+Et le chiffre corrige **n'avait aucun porte-voix** : `g_rows[i].status`, seul
+porteur des 0,70 / 0,50 / 0,75, n'etait lu que par le son et par un bloc Telegram
+mort (`if (false && ...)`). Le correctif v3.17 vivait entierement **hors du champ
+visuel**. Desormais **une** fonction decide, `RuleWarnRatio()`, et elle alimente
+le son ET le modele que le shell peint. Le repere de la jauge se place sur le
+seuil qui s'applique vraiment, et son infobulle cesse d'affirmer « Marqueur =
+80 % ».
+
+🔴 **Le score de sante comptait QUATRE regles sur les SEPT qui peuvent partir.**
+Quick Strike, hyperactivite et messages serveur n'entraient pas dans l'agregat :
+**100/100 restait atteignable avec le compteur d'hyperactivite a son plafond.**
+Les sept comptent. ⚠️ Mon premier correctif repliait ces trois regles **cent
+lignes avant** que leurs champs soient remplis — elles auraient compte pour zero,
+exactement le defaut a corriger. L'agregat **ouvre** sur les quatre limites et
+**ferme** la ou chaque regle a ses chiffres.
+
+⭐ **Le self-test a ete EXECUTE pour la premiere fois** (il existait depuis la
+v3.16 sans avoir jamais tourne) : **37 PASS, 0 FAIL**, dont six cas neufs qui
+verrouillent exactement le defaut ci-dessus — 72 % d'un plafond a seuil 70 %
+avertit, 72 % d'un plafond a seuil 80 % **n'avertit pas**. `#property
+script_show_inputs` a ete retire : il ne montrait aucun input, il ne mettait
+qu'une boite de dialogue entre l'utilisateur et le resultat.
+
+**v3.32** — la ligne de troncature repondait a la mauvaise question. Une sonde
+posee dans le rendu a montre le cas reel : `H=860`, huit en-tetes dessines,
+curseur a `y=1047` — **187 px de la derniere section peints hors du bitmap**, et
+la ligne muette parce que `shown == 8`. Elle demandait « est-ce qu'un EN-TETE
+manque » alors que la question est « est-ce qu'un CONTENU est coupe ». Elle part
+sur les deux, sur un bandeau qui la garde lisible.
+
+### v3.27.39 -> v3.30.42 — le panneau complet devient un ACCORDEON, et la barre du haut porte les chiffres
+
+JR, apres avoir vu la v3.26 tourner : « on perd le bas du menu », « les infos
+importantes sur la barre horizontale du haut », « un bouton pour centrer le chart
+a cote du theme ». Il a laisse le choix de la solution pour le premier point,
+entre montrer moins, faire defiler, ou plier les sections.
+
+**1. Le panneau complet est un ACCORDEON.** Il empilait huit sections a la
+suite : les dernieres tombaient hors du graphique et rien ne le disait — la
+ligne d'honnetete elle-meme etait peinte au curseur `y`, donc hors du bitmap.
+Chaque section garde desormais un **en-tete cliquable** ; seuls les **corps** se
+plient. Rien n'est cache : ce qui ne rentre pas est a un clic. L'etat est
+**persiste par login**, avec l'etat du panneau (ouvert / quelle section / plein)
+— avant, chaque changement d'unite de temps refermait tout, et un outil qu'il
+faut rouvrir est un outil qu'on cesse d'ouvrir.
+
+⚠️ **Deux defauts de mon propre accordeon, trouves a l'ecran, pas au compilateur :**
+- Le panneau **OSCILLAIT** entre deux hauteurs. La boucle reservait 46 px avant
+  d'ouvrir une section, mais la mesure demandait `y + 14` : haut, tout rentre et
+  la mesure demande a RETRECIR ; bas, le dernier en-tete ne rentre plus et elle
+  demande a GRANDIR. Deux hauteurs, indefiniment, **une reconstruction complete
+  des surfaces a chaque frame**. La mesure ne fait plus que GRANDIR, et elle est
+  remise a zero au repli d'une section — le seul moment ou la pile peut
+  legitimement raccourcir.
+- **Titres en double** : l'en-tete disait « POSITIONS OUVERTES » et le corps le
+  repetait mot pour mot juste en dessous. Le premier titre d'un corps est
+  supprime **uniquement** s'il repete l'en-tete a l'identique, donc un corps dont
+  le premier titre dit autre chose (« ETAT », « CONSOMMATION DES LIMITES ») le
+  garde.
+
+**2. La barre du haut porte les trois chiffres qui decident du clic suivant** —
+marge jusqu'a la limite la plus proche, lot conseille, prochaine news — colores
+par leur propre etat, puis l'equite et le nombre de positions. Elle repond
+« est-ce que je peux prendre ce trade » sans rien ouvrir. Barre elargie de 750 a
+980 px, avec degradation progressive : sur un graphique etroit les chips tombent
+une par une, jamais de debordement.
+
+**3. Bouton CADR (FIT)**, entre la palette et le D/L : il **arme** l'echelle
+confort et re-cadre immediatement. Un bouton qui n'agirait que si un reglage est
+deja actif est un piege — il allume le reglage lui-meme.
+
+### v3.26.38 — passe de SECURITE
+
+Revue adversariale a 53 agents (fuite de donnees, garantie lecture seule,
+parsing de donnees non fiables, systeme de fichiers, interference entre
+indicateurs, ressources, distribution). Chaque constat a ete **reverifie dans le
+code** avant d'etre touche : un rapport d'agent est une donnee, pas un ordre.
+
+**Fuite reelle, dans le depot PUBLIC.** `HISTORY.md` portait un vrai numero de
+compte MT5 (demo, mais la regle est **zero**). Il est masque. Le controle du gate
+**ne pouvait pas le voir** : son motif exigeait le mot « compte »/« login » a
+moins de 3 caracteres des chiffres, et la ligne disait « compte **demo** Ava,
+<numero> » — quatorze caracteres plus loin. C'est la **deuxieme fois** que ce
+controle rend OK sur le fichier qui porte la fuite. Il signale desormais **toute
+suite de 8 a 10 chiffres** hors d'une liste blanche explicite (ids d'articles
+FundedNext, une date), et le binaire recoit la meme regle. L'injection du
+self-test a ete refaite dans la forme qui passait : `8/8` detectes.
+⚠️ **Deux messages de commit deja pousses portent encore un numero de compte.**
+Un fichier se corrige, un message de commit demande une **reecriture d'historique
+public** : c'est la decision de JR, pas la mienne.
+
+**Le jeton Telegram etait un `input string` en clair.** MQL5 **interdit**
+`WebRequest` dans un indicateur : ce build ne peut donc **jamais** envoyer un
+message — pendant que MT5 recopie chaque `input` dans des `.set` et des modeles
+de graphique qu'aucun garde-fou ne scanne. Un reglage qui ne peut pas servir et
+ne peut que fuir n'a pas lieu d'exister : les deux entrees sont retirees.
+
+**Le solde de POINTE du compte partait dans le journal Experts** a chaque
+session, sans condition — et un journal Experts est ce qu'un trader colle dans un
+fil de support. Passe derriere `InpVerboseLog`.
+
+**Une bascule dessinee VERROUILLEE restait cliquable** : `ZAdd` etait appele meme
+quand `locked` etait vrai. Les deux bascules « apres violation » resserraient
+donc reellement les plafonds tout en affirmant au lecteur qu'elles ne pouvaient
+rien. Un controle qui ne peut pas agir ne doit pas etre cliquable.
+
+**Le calendrier ForexFactory etait charge UNE fois et jamais relu**
+(`if (ArraySize(g_ff_events) == 0)`). Un terminal laisse ouvert un week-end
+gardait les evenements de la semaine precedente pendant que le service
+compagnon reecrivait le fichier toutes les heures. Tout etant passe, le panneau
+annoncait « rien dans les 24 h » **badge [FF] allume**, et `g_ff_active`, jamais
+remis a false, gardait le calendrier MT5 hors-jeu : **les deux filets tombaient
+ensemble**. Desormais : relecture des que la date de modification bouge, et un
+cache sans aucun evenement courant ou futur est traite comme une **PANNE de
+source** (badge eteint, la regle news repart sur le calendrier MT5), jamais comme
+« pas de news ».
+
+**Entrees non fiables bornees.** Aucun plafond n'existait sur le nombre
+d'evenements analyses : un fichier de 4 Mo allouait sans limite, puis payait un
+tri O(n2) et un objet graphique par evenement **a chaque rafraichissement**
+(plafond 512). Et `FFParseIso8601Utc` ne validait que la date : l'heure, la
+minute, la seconde, la borne haute de l'annee et le decalage horaire passaient
+tels quels — un decalage aberrant deplacait un evenement de plusieurs jours.
+
+### v3.24.36 / v3.25.37 — quatre defauts vus a l'ecran par JR
+
+**1. Les boites « copier » disparaissaient des qu'on bougeait le graphique.**
+La v3.24 accusait `Destroy()` / `ObjectsDeleteAll`. **Ce diagnostic etait FAUX** :
+`OnChartChange()` n'appelle jamais `ObjectsDeleteAll`, et le timer re-synchronise
+les boites deux fois par seconde. Les boites ne sont jamais supprimees, elles sont
+**RECOUVERTES** : MT5 peint les objets d'un graphique dans l'**ordre de creation**
+(`OBJPROP_ZORDER` ne classe que les clics), donc un bitmap de panneau re-cree passe
+devant un `OBJ_EDIT` plus ancien. `ShellSyncLotEdit` trouvait l'objet et se
+contentait de le DEPLACER — il restait dessous pour toujours. Le shell compte
+desormais ses generations de surfaces (`SurfGen()`) et l'hote supprime les deux
+boites apres chaque reconstruction, pour que la synchro suivante les re-cree
+au-dessus. **Prouve a l'ecran** : 8 barres de defilement, deux zooms, PgUp/PgDn —
+les deux boites (`0.01` et `0.75`) restent presentes.
+
+**2. Le panneau COMPLET etait haut de 740 px en dur.** La pile de sections
+debordait : « A VENIR » etait le dernier titre dessine et son contenu tombait
+hors du bitmap. Le panneau **mesure** maintenant sa pile et grandit jusqu'a la
+hauteur du graphique. Mesure a l'ecran : 730 px -> **990 px**, et « A VENIR »
+affiche enfin sa ligne (« Rien dans les 24 h. »). La ligne d'honnetete
+« +N sections : agrandir la fenetre » etait elle-meme peinte AU curseur `y`,
+c'est-a-dire exactement la ou le bitmap se termine : la seule ligne chargee de
+dire « il y a la suite » n'etait jamais visible. Elle est desormais peinte a
+position fixe, en bas du panneau.
+
+**3. L'echelle confort avait une bascule a sens unique.** La rallumer appelait
+`ApplyComfortScale(false)`, qui **refuse** d'agir sur une echelle fixe qui n'est
+pas la notre : le clic ne faisait donc **rien**. L'eteindre ne rendait pas non
+plus le graphique, fige sur notre propre echelle. ON force maintenant ; OFF rend
+l'echelle native, mais seulement si elle est encore la notre (jamais de zoom
+manuel ecrase). Trouve a l'ecran : la bascule etait persistee sur OFF, ce qui
+explique le graphique colle en haut et en bas dont JR se plaignait.
+
+**4. La section COMPTE portait le plan, pas le COMPTE.** Ni courtier, ni serveur,
+ni levier, ni equite, ni marge — l'ancien onglet « Compte » les avait. Bloc
+TERMINAL ajoute, en lecture seule : courtier, serveur, levier, solde, equite,
+marge utilisee, marge libre.
+
+### v3.22.34 / v3.23.35 — première vérification À L'ÉCRAN
+
+JR a autorisé l'ouverture de son terminal (un compte **démo** Ava).
+L'indicateur a été attaché à EURUSD M15 et piloté à la souris : c'est la
+première fois que ce shell est **vu tourner**.
+
+**Ce qui marche, vérifié à l'image** — navbar complète (`RC | EURUSD | M15 |
+SAIN 100/100 | $10174.11 | 0 pos | EMER | D | 00:33 | ✕`), rail collé au bord
+avec ses 8 cellules et leurs micro-états, tableau flottant en **état vide**
+(« Aucune position ouverte », bandeau d'accès rapide, mention « Fermeture :
+version EA »), sidebar complète empilant toutes les sections, infobulle sur
+**2 lignes** (correctif v3.20), sections repliées/dépliées au clic, tableau des
+réglages avec ses 4 onglets et ses 6 steppers, `N/A` honnête là où une limite
+ne s'applique pas au profil personnel.
+
+**Chaîne fonctionnelle prouvée de bout en bout** : deux clics sur le `+` de
+« Distance SL % » → `1.00 %` devient `1.20 %`, deux clics sur `−` la ramènent à
+`1.00 %`. Les **deux** clics comptent, ce qui valide aussi le correctif v3.19
+(avant, deux clics dans une même période de rafraîchissement n'en faisaient
+qu'un). Clic → zone → intention → hôte → mutation → GlobalVariable → re-rendu.
+
+**Trois défauts que quinze contrôles statiques n'ont pas pu voir :**
+
+1. **Deux lignes dessinées l'une SUR l'autre** dans « D'OÙ VIENT CE LOT » :
+   la ligne « Marge libre » n'incrémentait jamais `y`, donc « Lot max autorisé »
+   se peignait par-dessus — libellés et valeurs mélangés en une bouillie
+   illisible (`Mlangeakilanetorisé`, `ma0g%`). Une ligne manquante, `y += 18`.
+2. **« Marge avant limite » débordait sa colonne** de 80 px dans le bandeau
+   d'accès rapide du flottant et mordait sur la colonne LOT : le libellé du
+   PANNEAU était réutilisé dans une cellule six fois plus étroite. Libellé court
+   dédié (`ROOM` / `MARGE` / `MARGEN`).
+3. **L'aide se contredisait** : titre « RÈGLE 40% » et corps « seuls **100%** du
+   profit comptent » sur un profil personnel. Le titre porte désormais le
+   nombre dont il parle. Et « LÉGENDE » était écrit deux fois de suite.
+
+⚠️ **Constat de méthode** : MT5 **ne recharge pas** l'indicateur à la
+recompilation. Il faut changer d'unité de temps (ou le détacher/rattacher) —
+sinon on regarde l'ancien binaire en croyant tester le nouveau.
+
 ### v3.21.33 — la queue de la relecture
 
 - **Cliquer une ligne de position ramène le graphique sur son symbole** — le

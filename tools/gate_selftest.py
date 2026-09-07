@@ -24,7 +24,9 @@ def mut_input(b):  return b.replace(b'input bool ', b'input int InpDeadOne = 3;\
 def mut_leak(b):
     # built by concatenation on purpose : this FILE must not itself contain a
     # string shaped like a leak, or the gate would flag its own test harness.
-    fake = b'// log' + b'in ' + b'12345678'
+    # the injection deliberately does NOT put the word 'login' next to the
+    # digits any more : that is exactly the shape the old pattern missed.
+    fake = b'// compte **demo** Ava, ' + b'9911' + b'22337'
     return b.replace(b'#property version', fake + b'\r\n#property version', 1)
 def mut_label(b):  return b.replace(b'g_shell.SetLabel(RCL_PAYOUT,', b'//g_shell.SetLabel(RCL_PAYOUT,', 1)
 def mut_key(b):    return re.sub(rb'    AddTr\("shl_pyramid",.*?\);\r\n', b'', b, count=1, flags=re.S)

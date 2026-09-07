@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.21"
+#property version "3.41"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.21"
+#define RC_VERSION_STR "3.41"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -163,9 +163,12 @@ input bool   InpEnableSound      = true;          // Sound alert on warn/red tra
 input string InpSoundOK          = "alert.wav";   // Sound file : back to OK
 input string InpSoundWarn        = "alert2.wav";  // Sound file : warning
 input string InpSoundRed         = "stops.wav";   // Sound file : breach / red
-input bool   InpEnableTelegram   = false;         // Telegram alerts (V2)
-input string InpTelegramBotToken = "";            // Telegram bot token
-input string InpTelegramChatId   = "";            // Telegram chat id
+// v3.26 : the bot token and chat id used to be `input string` in clear. MQL5
+// FORBIDS WebRequest inside an INDICATOR, so this build can never send a
+// message - while MT5 persists every input into .set files and chart
+// templates that no guard scans. An input that cannot work and can only leak
+// has no reason to exist : the credentials belong to the EA / service build.
+input bool   InpEnableTelegram   = false;         // Telegram alerts (EA build only)
 
 #ifdef __MQL5__
 input group "6 - TRADING-DAYS COUNTER"
@@ -255,6 +258,8 @@ int     g_fx_h  = 0;
 RCShellUI g_shell;
 void BuildDeckData(RCDeckData &d);
 void ShellRefresh(void);
+void ShellReSyncEdits(void);
+void ShellEditsTopmost(void);
 
 // LOT D : the settings modal draws on its OWN canvas - shell (rounded card + shadow +
 // glow) AND, since D-FULL step 2, every control face (buttons / pills / steppers).
@@ -1065,7 +1070,7 @@ int OnInit(void) {
 
     // Telegram setup hint (B1) - cheap one-time message at attach time.
     if (g_eff_telegram) {
-        if (InpTelegramBotToken == "" || InpTelegramChatId == "") {
+        if (true) {   // v3.26 : no credentials in an indicator, ever
             Print("RiskCockpit : Telegram enabled but bot token / chat id empty - alerts will not fire.");
         } else if (InpVerboseLog) { // LOG CLEANUP : one-time info, gated (the empty-token WARNING above stays ungated)
             Print("RiskCockpit : Telegram alerts ON. ",
@@ -1090,7 +1095,11 @@ int OnInit(void) {
     // a fresh attach already matches the product's brand language.
     {
         g_shell.Init();
-        g_shell.SetThemeIdx((int)InpPalette * 2 + (EffectiveTheme() == RC_THEME_GLASS_DARK ? 0 : 1));
+        // v3.35 : this read InpPalette while g_active_palette_idx - the palette
+        // the user picked, restored a few lines above - sat right next to it.
+        // The shell reopened on the input palette after every restart.
+        g_shell.SetThemeIdx((int)EffectivePalette() * 2 +
+                            (EffectiveTheme() == RC_THEME_GLASS_DARK ? 0 : 1));
         g_shell.SetTipDelay(InpShellTipMs);
         {   // WHERE the floating table was left, per login - read BEFORE Create()
             // so the first frame is drawn at the restored spot. Setting it after
@@ -1101,6 +1110,20 @@ int OnInit(void) {
             GVGetLogin("RC_v3_flthid", fh);
             g_shell.SetFloatPos((int)fx, (int)fy);
             g_shell.SetFloatHidden(fh != 0.0);   // a hidden table stayed hidden
+            // v3.27 : which sections of the FULL panel are unfolded. Without
+            // this the accordion reset on every timeframe change - the panel
+            // would forget what the trader had opened, every single time.
+            double sm = 0.0;
+            if (GVGetLogin("RC_v3_secopen", sm) && (int)sm != 0)
+                g_shell.SetSecOpenMask((int)sm);
+            // v3.30 : and WHICH panel was open. A timeframe change used to
+            // close everything - the trader re-opened the same section after
+            // every switch, and a tool you have to re-open is a tool you stop
+            // opening. Restored BEFORE Create(), like the table's position.
+            double st = -1.0, sc = -1.0;
+            GVGetLogin("RC_v3_state", st);
+            GVGetLogin("RC_v3_sec",   sc);
+            if (st >= 0.0) g_shell.SetStateSec((int)st, (int)sc);
         }
         g_shell.Create(RC_PREFIX + "V3_");
         ShellPushLabels();   // the shell's chrome speaks the product's language
@@ -1268,7 +1291,10 @@ void OnChartEvent(const int id, const long& lparam, const double& dparam, const 
         }
         // v3 SHELL : surfaces are destroyed + recreated (the zones moved) and the
         // hover state is reset - the playbook's OnChartChange rule.
-        if (g_shell.Created()) g_shell.OnChartChange();
+        if (g_shell.Created()) {
+            g_shell.OnChartChange();
+            ShellReSyncEdits();      // Destroy() took the copy boxes with it
+        }
         ChartRedraw(0);
         return;
     }
@@ -1332,6 +1358,75 @@ datetime g_disc_last_alert = 0;     // tilt sound/Telegram throttle
 
 // One bounded history scan (cached 5 s) feeding all the discipline metrics, so
 // nothing heavy runs on the 500 ms refresh path (LOT 1 freeze lesson).
+//
+// v3.33 : this function went out with the legacy panel in v3.06 and was never
+// replaced, while every variable it fills stayed declared and stayed READ.
+// Tilt could not fire, revenge sizing could not be detected, and the cooldown
+// after N consecutive losses simply did not exist - its setting was still in
+// the panel, still persisted, commanding nothing. Restored verbatim from the
+// legacy build : the SCAN is the same, only what consumes it changed.
+void ComputeDisciplineMetrics(void) {
+    if (g_disc_scan != 0 && TimeCurrent() - g_disc_scan < 5) return;
+    g_disc_scan = TimeCurrent();
+    g_disc_consec = 0; g_disc_lastloss = 0; g_disc_trades_win = 0; g_disc_revenge = false;
+    const datetime now = TimeCurrent();
+    const datetime win_from = now - (datetime)MathMax(1, g_eff_tilt_win) * 60;
+    if (!HistorySelect(now - 30 * 86400, now)) return;
+    const int n = HistoryDealsTotal();
+    bool   streak_open = true;
+    double last_loss_vol = -1.0;
+    for (int i = n - 1; i >= 0; --i) {
+        const ulong t = HistoryDealGetTicket(i);
+        if (t == 0) continue;
+        const long     e  = HistoryDealGetInteger(t, DEAL_ENTRY);
+        const datetime dt = (datetime)HistoryDealGetInteger(t, DEAL_TIME);
+        if (e == DEAL_ENTRY_IN && dt >= win_from) g_disc_trades_win++;
+        if (e == DEAL_ENTRY_OUT || e == DEAL_ENTRY_INOUT) {
+            const double pnl = HistoryDealGetDouble(t, DEAL_PROFIT) +
+                               HistoryDealGetDouble(t, DEAL_SWAP) +
+                               HistoryDealGetDouble(t, DEAL_COMMISSION);
+            if (streak_open) {
+                if (pnl < 0.0) { g_disc_consec++; if (g_disc_lastloss == 0) g_disc_lastloss = dt; }
+                else           { streak_open = false; }   // a win / breakeven ends the streak
+            }
+            if (last_loss_vol < 0.0 && pnl < 0.0) last_loss_vol = HistoryDealGetDouble(t, DEAL_VOLUME);
+        }
+    }
+    // revenge sizing : the newest OPEN position is bigger than the last closed LOSS
+    if (last_loss_vol > 0.0) {
+        double newest_vol = 0.0; datetime newest_time = 0;
+        const int np = PositionsTotal();
+        for (int i = 0; i < np; ++i) {
+            const ulong pt = PositionGetTicket(i);
+            if (pt == 0 || !PositionSelectByTicket(pt)) continue;
+            const datetime ot = (datetime)PositionGetInteger(POSITION_TIME);
+            if (ot >= newest_time) { newest_time = ot; newest_vol = PositionGetDouble(POSITION_VOLUME); }
+        }
+        if (newest_vol > last_loss_vol + 1e-9) g_disc_revenge = true;
+    }
+}
+
+// The hard-lock ladder, by priority : self-lock > daily DD at 80 % of its cap
+// > cooldown after N consecutive losses. Returns the kind (0 none, 1 self,
+// 2 daily, 3 cooldown) and how many minutes are left when that is known.
+// The whole ladder is gated by the discipline master switch and by the risk
+// toolkit, exactly as in the legacy build - which is what makes that master
+// switch command something again.
+int DisciplineLockKind(const double daily_dd_pct, const double daily_cap, int &mins_left) {
+    mins_left = 0;
+    const datetime now = TimeCurrent();
+    if (g_selflock_until > now) {                 // the Ulysses pact outranks all
+        mins_left = (int)((g_selflock_until - now) / 60) + 1;
+        return 1;
+    }
+    if (!g_eff_discipline || !g_eff_risktools) return 0;
+    if (daily_cap > 0.0 && daily_dd_pct >= 0.80 * daily_cap) return 2;
+    if (g_eff_cooldown_n > 0 && g_disc_consec >= g_eff_cooldown_n && g_disc_lastloss > 0) {
+        const datetime until = g_disc_lastloss + (datetime)MathMax(0, g_eff_cooldown_m) * 60;
+        if (now < until) { mins_left = (int)((until - now) / 60) + 1; return 3; }
+    }
+    return 0;
+}
 
 // Full-panel red STOP overlay used by self-lock / daily-DD / cooldown.
 
@@ -1395,21 +1490,41 @@ void BuildDeckData(RCDeckData &d) {
     // --- limits (cell LIM) ----------------------------------------------
     d.marginPct = Live_CumulativeMarginPct(); d.marginCap = EffectiveMarginCap();
     d.riskPct   = Live_CumulativeRiskPct();   d.riskCap   = EffectiveRiskCap();
+    d.lockedRiskPct = Live_LockedRiskPct();   // v3.35 : what the FIRM scores
     d.dailyPct  = Live_DailyDdPct();          d.dailyCap  = g_profile.daily_loss_pct;
     d.overallPct= Live_OverallDdPct();        d.overallCap= g_profile.max_loss_pct;
     d.dailyApplies   = (d.dailyCap > 0.0);
     d.overallApplies = (d.overallCap > 0.0);
     d.trailing       = g_profile.max_loss_trailing;
-    double worst = 0.0;
-    if (d.marginCap > 0.0)              worst = MathMax(worst, d.marginPct  / d.marginCap);
-    if (d.riskCap > 0.0)                worst = MathMax(worst, d.riskPct    / d.riskCap);
-    if (d.dailyApplies)                 worst = MathMax(worst, d.dailyPct   / d.dailyCap);
-    if (d.overallApplies)               worst = MathMax(worst, d.overallPct / d.overallCap);
-    d.limRatio  = worst;
-    // verdict + health score, derived from the ratios just computed
-    d.score       = (int)MathRound(100.0 * (1.0 - MathMin(1.0, MathMax(0.0, worst))));
-    d.verdict     = (worst >= 1.0 ? 2 : (worst >= 0.80 ? 1 : 0));
-    d.verdictWord = Tr(d.verdict == 2 ? "v_violation" : (d.verdict == 1 ? "v_atrisk" : "v_ontrack"));
+    // v3.31 : the thresholds the SOUND uses, carried to the shell so every
+    // surface warns at the same moment the alarm does.
+    d.warnMargin  = RuleWarnRatio("rule_margin_cum", d.trailing);
+    d.warnRisk    = RuleWarnRatio("rule_risk_cum",   d.trailing);
+    d.warnDaily   = RuleWarnRatio("rule_daily_dd",   d.trailing);
+    d.warnOverall = RuleWarnRatio("rule_overall_dd", d.trailing);
+    // v3.39 : the catalogue carries Quick Strike's OWN warning band
+    // (warn_pct / violate_pct) and the legacy row used it. Use it when the
+    // profile defines one ; fall back to the generic threshold otherwise.
+    d.warnQuick   = ((g_profile.quick_strike_warn_pct > 0.0 &&
+                      g_profile.quick_strike_violate_pct > 0.0)
+                     ? g_profile.quick_strike_warn_pct / g_profile.quick_strike_violate_pct
+                     : RuleWarnRatio("rule_qs", d.trailing));
+    d.warnHyper   = RuleWarnRatio("rule_hyper",      d.trailing);
+    // worst = raw consumption (what a BAR must show) ; sev = consumption
+    // measured against each rule's OWN warning threshold (what a COLOUR must
+    // show). They are not the same question and they had been conflated.
+    // v3.31 also puts Quick Strike, hyperactivity and server messages INTO
+    // the aggregate : the score counted four rules out of seven, so 100/100
+    // was reachable with the hyperactivity counter sitting at its cap.
+    double worst = 0.0, sev = 0.0, mark = 0.80;
+    RC_WorstRule(worst, sev, mark, d.marginPct,  d.marginCap,  true,               d.warnMargin);
+    RC_WorstRule(worst, sev, mark, d.riskPct,    d.riskCap,    d.riskCap > 0.0,    d.warnRisk);
+    RC_WorstRule(worst, sev, mark, d.dailyPct,   d.dailyCap,   d.dailyApplies,     d.warnDaily);
+    RC_WorstRule(worst, sev, mark, d.overallPct, d.overallCap, d.overallApplies,   d.warnOverall);
+    // The aggregate stays OPEN here : Quick Strike, hyperactivity and server
+    // messages are only filled a hundred lines below, and folding them in at
+    // this point would have counted three of the seven rules as ZERO - the
+    // very defect this change removes. It closes right after msgsCap.
     d.roomMoney = Live_NearestLimitRoom();                 // -1 = no active limit
     d.floorMoney = 0.0;
     if (d.trailing && init > 0.0) {
@@ -1435,7 +1550,26 @@ void BuildDeckData(RCDeckData &d) {
             d.posRowPnl[k] = rp;
             d.posAge[k]    = (int)(TimeCurrent() - (datetime)PositionGetInteger(POSITION_TIME));
             d.posHasSl[k]  = hsl;
-            d.posStat[k]   = (hsl ? (rp >= 0.0 ? 0 : 1) : 2);   // no SL = the only red row state
+            // v3.35 : this was (profit >= 0 ? green : amber) - the sign of the
+            // P&L, which is a mood, not a rule. A losing trade inside its planned
+            // risk is normal ; a WINNING trade carrying the whole budget is the
+            // one that ends the account. The status is the position's own risk
+            // against the per-trade budget (cap / N) ; no stop stays red.
+            double prisk = 0.0;
+            if (hsl && g_profile.initial_balance > 0.0) {
+                prisk = 100.0 * ComputePositionRiskMoney(
+                            PositionGetString(POSITION_SYMBOL),
+                            (int)PositionGetInteger(POSITION_TYPE),
+                            PositionGetDouble(POSITION_PRICE_OPEN),
+                            PositionGetDouble(POSITION_SL),
+                            PositionGetDouble(POSITION_VOLUME),
+                            PositionGetDouble(POSITION_SWAP))
+                        / g_profile.initial_balance;
+            }
+            const double per_trade = (g_max_parallel > 0
+                                      ? EffectiveRiskCap() / g_max_parallel : 0.0);
+            d.posStat[k]   = (!hsl ? 2
+                              : (per_trade > 0.0 && prisk > per_trade ? 1 : 0));
             d.posN++;
         }
     }
@@ -1444,11 +1578,19 @@ void BuildDeckData(RCDeckData &d) {
     d.slGuard    = Live_SlGuardBreached(gsym, gsl);
     d.slGuardSym = gsym;
     d.slGuardPrice = gsl;
-    d.discLocked = (g_selflock_until > TimeCurrent());
-    d.selfLock   = d.discLocked;
-    d.lockMinsLeft = (d.discLocked ? (int)((g_selflock_until - TimeCurrent()) / 60) + 1 : 0);
+    // v3.33 : the full ladder is back. This used to read the self-lock and
+    // nothing else, so a daily drawdown at 80 % of its cap and a losing streak
+    // past its cooldown both went unnoticed.
+    ComputeDisciplineMetrics();
+    int lk_mins = 0;
+    d.lockKind     = DisciplineLockKind(d.dailyPct, d.dailyCap, lk_mins);
+    d.discLocked   = (d.lockKind != 0);
+    d.selfLock     = (d.lockKind == 1);
+    d.lockMinsLeft = lk_mins;
+    d.lossStreak   = g_disc_consec;
     d.unlockArmed  = (g_unlock_arm > 0 && TimeCurrent() - g_unlock_arm <= 5);
-    d.discTilt   = (g_eff_discipline && ((g_eff_tilt_n > 0 && g_disc_trades_win > g_eff_tilt_n) || g_disc_revenge));
+    d.discTilt   = (g_eff_discipline && g_eff_risktools &&
+                    ((g_eff_tilt_n > 0 && g_disc_trades_win > g_eff_tilt_n) || g_disc_revenge));
     d.tiltTrades = g_disc_trades_win;
     d.tiltN      = g_eff_tilt_n;
     d.tiltWinMin = g_eff_tilt_win;
@@ -1470,12 +1612,19 @@ void BuildDeckData(RCDeckData &d) {
         d.lotDigits     = LotDigits(s.vol_step);
         d.lotCapped     = s.floor_capped;
         d.lotZero       = (s.floor_capped && s.risk_budget_money <= 0.005);
+        d.lotBelowMin    = s.below_min;          // v3.35 : all computed, none shown
+        d.lotOverBudget  = s.over_budget;
+        d.lotMarginBound = s.margin_bound;
+        d.lotMarginShort = s.margin_insufficient;
+        d.lotReduce      = s.reduce_flag;
         d.budgetPct     = s.budget_pct;
         d.budgetMoney   = s.risk_budget_money;
         d.freeMarginPct = s.free_margin_pct;
         d.nPlanned      = s.n_planned;
     } else {
         d.sugLot = 0.0; d.lotDigits = 2; d.lotCapped = false; d.lotZero = false;
+        d.lotBelowMin = false; d.lotOverBudget = false; d.lotMarginBound = false;
+        d.lotMarginShort = false; d.lotReduce = false;
         d.budgetPct = 0.0; d.budgetMoney = 0.0; d.freeMarginPct = 0.0; d.nPlanned = 0;
     }
     d.spreadPts  = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
@@ -1495,6 +1644,24 @@ void BuildDeckData(RCDeckData &d) {
     d.qsCap     = g_profile.quick_strike_violate_pct;
     d.msgsToday = Live_OrdersToday();
     d.msgsCap   = g_profile.hyperactivity_msgs_per_day;
+    {   // v3.31 : the aggregate CLOSES here, now that every rule has its
+        // numbers. worst drives the bar and the score (consumption) ; sev
+        // drives the colour (each rule against its OWN threshold) ; mark
+        // carries the threshold that actually applies, for the gauge tick and
+        // the tooltip that used to claim a flat 80 %.
+        RC_WorstRule(worst, sev, mark, d.qsPct, d.qsCap, d.qsCap > 0.0, d.warnQuick);
+        RC_WorstRule(worst, sev, mark, (double)d.tradesToday, (double)d.tradesCap,
+                     d.tradesCap > 0, d.warnHyper);
+        RC_WorstRule(worst, sev, mark, (double)d.msgsToday, (double)d.msgsCap,
+                     d.msgsCap > 0, d.warnHyper);
+        d.limRatio    = worst;
+        d.limMark     = mark;
+        d.limStat     = (worst >= 1.0 ? 2 : (sev >= 1.0 ? 1 : 0));
+        d.score       = (int)MathRound(100.0 * (1.0 - MathMin(1.0, MathMax(0.0, worst))));
+        d.verdict     = d.limStat;
+        d.verdictWord = Tr(d.verdict == 2 ? "v_violation"
+                           : (d.verdict == 1 ? "v_atrisk" : "v_ontrack"));
+    }
     ComputeNewsStats();                                    // cached ~60 s inside
     d.newsTrades   = g_news_trades;
     d.newsPnl      = g_news_pnl;
@@ -1551,6 +1718,7 @@ void BuildDeckData(RCDeckData &d) {
     // ordered by time, capped at 6 (the section states the cap honestly).
     d.newsWinMin   = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5);
     d.newsSharePct = g_profile.news_profit_share_pct;
+    d.newsApplies  = g_profile.news_rule_applies;   // v3.37 : say N/A, don't invent
     d.newsN        = 0;
     {
         datetime ct[64]; string cc[64]; bool cr[64];
@@ -1639,6 +1807,14 @@ void BuildDeckData(RCDeckData &d) {
     d.cfgSound      = g_eff_sound;
     d.cfgTelegram   = g_eff_telegram;
     d.cfgComfort    = g_eff_comfort;
+    // v3.25 : the terminal's own account facts, read-only, for the ACCOUNT
+    // section (the legacy Account tab had them ; v3 had dropped them all).
+    d.acctFirm      = AccountInfoString(ACCOUNT_COMPANY);
+    d.acctServer    = AccountInfoString(ACCOUNT_SERVER);
+    d.acctCurr      = AccountInfoString(ACCOUNT_CURRENCY);
+    d.acctLev       = (int)AccountInfoInteger(ACCOUNT_LEVERAGE);
+    d.marginUsed    = AccountInfoDouble(ACCOUNT_MARGIN);
+    d.freeMargin    = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
     d.cfgDiscipline = g_eff_discipline;
     d.lang          = g_lang;
     d.version       = RC_VERSION_STR;
@@ -1730,6 +1906,30 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_CLOSE_EA,  Tr("shl_closeea"));
     g_shell.SetLabel(RCL_UNLOCK,    Tr("shl_unlock"));
     g_shell.SetLabel(RCL_LOCK_TG,   Tr("shl_locktg"));
+    g_shell.SetLabel(RCL_ROOM_SHORT, Tr("shl_roomshort"));
+    g_shell.SetLabel(RCL_HELP_COLOURS, Tr("shl_colours"));
+    g_shell.SetLabel(RCL_NAV_ROOM,  Tr("shl_navroom"));
+    g_shell.SetLabel(RCL_NAV_LOT,   Tr("shl_navlot"));
+    g_shell.SetLabel(RCL_NAV_NEWS,  Tr("shl_navnews"));
+    g_shell.SetLabel(RCL_NAV_FIT,   Tr("shl_navfit"));
+    g_shell.SetLabel(RCL_COOLDOWN_T, Tr("shl_cooldownt"));
+    g_shell.SetLabel(RCL_LOSSES,     Tr("shl_losses"));
+    g_shell.SetLabel(RCL_LOCK_BLOCKED, Tr("shl_lockblocked"));
+    g_shell.SetLabel(RCL_LIM_LOCKED,    Tr("shl_limlocked"));
+    g_shell.SetLabel(RCL_LOT_BELOWMIN,  Tr("shl_lotbelowmin"));
+    g_shell.SetLabel(RCL_LOT_OVERBUD,   Tr("shl_lotoverbud"));
+    g_shell.SetLabel(RCL_LOT_MARGBOUND, Tr("shl_lotmargbound"));
+    g_shell.SetLabel(RCL_LOT_MARGSHORT, Tr("shl_lotmargshort"));
+    g_shell.SetLabel(RCL_LOT_REDUCE,    Tr("shl_lotreduce"));
+    g_shell.SetLabel(RCL_NEWS_NORULE,   Tr("shl_newsnorule"));
+    g_shell.SetLabel(RCL_SEC_CPTST,  Tr("shl_cptstate"));
+    g_shell.SetLabel(RCL_CPT_FIRM,   Tr("shl_cptfirm"));
+    g_shell.SetLabel(RCL_CPT_SERVER, Tr("shl_cptserver"));
+    g_shell.SetLabel(RCL_CPT_LEV,    Tr("shl_cptlev"));
+    g_shell.SetLabel(RCL_CPT_BAL,    Tr("shl_cptbal"));
+    g_shell.SetLabel(RCL_CPT_EQ,     Tr("shl_cpteq"));
+    g_shell.SetLabel(RCL_CPT_MUSED,  Tr("shl_cptmused"));
+    g_shell.SetLabel(RCL_CPT_FREEM,  Tr("shl_cptfreem"));
     g_shell.SetLabel(RCL_PAYOUT,    Tr("shl_payout"));
     g_shell.SetLabel(RCL_TARGET,    Tr("shl_target"));
     g_shell.SetLabel(RCL_LOCK_RTOOLS, Tr("shl_lockrtools"));
@@ -1875,7 +2075,19 @@ void ShellApplyCfg(const int id) {
     } else if (id == g_shell.CfgIdComfort()) {
         g_eff_comfort = !g_eff_comfort;
         GlobalVariableSet("RC_comfort", g_eff_comfort ? 1.0 : 0.0);
-        ApplyComfortScale(false);
+        // v3.25 : this was ApplyComfortScale(false), which REFUSES to touch a
+        // fixed scale that is not ours - so switching the padding back ON did
+        // nothing at all, and switching it OFF left the chart locked on our
+        // own frozen scale. ON forces ; OFF gives the chart back, but only if
+        // the scale still is the one we set (never clobber a manual zoom).
+        if (g_eff_comfort) ApplyComfortScale(true);
+        else if (g_cs_max > g_cs_min) {
+            const double tol0 = (g_cs_max - g_cs_min) * 1e-3;
+            if (MathAbs(ChartGetDouble(0, CHART_FIXED_MIN) - g_cs_min) < tol0 &&
+                MathAbs(ChartGetDouble(0, CHART_FIXED_MAX) - g_cs_max) < tol0)
+                ChartSetInteger(0, CHART_SCALEFIX, false);
+            g_cs_min = 0.0; g_cs_max = 0.0;
+        }
     } else if (id == g_shell.CfgIdDiscipline()) {
         g_eff_discipline = !g_eff_discipline;
         GlobalVariableSet("RC_discipline", g_eff_discipline ? 1.0 : 0.0);
@@ -1889,11 +2101,15 @@ void ShellApplyCfg(const int id) {
         GlobalVariableSet("RC_lang", (double)g_lang);
         ShellPushLabels();                 // the shell's chrome follows the language
     } else if (id == g_shell.CfgIdViolMargin()) {
+        // v3.34 : these two wrote the GLOBAL variable only. PersistViolationFlags()
+        // - which also writes the PER-LOGIN copy the loader reads first - existed,
+        // was declared, and was called by nothing : the flag leaked from one
+        // account to the next and was never saved where it is looked for.
         g_margin_violation_active = !g_margin_violation_active;
-        GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
+        PersistViolationFlags();
     } else if (id == g_shell.CfgIdViolRisk()) {
         g_risk_violation_active = !g_risk_violation_active;
-        GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0);
+        PersistViolationFlags();
     } else if (id == g_shell.CfgIdBe()) {
         g_be_visible = !g_be_visible;
         PersistBE();
@@ -1967,7 +2183,18 @@ void ShellArmSelfLock(void) {
 // to be an OBJ_EDIT. The shell reserves the rect (and a no-op click zone under
 // it) ; the host owns the object, so its lifecycle stays with the other
 // RC_-prefixed objects and it dies with the shell.
+// v3.25 - the boxes are never deleted, they are COVERED. MT5 paints chart
+// objects in CREATION order, so a re-created sidebar bitmap paints over the
+// older OBJ_EDIT ; the sync below finds the object and only MOVES it, so it
+// stays underneath for good. (v3.24 blamed Destroy()/ObjectsDeleteAll - that
+// was wrong : OnChartChange never calls it.) ShellEditsTopmost() deletes them
+// after every surface rebuild so the sync re-creates them on top. The last
+// values are kept so a rebuild can restore both without a model pass.
+double g_last_sug_lot = 0.0;  int g_last_sug_dig = 2;
+double g_last_max_lot = 0.0;  int g_last_max_dig = 2;
+
 void ShellSyncLotEdit(const double lot, const int digits) {
+    g_last_sug_lot = lot; g_last_sug_dig = digits;
     const string id = RC_PREFIX + "V3_copylot";
     int x, y, w, h;
     if (!g_shell.LotEditRect(x, y, w, h)) {
@@ -2133,6 +2360,7 @@ void ShellApplyCascade(const int row, const int dir) {
 }
 // v3.04 : the MAX lot gets its own copy box, right under the suggested one.
 void ShellSyncMaxEdit(const double lot, const int digits) {
+    g_last_max_lot = lot; g_last_max_dig = digits;
     const string id = RC_PREFIX + "V3_copymax";
     int x, y, w, h;
     if (!g_shell.MaxEditRect(x, y, w, h)) {
@@ -2160,11 +2388,42 @@ void ShellSyncMaxEdit(const double lot, const int digits) {
     ObjectSetInteger(0, id, OBJPROP_BORDER_COLOR, g_shell.EditLineColor());
     ObjectSetString (0, id, OBJPROP_TEXT, DoubleToString(lot, digits));
 }
+
+// One call restores both copy boxes after the shell has been re-created.
+void ShellReSyncEdits(void) {
+    ShellEditsTopmost();
+    ShellSyncLotEdit(g_last_sug_lot, g_last_sug_dig);
+    ShellSyncMaxEdit(g_last_max_lot, g_last_max_dig);
+}
+
+// The shell re-created its canvases : they now paint OVER the two native edit
+// boxes. Deleting them here makes the next sync re-create them, i.e. newest,
+// i.e. on top. Cheap : it only fires when the generation actually moved.
+void ShellEditsTopmost(void) {
+    static int s_gen = -1;
+    if (!g_shell.Created()) return;
+    const int gen = g_shell.SurfGen();
+    if (gen == s_gen) return;
+    s_gen = gen;
+    ObjectDelete(0, RC_PREFIX + "V3_copylot");
+    ObjectDelete(0, RC_PREFIX + "V3_copymax");
+}
 // v3.06 PARITY : status-change alerts (sound + Telegram) used to ride inside
 // UpdateRow, in the legacy refresh the shell short-circuits - so they had gone
 // SILENT since the switch to v3, with nothing on screen to say so. They now run
 // on the shell's own model, through the SAME registry (g_rows), the same
 // thresholds and the same per-rule Telegram cooldown.
+// v3.31 : at what fraction of its cap does a rule start to WARN. This used
+// to live inline in ShellRuleAlerts, where only the SOUND could see it, while
+// five drawing sites compared the same ratios to a flat 0.80. The alarm fired
+// on a green panel : the corrected threshold had no voice. One function, both
+// consumers - the sound and the deck the shell paints from.
+double RuleWarnRatio(const string key, const bool trailing) {
+    if (key == "rule_risk_cum" || key == "rule_daily_dd") return 0.70;
+    if (key == "rule_overall_dd") return (trailing ? 0.50 : 0.70);   // trailing = account killer
+    if (key == "rule_hyper" || key == "rule_msgs")        return 0.75;
+    return 0.80;
+}
 void ShellRuleAlerts(const RCDeckData &d) {
     if (!g_eff_risktools) return;
     for (int i = 0; i < RC_RULE_COUNT; ++i) {
@@ -2195,10 +2454,7 @@ void ShellRuleAlerts(const RCDeckData &d) {
         // warned at 70 %, a TRAILING overall at 50 % (it is the account killer),
         // hyper / msgs at 75 %. Flattening everything to 80 % made every alert
         // fire later than it used to - a risk tool must not warn later.
-        double warn = 0.80;
-        if (k == "rule_risk_cum" || k == "rule_daily_dd") warn = 0.70;
-        else if (k == "rule_overall_dd") warn = (d.trailing ? 0.50 : 0.70);
-        else if (k == "rule_hyper" || k == "rule_msgs")   warn = 0.75;
+        const double warn = RuleWarnRatio(k, d.trailing);   // v3.31 : ONE source
         g_rows[i].status     = ComputeRangeStatus(used, cap, warn, 1.00);
         TryFireSoundAlert(i, g_rows[i].status);
     }
@@ -2214,6 +2470,28 @@ void ShellRefresh(void) {
         ShellApplyAddon(g_shell.PendAddonTake());
         if (g_shell.PendSelfLockTake())     ShellArmSelfLock();
         if (g_shell.PendUnlockTake())       ShellReleaseSelfLock();
+        if (g_shell.PendFitTake()) {
+            // v3.27 : the FIT chip. It ARMS the comfort padding (a button that
+            // only works while a setting is already on is a trap) and re-pads
+            // at once - force, because ApplyComfortScale(false) refuses to act
+            // on a fixed scale it does not recognise as its own.
+            g_eff_comfort = true;
+            GlobalVariableSet("RC_comfort", 1.0);
+            ApplyComfortScale(true);
+        }
+        {   // v3.27 : persist the accordion as soon as it moves, per login.
+            static int s_secmask = -1;
+            const int sm2 = g_shell.SecOpenMask();
+            if (sm2 != s_secmask) {
+                s_secmask = sm2;
+                GVSetLogin("RC_v3_secopen", (double)sm2);
+            }
+            // v3.30 : and which panel is open, same rule.
+            static int s_state = -1, s_sec = -1;
+            const int st2 = g_shell.StateGet(), sc2 = g_shell.SecGet();
+            if (st2 != s_state) { s_state = st2; GVSetLogin("RC_v3_state", (double)st2); }
+            if (sc2 != s_sec)   { s_sec   = sc2; GVSetLogin("RC_v3_sec",   (double)sc2); }
+        }
         {   // The theme picked in the shell used to die with the frame : never
             // persisted (a regression against the legacy panel) and the chart-side
             // lines kept the previous palette.
@@ -2245,6 +2523,7 @@ void ShellRefresh(void) {
     }
     ShellRuleAlerts(d);                  // v3.06 : sound + Telegram were silent under v3
     if (g_shell.Created()) g_shell.Tick();
+    ShellEditsTopmost();                       // a rebuilt canvas would cover them
     ShellSyncLotEdit(d.sugLot, d.lotDigits);   // AFTER the render : the rect is known
     ShellSyncMaxEdit(d.maxLot, d.maxLotDigits);
 }
@@ -2618,7 +2897,12 @@ double Live_DailyDdPct(void) {
     // do NOT run a full history scan every 500 ms timer tick from inside the
     // daily-DD meter. Floating part of the day's P&L is handled by ACCOUNT_EQUITY.
     const double realised_today      = CachedRealisedToday();
-    const double balance_day_start   = AccountInfoDouble(ACCOUNT_BALANCE) - realised_today;
+    // v3.41 : and the money that moved the balance WITHOUT being P&L. Without
+    // this term a withdrawal reads as a loss of the same size, every tick, all
+    // day long.
+    const double ops_today           = CachedBalanceOpsToday();
+    const double balance_day_start   = AccountInfoDouble(ACCOUNT_BALANCE)
+                                       - realised_today - ops_today;
     const double cur_eq = AccountInfoDouble(ACCOUNT_EQUITY);
     const double dd = balance_day_start - cur_eq;
     if (dd <= 0.0)
@@ -2643,8 +2927,11 @@ double Live_OverallDdPct(void) {
         // at which the account is lost cannot have two versions.
         const double permitted = (g_profile.max_loss_pct / 100.0) * init;
         const double floorv    = RC_TrailingFloor(g_peak_balance, init, g_profile.max_loss_pct);
+        // v3.26 : this wrote the account's PEAK BALANCE into the Experts log on
+        // every session, ungated - and an Experts log is what a trader pastes
+        // into a support thread. Behind the verbose flag, like every diagnostic.
         static bool s_floor_logged = false; // acceptance : must match the FN dashboard
-        if (!s_floor_logged) {
+        if (!s_floor_logged && InpVerboseLog) {
             PrintFormat("RiskCockpit Instant floor: floor=%.2f permitted=%.2f peak_bal=%.2f",
                         floorv, permitted, g_peak_balance);
             s_floor_logged = true;
@@ -3057,6 +3344,17 @@ bool NewsCcyAffectsSymbol(const string sym, const string ccy) {
     if (jpy && ccy == "JPY") return true;
     if (aud && ccy == "AUD") return true;
     if (cad && ccy == "CAD") return true;
+    // v3.37 : FAIL SAFE. This used to return false for anything it did not
+    // recognise - and `ccy` comes from a JSON file the indicator does not
+    // control. A corrupt, renamed or falsified token silently switched the
+    // whole news rule OFF during the exact minutes it exists for. A token that
+    // is not a currency we can reason about now COUNTS : a false "you are in a
+    // news window" costs a missed trade, a false "you are clear" costs the
+    // account.
+    if (ccy != "USD" && ccy != "EUR" && ccy != "GBP" && ccy != "JPY" &&
+        ccy != "AUD" && ccy != "CAD" && ccy != "CHF" && ccy != "NZD" &&
+        ccy != "CNY" && ccy != "CNH")
+        return true;
     return false;
 }
 
@@ -3489,6 +3787,14 @@ void LoadOrSeedPeakBalance(void) {
     const double seed = MathMax(g_profile.initial_balance, AccountInfoDouble(ACCOUNT_BALANCE));
     if (GlobalVariableCheck(k_pb)) {
         g_peak_balance = GlobalVariableGet(k_pb);
+        // v3.38 : this value is an UNAUTHENTICATED GlobalVariable - any script,
+        // any EA, any hand edit in the terminal's own Global Variables window
+        // can change it. It drives the trailing floor, floor = min(peak -
+        // permitted, initial), so a peak LOWER than reality lowers the floor and
+        // the panel reports MORE room to lose than the account really has. That
+        // is the one direction a risk tool must never be wrong in. Floor it by
+        // the two things the terminal can observe by itself.
+        if (g_peak_balance < seed) g_peak_balance = seed;
         if (GlobalVariableCheck(k_sd)) {
             const double sd = GlobalVariableGet(k_sd);
             if (g_peak_balance <= sd + 0.005 && seed < sd - 0.005) { // never grew + smaller profile -> heal
@@ -3604,13 +3910,13 @@ string EscapeJson(const string s) {
 bool SendTelegramMessage(const string text) {
     if (!g_eff_telegram)
         return false;
-    if (InpTelegramBotToken == "" || InpTelegramChatId == "")
+    if (true)   // v3.26 : the token inputs are gone - see the note on InpEnableTelegram
         return false;
 
-    const string url = "https://api.telegram.org/bot" + InpTelegramBotToken + "/sendMessage";
+    const string url = "https://api.telegram.org/bot" + "" + "/sendMessage";
     string body;
     StringConcatenate(body,
-                      "{\"chat_id\":\"", InpTelegramChatId,
+                      "{\"chat_id\":\"", "",
                       "\",\"text\":\"", EscapeJson(text), "\"}");
 
     char post[], result[];
@@ -3661,8 +3967,15 @@ bool FFRestrictedOverride(const string ccy, const string title) {
 // `\"` (escaped quote) and `\\"` (escaped backslash + real quote) both parse right.
 string FFJsonStr(const string json, const string key, const int from, const int until, int &next_pos) {
     next_pos = from;
-    const int k = StringFind(json, "\"" + key + "\"", from);
-    if (k < 0 || k >= until) return "";
+    // v3.38 : the search used to run over the WHOLE remaining file and only
+    // then compare the hit with `until` - so a key missing from one event cost
+    // a full scan of everything after it, once per missing field, on a file
+    // this indicator does not control. Look inside the object's own slice.
+    if (until <= from) return "";
+    const int kk = StringFind(StringSubstr(json, from, until - from), "\"" + key + "\"");
+    if (kk < 0) return "";
+    const int k = from + kk;
+    if (k >= until) return "";
     const int c = StringFind(json, ":", k);
     if (c < 0 || c >= until) return "";
     const int q1 = StringFind(json, "\"", c);
@@ -3715,6 +4028,11 @@ int FFParseCalendar(const string json) {
         n++;
     }
     if (n == 0) return 0; // empty/HTML error page -> caller keeps the old state
+    // v3.26 : the feed is untrusted input and nothing bounded it. A crafted or
+    // corrupt 4 MB file allocated without limit, then paid an O(n2) sort and a
+    // chart object per event on EVERY refresh. One week of HIGH+MEDIUM events
+    // is ~150 ; 512 is generous and finite.
+    if (n > 512) n = 512;
     ArrayResize(g_ff_events, n);
     for (int i = 0; i < n; ++i) g_ff_events[i] = parsed[i];
     return n;
@@ -3726,10 +4044,26 @@ int FFParseCalendar(const string json) {
 // EAs / scripts / services only), so a companion service/EA or any external
 // scheduler can drop/refresh this file and the indicator stays FN-aligned.
 // Stale guard : a file older than 8 days is ignored (feed = this week).
+// v3.26 : true while the cache still holds an event that has not already
+// passed. A cache that can no longer answer anything is a source FAILURE, not
+// a quiet week : it must hand the rule back to the MT5 calendar instead of
+// reporting "nothing in the next 24 h" under a lit [FF] badge.
+bool FFHasLiveEvent(void) {
+    const datetime now = TimeGMT();
+    for (int i = 0; i < ArraySize(g_ff_events); ++i)
+        if (g_ff_events[i].t_utc >= now - 3600) return true;
+    return false;
+}
+datetime g_ff_fmod = 0;        // modify date of the parsed file : re-read on change
 bool FFLoadFromFile(void) {
     const int h = FileOpen("ff_calendar_thisweek.json", FILE_READ | FILE_BIN | FILE_SHARE_READ | FILE_SHARE_WRITE);
     if (h == INVALID_HANDLE) return false;
     const datetime fmod = (datetime)FileGetInteger(h, FILE_MODIFY_DATE);
+    // nothing new on disk and a cache already parsed : do not re-parse 200 KB
+    if (fmod > 0 && fmod == g_ff_fmod && ArraySize(g_ff_events) > 0) {
+        FileClose(h);
+        return true;
+    }
     const int sz = (int)FileSize(h);
     if (sz <= 2 || sz > 4 * 1024 * 1024 || (fmod > 0 && TimeCurrent() - fmod > 8 * 24 * 3600)) {
         FileClose(h);
@@ -3742,6 +4076,7 @@ bool FFLoadFromFile(void) {
     if ((int)rd != sz) return false;
     const string json = CharArrayToString(bytes, 0, sz, CP_UTF8);
     const int n = FFParseCalendar(json);
+    if (n > 0) g_ff_fmod = fmod;
     if (n > 0 && !g_ff_active) {
         g_ff_active = true;
         Print("RiskCockpit : ForexFactory feed ACTIVE via the file bridge (", n,
@@ -3758,10 +4093,29 @@ void FFSaveToFile(const string json) { // warm cache for the next re-init (best 
     FileClose(h);
 }
 void FetchFFCalendar(void) {
-    // (a) instant, network-free : repopulate the cache from the file bridge after
-    // a re-init (TF switch / input change wipes the globals).
-    if (ArraySize(g_ff_events) == 0)
+    // (a) the file bridge. This used to be `if (ArraySize(g_ff_events) == 0)` :
+    // the cache was loaded ONCE and never looked at again, so a terminal left
+    // open over a week-end kept last week's events while the companion service
+    // rewrote the file every hour. Everything in the past, nothing matches, and
+    // the panel announced "nothing in the next 24 h" with the [FF] badge lit -
+    // while g_ff_active, never cleared, kept the MT5 calendar locked out. Both
+    // safety nets fell together. Re-read on a cheap modify-date check.
+    static datetime s_ffRead = 0;
+    if (TimeCurrent() - s_ffRead >= 60) {
+        s_ffRead = TimeCurrent();
         FFLoadFromFile();
+        // a cache with nothing current or future cannot answer : say so and
+        // give the rule back to the MT5 calendar instead of saying "no news".
+        if (g_ff_active && !FFHasLiveEvent()) {
+            g_ff_active = false;
+            static bool s_ffDead = false;
+            if (!s_ffDead) {
+                s_ffDead = true;
+                Print("RiskCockpit : the ForexFactory cache holds no current event - ",
+                      "feed marked DOWN, the MT5 calendar takes the news rule back.");
+            }
+        }
+    }
     // (b) throttled web attempt : 1 / 60 min, stamp PERSISTED so re-inits do not
     // re-block the UI thread ; 3 s timeout bounds the worst case.
     if (g_ff_last_try == 0 && GlobalVariableCheck("RC_ff_lasttry"))
@@ -3824,6 +4178,10 @@ datetime FFNextEvt(const bool restricted_class) {
     return (best == 0 ? 0 : best + srv_off);
 }
 bool FFInNewsWindow(void) {
+    // v3.37 : the three MT5 paths all check news_rule_applies ; this one did
+    // not, so switching to the ForexFactory feed brought the rule back to life
+    // on a profile where FundedNext does not apply it at all.
+    if (!g_profile.news_rule_applies) return false;
     if (!g_eff_news_high) return false; // same toggle contract as the MT5 fallback body
     const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
     const datetime now_utc = TimeGMT();
@@ -3854,9 +4212,38 @@ double SumClosedDealsPnL(const datetime from, const datetime to) {
         if (t == 0)
             continue;
         const long entry = HistoryDealGetInteger(t, DEAL_ENTRY);
-        if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT)
+        // v3.41 : DEAL_ENTRY_OUT_BY - a position closed AGAINST an opposite one -
+        // was not counted. This runs on hedging accounts, where close-by is an
+        // ordinary way to flatten, and its P&L simply vanished from the day.
+        if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT &&
+            entry != DEAL_ENTRY_OUT_BY)
             continue;
         sum += HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP) + HistoryDealGetDouble(t, DEAL_COMMISSION);
+    }
+    return sum;
+}
+
+// v3.41 : money that MOVED the balance without being trading P&L - deposits,
+// withdrawals, credits, corrections, bonuses. Live_DailyDdPct rebuilds the
+// start-of-day balance as balance_now - realised_today ; every one of these
+// makes that subtraction wrong by exactly the amount moved. A withdrawal made
+// the reconstructed start-of-day balance too HIGH and the panel reported a
+// daily drawdown that never happened - a breach on a day without a single
+// losing trade.
+double SumBalanceOps(const datetime from, const datetime to) {
+    if (!HistorySelect(from, to))
+        return 0.0;
+    double sum = 0.0;
+    const int n = HistoryDealsTotal();
+    for (int i = 0; i < n; ++i) {
+        const ulong t = HistoryDealGetTicket(i);
+        if (t == 0)
+            continue;
+        const long ty = HistoryDealGetInteger(t, DEAL_TYPE);
+        if (ty != DEAL_TYPE_BALANCE && ty != DEAL_TYPE_CREDIT &&
+            ty != DEAL_TYPE_CORRECTION && ty != DEAL_TYPE_BONUS)
+            continue;
+        sum += HistoryDealGetDouble(t, DEAL_PROFIT);
     }
     return sum;
 }
@@ -3892,6 +4279,20 @@ double CachedRealisedToday(void) {
     return g_realised_today_cache;
 }
 
+// The balance operations of the day, on the same window and the same 2 s
+// throttle as the realised P&L : one bounded pass, never on every tick.
+double   g_balops_today_cache = 0.0;
+datetime g_balops_today_scan  = 0;
+double CachedBalanceOpsToday(void) {
+    if (g_balops_today_scan == 0 || TimeCurrent() - g_balops_today_scan >= 2) {
+        MqlDateTime mdt2;
+        TimeToStruct(TimeCurrent(), mdt2);
+        mdt2.hour = 0; mdt2.min = 0; mdt2.sec = 0;
+        g_balops_today_cache = SumBalanceOps(StructToTime(mdt2), TimeCurrent());
+        g_balops_today_scan  = TimeCurrent();
+    }
+    return g_balops_today_cache;
+}
 double Live_TodayProfit(void) {
     return CachedRealisedToday() + SumFloatingPnL();
 }
@@ -4734,6 +5135,63 @@ void InitI18n(void) {
         "basket",
         "panier",
         "cesta");
+    AddTr("shl_cooldownt",
+        "Cooldown after losses",
+        "Pause après pertes",
+        "Pausa tras pérdidas");
+    AddTr("shl_losses", "losses", "pertes", "pérdidas");
+    AddTr("shl_newsnorule",
+        "No news rule on this profile.",
+        "Aucune règle news sur ce profil.",
+        "Sin regla de noticias en este perfil.");
+    AddTr("shl_limlocked",
+        "Locked risk (scored)",
+        "Risque verrouillé (noté)",
+        "Riesgo bloqueado (puntuado)");
+    AddTr("shl_lotbelowmin",
+        "Maths asked for less than the broker minimum.",
+        "Le calcul demandait moins que le minimum du courtier.",
+        "El cálculo pedía menos que el mínimo del bróker.");
+    AddTr("shl_lotoverbud",
+        "The tradable lot risks MORE than the budget.",
+        "Le lot réel risque PLUS que le budget.",
+        "El lote real arriesga MÁS que el presupuesto.");
+    AddTr("shl_lotmargbound",
+        "Free margin is what limits this lot.",
+        "C'est la marge libre qui limite ce lot.",
+        "El margen libre es lo que limita este lote.");
+    AddTr("shl_lotmargshort",
+        "Free margin cannot cover the minimum lot.",
+        "La marge libre ne couvre même pas le lot minimum.",
+        "El margen libre no cubre ni el lote mínimo.");
+    AddTr("shl_lotreduce",
+        "Cumulative budget left is under cap / N.",
+        "Le budget cumulé restant est sous plafond / N.",
+        "El presupuesto acumulado restante está bajo tope / N.");
+    AddTr("shl_lockblocked",
+        "LOCKED - this control is disabled until the lock ends",
+        "VERROUILLÉ - ce contrôle est désactivé jusqu'à la fin du verrou",
+        "BLOQUEADO - este control está desactivado hasta el fin del bloqueo");
+    AddTr("shl_navroom", "ROOM", "MARGE", "MARGEN");
+    AddTr("shl_navlot",  "LOT",  "LOT",   "LOTE");
+    AddTr("shl_navnews", "NEWS", "NEWS",  "NEWS");
+    AddTr("shl_navfit",  "FIT",  "CADR",  "AJUS");
+    AddTr("shl_cptstate",  "TERMINAL",   "TERMINAL",    "TERMINAL");
+    AddTr("shl_cptfirm",   "Broker",     "Courtier",    "Bróker");
+    AddTr("shl_cptserver", "Server",     "Serveur",     "Servidor");
+    AddTr("shl_cptlev",    "Leverage",   "Levier",      "Apalancamiento");
+    AddTr("shl_cptbal",    "Balance",    "Solde",       "Saldo");
+    AddTr("shl_cpteq",     "Equity",     "Équité",      "Patrimonio");
+    AddTr("shl_cptmused",  "Margin used","Marge utilisée", "Margen usado");
+    AddTr("shl_cptfreem",  "Free margin","Marge libre", "Margen libre");
+    AddTr("shl_colours",
+        "COLOURS",
+        "COULEURS",
+        "COLORES");
+    AddTr("shl_roomshort",
+        "ROOM",
+        "MARGE",
+        "MARGEN");
     AddTr("shl_unlock",
         "RELEASE THE LOCK",
         "LEVER LE VERROU",
@@ -5022,9 +5480,9 @@ void InitI18n(void) {
         "BREACH - limite atteinte",
         "BREACH - límite alcanzado");
     AddTr("shl_hr40",
-        "40% RULE",
-        "RÈGLE 40%",
-        "REGLA 40%");
+        "NEWS RULE",
+        "RÈGLE NEWS",
+        "REGLA NEWS");
     AddTr("shl_hr40a",
         "News window : only ",
         "Fenêtre news : seuls ",
@@ -5066,9 +5524,9 @@ void InitI18n(void) {
         "ne ferme AUCUN trade. Aucun signal.",
         "modifica ni cierra NINGUNA operación. Sin señal.");
     AddTr("shl_secsize",
-        "sections : enlarge the window",
-        "sections : agrandis la fenêtre",
-        "secciones : agranda la ventana");
+        "more : fold one, or enlarge the window",
+        "de plus : replie-en une, ou agrandis la fenêtre",
+        "más : pliega una, o agranda la ventana");
     AddTr("shl_rtoolsoff",
         "Risk toolkit OFF (personal account).",
         "Outils de risque OFF (compte perso).",
@@ -5793,7 +6251,7 @@ void ApplySettingsChange(void) {
     // v3 SHELL : DestroyAllObjects wipes the WHOLE "RC_" namespace - the shell's
     // canvases included (RC_V3_*). Recreate them here or the rail would vanish
     // until the next chart change (seen on the lock -> clear transition).
-    if (g_shell.Created()) g_shell.OnChartChange();
+    if (g_shell.Created()) { g_shell.OnChartChange(); ShellReSyncEdits(); }
     // V1.29 S : CHART elements live on the price area (NOT the panel), so a popup
     // change must reflect on them IMMEDIATELY - refresh them ALWAYS (no modal
     // bleed-through, they're off-panel). Only RefreshPanel (the panel rows) stays

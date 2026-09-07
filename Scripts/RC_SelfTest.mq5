@@ -12,7 +12,7 @@
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link      "https://javadrazavi.fr"
 #property version   "1.00"
-#property script_show_inputs
+// no inputs : the dialog would only stand between the user and the result
 #property strict
 
 #include <..\Libraries\RC_Math.mqh>
@@ -30,6 +30,24 @@ void CheckD(const string name, const double got, const double want, const double
 
 void OnStart() {
     Print("=== RiskCockpit self-test : pure math ===");
+    {  // v3.31 : the aggregate must colour on each rule's OWN threshold. A
+       // daily DD at 72% of its cap warns (threshold 70%) while a margin at
+       // 72% does not (threshold 80%) - the exact case where the old flat
+       // 0.80 kept the panel green while the alarm was sounding.
+       double w = 0.0, s = 0.0, m = 0.80;
+       RC_WorstRule(w, s, m, 3.6, 5.0, true, 0.70);
+       CheckD("agregat : consommation brute", w, 0.72);
+       Check("agregat : 72% d'un plafond a seuil 70% AVERTIT", s >= 1.0);
+       CheckD("agregat : le repere suit la regle qui avertit", m, 0.70);
+       double w2 = 0.0, s2 = 0.0, m2 = 0.80;
+       RC_WorstRule(w2, s2, m2, 3.6, 5.0, true, 0.80);
+       Check("agregat : 72% d'un plafond a seuil 80% n'avertit PAS", s2 < 1.0);
+       double w3 = 0.0, s3 = 0.0, m3 = 0.80;
+       RC_WorstRule(w3, s3, m3, 9.9, 0.0, true, 0.70);
+       CheckD("agregat : un plafond nul ne compte pas", w3, 0.0);
+       RC_WorstRule(w3, s3, m3, 9.9, 5.0, false, 0.70);
+       CheckD("agregat : une regle inapplicable ne compte pas", w3, 0.0);
+    }
 
     // --- TRAILING FLOOR : the level at which a funded account is lost -----
     // FundedNext oracle (Instant 2K) : peak 2003.28, 6% of 2000 = 120 permitted.

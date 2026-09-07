@@ -64,12 +64,26 @@ struct RCDeckData {
    string planTag, sizeTag; // "INST" / "2K"
    int    splitPct;
    bool   riskTools;        // the prop toolkit is ON (Personal can switch it off)
+   // account state : what the terminal itself says about this login. The
+   // legacy Account tab showed it ; the v3 panel had dropped all of it.
+   string acctFirm, acctServer, acctCurr;
+   int    acctLev;                       // 1:N
+   double marginUsed, freeMargin;        // $ ; the % lives in freeMarginPct
    // limits (cell LIM)
    double limRatio;         // 0..1 : worst consumption among the ACTIVE limits
+   // v3.31 : the sound warned at 70/50/75 % per rule while every screen
+   // compared to a flat 0.80 - the alarm fired on a green panel. The HOST
+   // now decides once, here, and every surface obeys.
+   int    limStat;          // 0 ok / 1 watch / 2 breach, each rule's OWN threshold
+   double limMark;          // the threshold that actually applies (gauge tick)
+   double warnMargin, warnRisk, warnDaily, warnOverall, warnQuick, warnHyper;
    double roomMoney;        // $ to the nearest active limit (-1 = no limit applies)
    double floorMoney;       // trailing floor $ (0 when not applicable)
    bool   trailing;         // FN Instant style trailing max-loss
    double marginPct, marginCap, riskPct, riskCap;
+   // v3.35 : the risk FundedNext actually scores - locked at the stop posed
+   // AT OPENING. Trailing a stop lowers riskPct and leaves this one alone.
+   double lockedRiskPct;
    double dailyPct, dailyCap, overallPct, overallCap;
    bool   dailyApplies, overallApplies;
    // positions (cell POS)
@@ -80,9 +94,16 @@ struct RCDeckData {
    double sugLot;
    int    lotDigits;
    bool   lotCapped, lotZero;   // capped by the 80% survival guard / no room left
+   // v3.35 : the advisor computed all of these and the deck carried none.
+   bool   lotBelowMin;          // the maths asked for less than the broker minimum
+   bool   lotOverBudget;        // the tradable lot risks MORE than the budget
+   bool   lotMarginBound;       // real free margin is the tightest constraint
+   bool   lotMarginShort;       // free margin cannot cover even the minimum lot
+   bool   lotReduce;            // remaining cumulative budget < cap / N
    double budgetPct, freeMarginPct;
    // news (cell NEWS)
    bool   newsHasEvt, newsHigh, newsActive, newsFF;
+   bool   newsApplies;      // v3.37 : this profile HAS a news rule at all
    int    newsMins;
    // discipline (cell DISC)
    bool   discLocked, discTilt, slGuard;
@@ -121,6 +142,11 @@ struct RCDeckData {
    string slGuardSym;
    double slGuardPrice;
    bool   selfLock;
+   // v3.33 : WHICH lock is holding. 0 none, 1 self-lock, 2 daily drawdown,
+   // 3 cooldown after consecutive losses. "Locked" without a reason is an
+   // instruction the trader cannot check.
+   int    lockKind;
+   int    lossStreak;       // consecutive losing trades : what a cooldown is ABOUT
    // --- lot 2b : account card + config toggles --------------------------
    string planLabel, phaseLabel, acctTypeLabel, addonsLabel, cycleLabel, sizeLabelFull;
    long   login;
@@ -166,7 +192,7 @@ enum ERCZone {
    RZ_PANEL_CLOSE, RZ_PANEL_PIN,
    // navbar
    RZ_NAV_LOGO, RZ_NAV_SYM, RZ_NAV_TF, RZ_NAV_VITALS, RZ_NAV_HEALTH,
-   RZ_NAV_PALETTE, RZ_NAV_MODE, RZ_NAV_CLOCK, RZ_NAV_KILL,
+   RZ_NAV_PALETTE, RZ_NAV_MODE, RZ_NAV_FIT, RZ_NAV_CLOCK, RZ_NAV_KILL,
    // hover-only info zones (click = swallowed no-op, never collapses a section)
    RZ_TIP_LIM_ROOM, RZ_TIP_LIM_FLOOR, RZ_TIP_LIM_M0, RZ_TIP_LIM_M1,
    RZ_TIP_LIM_M2, RZ_TIP_LIM_M3,
@@ -189,8 +215,8 @@ enum ERCZone {
    // --- floating positions table (appears as soon as a trade is open) ---
    RZ_FLT_GRIP, RZ_FLT_HIDE,
    RZ_FLT_ROW0, RZ_FLT_ROW1, RZ_FLT_ROW2, RZ_FLT_ROW3,
-   RZ_FLT_ROW4, RZ_FLT_ROW5, RZ_FLT_ROW6, RZ_FLT_ROW7,
-   RZ_FLT_CLOSE0, RZ_FLT_CLOSE1, RZ_FLT_CLOSE2, RZ_FLT_CLOSE3,
+   RZ_FLT_ROW4, RZ_FLT_ROW5, RZ_FLT_ROW6, RZ_FLT_ROW7,
+   RZ_FLT_CLOSE0, RZ_FLT_CLOSE1, RZ_FLT_CLOSE2, RZ_FLT_CLOSE3,
    RZ_FLT_CLOSE4, RZ_FLT_CLOSE5, RZ_FLT_CLOSE6, RZ_FLT_CLOSE7,
    RZ_FLT_QLIM, RZ_FLT_QLOT, RZ_FLT_QNEWS,
    // --- v3.02 : settings tabs + steppers + plan cascade -----------------
@@ -207,11 +233,16 @@ enum ERCZone {
    RZ_SELFLOCK, RZ_UNLOCK,
    RZ_CYC_PREV0, RZ_CYC_PREV1, RZ_CYC_PREV2,
    RZ_CYC_NEXT0, RZ_CYC_NEXT1, RZ_CYC_NEXT2,
-   RZ_MAXLOT_EDIT
+   RZ_MAXLOT_EDIT,
+   // --- v3.27 : the full panel is an ACCORDION - one clickable header per
+   // section, contiguous so the index is the offset.
+   RZ_SECH0, RZ_SECH1, RZ_SECH2, RZ_SECH3, RZ_SECH4, RZ_SECH5, RZ_SECH6, RZ_SECH7
 };
 //--- label slots : the shell ships FR defaults ; the host overrides them with
 //--- its own i18n (Tr) so one translation table serves the whole product.
-#define RCS_L_MAX 192      // MUST stay above the last ERCLabel id
+// v3.36 : 184 ids for 192 slots is how the v3.07 defect comes back - ids were
+// being silently dropped then, and eight slots of headroom is not headroom.
+#define RCS_L_MAX 256      // MUST stay above the last ERCLabel id
 #define RCS_TIP_MAX 192     // tooltip slots, indexed by zone id - MUST stay above the last ERCZone id
 enum ERCLabel {
    RCL_SEC_LIM = 0, RCL_SEC_POS, RCL_SEC_LOT, RCL_SEC_NEWS, RCL_SEC_DISC,
@@ -234,6 +265,7 @@ enum ERCLabel {
    RCL_CPT_PROFILE, RCL_TAB_RISK, RCL_TAB_DISC, RCL_TAB_ADV, RCL_TAB_DISP,
    RCL_CYCLE, RCL_YEAR, RCL_MONTH, RCL_DAY, RCL_DISC_VIOL, RCL_VIOL_M, RCL_VIOL_R,
    RCL_LOCK_ARM, RCL_LOCK_ASK, RCL_LOCK_ON, RCL_BE, RCL_CLOSE_EA, RCL_UNLOCK, RCL_LOCK_TG,
+   RCL_ROOM_SHORT, RCL_HELP_COLOURS,
    RCL_RAIL_CPT, RCL_RAIL_HELP, RCL_FLOOR_HINT, RCL_MORE_RESIZE, RCL_PYRAMID, RCL_LOT_NOROOM,
    RCL_LOT_CAP80, RCL_SRC_MT, RCL_INACTIVE, RCL_NEWS_ACT_EL, RCL_IN_MIN, RCL_NEWS_NONE24,
    RCL_RULE40, RCL_CHECKFN, RCL_SLG_ON, RCL_TILT_ON, RCL_ALLCLEAR, RCL_SELFLOCK_T,
@@ -245,7 +277,13 @@ enum ERCLabel {
    RCL_NEWS_SOURCE, RCL_HELP_RO1, RCL_HELP_RO2, RCL_SECS_RESIZE, RCL_RTOOLS_OFF,
    RCL_BAND_WKND, RCL_MINS_LEFT, RCL_BAND_RAISE, RCL_BAND_SLLOW, RCL_BAND_LOCKED,
    RCL_BAND_TRADES, RCL_BAND_SLOW,
-   RCL_NEWS_HI, RCL_NEWS_MED, RCL_LOCK_RTOOLS, RCL_LOCK_VIOL
+   RCL_NEWS_HI, RCL_NEWS_MED, RCL_LOCK_RTOOLS, RCL_LOCK_VIOL,
+   RCL_SEC_CPTST, RCL_CPT_FIRM, RCL_CPT_SERVER, RCL_CPT_LEV, RCL_CPT_BAL,
+   RCL_CPT_EQ, RCL_CPT_MUSED, RCL_CPT_FREEM,
+   RCL_NAV_ROOM, RCL_NAV_LOT, RCL_NAV_NEWS, RCL_NAV_FIT,
+   RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
+   RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
+   RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -254,7 +292,7 @@ struct RCZone { int x, y, w, h, id; };
 #define RCS_CELLS_TOT  402      // 74+46+50+52+48+48+44+40 (see CellH)
 #define RCS_RAIL_HEAD   44      // pad 4 + chevron band 22 + 18 breathing
 #define RCS_RAIL_MING    4      // gap floor before degrading
-#define RCS_NAV_W      750
+#define RCS_NAV_W      980      // v3.27 : room for ROOM / LOT / NEWS
 #define RCS_NAV_MINW   330      // floor = the MANDATORY controls (logo+sym+tf+pal+D/L+X)
 #define RCS_NAV_H       34
 #define RCS_SIDE_W     340
@@ -267,7 +305,7 @@ struct RCZone { int x, y, w, h, id; };
 #define RCS_BAND_H      26      // full-width blocking banner (hard lock / SL guard / tilt)
 #define RCS_FLT_W      256      // floating positions table (shown while trades are open)
 #define RCS_FLT_HEAD    24
-#define RCS_FLT_ROW     30
+#define RCS_FLT_ROW     30
 #define RCS_FLT_QUICK   28      // quick-access strip (room / lot / news)
 
 //--- font scale (POINTS) ----------------------------------------------------
@@ -289,6 +327,8 @@ private:
    RCTheme    m_t;
    string     m_pfx;
    bool       m_created, m_haveData;
+   int        m_surfGen;     // bumped by CreateSurfaces : the host re-creates
+                             // its native edit boxes so they stay ON TOP
    int        m_themeIdx;        // 0..5 (palette*2 + light)
    int        m_state;           // 0 = rail only, 1 = one section, 2 = full sidebar
    int        m_sec;             // active section = its RZ_RAIL_* id
@@ -303,12 +343,15 @@ private:
    int        m_fltX, m_fltY, m_fltW, m_fltH;
    bool       m_fltOn, m_fltHidden, m_drag;
    bool       m_lastLeft;        // previous button state : a drag needs a TRANSITION
-   int        m_pendTheme;       // host consumes : new theme index, -1 = none
+   int        m_pendTheme;       // host consumes : new theme index, -1 = none
+   bool       m_pendFit;         // host consumes : re-centre the chart NOW
    bool       m_closeNotice;     // a disabled CLOSE was clicked : highlight the EA line
    // v3.09 : measured height of each section (0 = never drawn yet). The panel
    // surface is sized from it, so a body can no longer be painted outside its
    // own bitmap - the defect that made the floating table vanish.
-   int        m_secH[8];
+   int        m_secH[9];        // 0..7 = one section ; 8 = the FULL stack
+   bool       m_secOpen[8];     // v3.27 : accordion state of the FULL panel
+   string     m_accTitle;       // v3.28 : title just drawn by the accordion
    bool       m_relayout;        // a measurement moved : re-create the surfaces
    int        m_dragOffX, m_dragOffY;
    int        m_sideX, m_sideY, m_sideH;
@@ -324,6 +367,7 @@ private:
    bool       m_pendSelfLock;    // host consumes : ARM the self-lock (confirmed)
    bool       m_pendUnlock;      // host consumes : RELEASE an active self-lock
    bool       m_lockArm;         // first click : the button asks for confirmation
+   bool       m_lockBlocked;     // v3.34 : a click was refused because of the lock
    bool       m_maxEditOn;       // second copy box (max lot)
    int        m_maxEditX, m_maxEditY;
    string     m_L[RCS_L_MAX];    // i18n slots (empty = the built-in FR default is used)
@@ -405,12 +449,17 @@ private:
    }
 
    void ReadChart(void) {
-      m_chW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+      // v3.35 : the floor below is for LAYOUT decisions (how much fits). It
+      // must never reach the ANCHOR : on a chart narrower than 400 px the rail
+      // was placed at 400 - 36 = 364, i.e. off-screen - and the rail is the only
+      // permanent surface, the one that opens everything else.
+      const int realW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+      m_chW = realW;
       m_chH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
       if(m_chW < 400) m_chW = 400;
       if(m_chH < 300) m_chH = 300;
       // ANCHOR CLAMP : every surface hugs its edge, never leaves the screen.
-      m_railX = m_chW - RCS_RAIL_W;
+      m_railX = (realW > RCS_RAIL_W ? realW - RCS_RAIL_W : 0);
       m_railH = (int)(m_chH * 0.60);                    // centred band ~60% (20% air top+bottom)
       const int minh = RCS_RAIL_HEAD + RCS_CELLS_TOT + 7 * RCS_RAIL_MING;
       if(m_railH < minh) m_railH = minh;
@@ -461,7 +510,7 @@ private:
       const int msec = (m_state == 1 ? SecIdx(m_sec) : -1);
       const int meas = (msec >= 0 ? m_secH[msec] : 0);
       m_sideH = (meas > 0 ? meas
-               : (m_state == 2 ? RCS_SIDE_FULLH
+               : (m_state == 2 ? (m_secH[8] > 0 ? m_secH[8] : RCS_SIDE_FULLH)
                  : ((m_state == 1 && (m_sec == RZ_RAIL_CFG || m_sec == RZ_RAIL_CPT))
                     ? RCS_SIDE_TALLH : RCS_SIDE_SECH)));
       if(m_sideH > m_chH - 24) m_sideH = m_chH - 24;
@@ -476,6 +525,25 @@ private:
    }
 
    //================= NAVBAR (session state - top centre) ==================
+   //--- one navbar chip : LABEL then value, returns the next x -------------
+   int NavChip(const int x, const string lab, const string val, const color vc,
+               const int zid) {
+      const int w = 86;
+      m_nav.CapsuleStroke(x, 7, w, 20, Mix(m_t.surface, m_t.dim, 0.30),
+                          Mix(m_t.surface, clrBlack, 0.10));
+      m_nav.Text(x + 7, 12, lab, A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
+      m_nav.Text(x + w - 7, 11, val, A(vc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, FW_BOLD);
+      ZAdd(m_navX + x, m_navY + 7, w, 20, zid);
+      return x + w + 4;
+   }
+   //--- money that always fits a chip : 1 234 -> 1.2K, 12 345 -> 12K --------
+   string MoneyShort(const double v) const {
+      const double a = MathAbs(v);
+      if(a >= 100000.0) return "$" + DoubleToString(v / 1000.0, 0) + "K";
+      if(a >= 10000.0)  return "$" + DoubleToString(v / 1000.0, 1) + "K";
+      if(a >= 1000.0)   return "$" + DoubleToString(v / 1000.0, 2) + "K";
+      return "$" + DoubleToString(v, 0);
+   }
    void RenderNavbar(void) {
       if(!m_nav.Ready()) return;
       m_nav.Begin();
@@ -492,7 +560,8 @@ private:
       m_nav.Text(144, 11, m_d.tf, A(m_t.accent), RCS_F_BODY, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(m_navX + 122, m_navY + 7, 44, 20, RZ_NAV_TF);
       // --- right cluster : palette / mode / clock / remove ----------------
-      const int killX = W - 28, clkX = W - 96, modeX = W - 130, palX = W - 172;
+      const int killX = W - 28, clkX = W - 96, modeX = W - 130,
+                fitX  = W - 166, palX = W - 210;
       m_nav.Text(killX + 9, 9, ShortToString((ushort)0x00D7), A(m_t.dim), RCS_F_BTN, "Segoe UI", TA_CENTER | TA_TOP);
       ZAdd(m_navX + killX, m_navY + 4, 22, 26, RZ_NAV_KILL);
       // v3.06 : the legacy title clock switched to the news countdown ; here the
@@ -505,6 +574,15 @@ private:
       m_nav.CapsuleStroke(modeX, 7, 30, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.10));
       m_nav.Text(modeX + 15, 11, (m_themeIdx % 2 == 1 ? "L" : "D"), A(m_t.text), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(m_navX + modeX, m_navY + 7, 30, 20, RZ_NAV_MODE);
+      // v3.27 : centre the chart, next to the theme chips (JR). It turns the
+      // comfort padding ON and re-pads immediately - the host does the work.
+      m_nav.CapsuleStroke(fitX, 7, 32, 20,
+                          Mix(m_t.surface, m_d.cfgComfort ? m_t.accent : m_t.dim, 0.45),
+                          Mix(m_t.surface, clrBlack, 0.10));
+      m_nav.Text(fitX + 16, 11, L(RCL_NAV_FIT, "FIT"),
+                 A(m_d.cfgComfort ? m_t.accent : m_t.dim), RCS_F_SMALL, "Segoe UI",
+                 TA_CENTER | TA_TOP, FW_BOLD);
+      ZAdd(m_navX + fitX, m_navY + 7, 32, 20, RZ_NAV_FIT);
       m_nav.CapsuleGradient(palX, 7, 38, 20, A(m_t.accent), A(m_t.accent2));
       m_nav.Text(palX + 19, 11, StringSubstr(m_t.name, 0, 4), Mix(m_t.bg, clrBlack, 0.35), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(m_navX + palX, m_navY + 7, 38, 20, RZ_NAV_PALETTE);
@@ -516,11 +594,37 @@ private:
          string hb = m_d.verdictWord + " " + IntegerToString(m_d.score) + "/100";
          m_nav.Text(midX + 52, 11, hb, A(vc), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
          ZAdd(m_navX + midX, m_navY + 7, 104, 20, RZ_NAV_HEALTH);
-         if(midW >= 260) {
+         // v3.27 : the three numbers that decide the next click, on the top bar
+         // (JR : "les infos importantes sur la barre horizontale du haut").
+         // They are the same three the floating table carries - room to the
+         // nearest limit, advised lot, next news - so the bar answers "can I
+         // take this trade" without opening anything.
+         int cx = midX + 112;
+         if(midW >= 250) {
+            const color rc = LimStatC();
+            cx = NavChip(cx, L(RCL_NAV_ROOM, "ROOM"),
+                         (m_d.roomMoney < 0.0 ? "N/A" : MoneyShort(m_d.roomMoney)),
+                         rc, RZ_NAV_VITALS);
+         }
+         if(midW >= 340) {
+            const color lc2 = (m_d.lotZero ? m_t.red : (m_d.lotCapped ? m_t.warn : m_t.accent));
+            cx = NavChip(cx, L(RCL_NAV_LOT, "LOT"),
+                         (m_d.sugLot > 0.0 ? DoubleToString(m_d.sugLot, m_d.lotDigits) : "--"),
+                         lc2, RZ_NAV_VITALS);
+         }
+         if(midW >= 430) {
+            const color nc2 = (!m_d.newsHasEvt ? m_t.dim
+                               : (m_d.newsActive ? m_t.red
+                                  : (m_d.newsMins <= 60 ? m_t.warn : m_t.text)));
+            cx = NavChip(cx, L(RCL_NAV_NEWS, "NEWS"),
+                         (m_d.newsHasEvt ? IntegerToString(m_d.newsMins) + "m" : "--"),
+                         nc2, RZ_NAV_VITALS);
+         }
+         if(midW >= 560) {
             string vit = "$" + DoubleToString(m_d.equity, 2) + "  " +
                          IntegerToString(m_d.posCount) + " pos";
-            m_nav.Text(midX + 116, 11, vit, A(m_t.dim), RCS_F_NUM, "Consolas", TA_LEFT | TA_TOP);
-            ZAdd(m_navX + midX + 116, m_navY + 7, midW - 116, 20, RZ_NAV_VITALS);
+            m_nav.Text(cx + 6, 11, vit, A(m_t.dim), RCS_F_NUM, "Consolas", TA_LEFT | TA_TOP);
+            ZAdd(m_navX + cx + 6, m_navY + 7, midX + midW - cx - 6, 20, RZ_NAV_VITALS);
          }
       }
       m_nav.Commit();
@@ -549,13 +653,16 @@ private:
       double ratio = m_d.limRatio;
       if(ratio < 0.0) ratio = 0.0;
       if(ratio > 1.0) ratio = 1.0;
-      const color rc = (ratio >= 1.0 ? m_t.red : (ratio >= 0.80 ? m_t.warn : m_t.ok));
+      const color rc = LimStatC();
       const int mx = W / 2 - 3, mh = 46;
       m_rail.Capsule(mx, cy + 2, 6, mh, A(TrackC()));
       const int fh = (int)(mh * ratio);
       if(fh > 1) m_rail.CapsuleGradient(mx, cy + 2 + (mh - fh), 6, fh, A(rc), Mix(rc, clrBlack, 0.25));
-      // 80% survival marker (the v2.13 guard threshold)
-      m_rail.Capsule(mx - 2, cy + 2 + (int)(mh * 0.20), 10, 2, Mix(TrackC(), m_t.text, 0.45));
+      // v3.31 : the tick used to sit at 80 % no matter what, while the rule
+      // closest to warning could be warning at 50 %. It now marks the
+      // threshold that actually applies, and the tooltip says the number.
+      const double mk = (m_d.limMark > 0.0 && m_d.limMark < 1.0 ? m_d.limMark : 0.80);
+      m_rail.Capsule(mx - 2, cy + 2 + (int)(mh * (1.0 - mk)), 10, 2, Mix(TrackC(), m_t.text, 0.45));
       m_rail.Text(W / 2, cy + mh + 6, IntegerToString((int)(ratio * 100.0)) + "%", A(rc), RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(m_railX, m_railY + cy, W, ch, RZ_RAIL_LIM);
       // --- POS : open count + worst row status ---------------------------
@@ -585,7 +692,13 @@ private:
          m_rail.CapsuleStroke(W / 2 - 5, cy + 8, 10, 10, Mix(m_t.surface, m_t.dim, 0.45), Mix(m_t.surface, clrBlack, 0.06));
          m_rail.Text(W / 2, cy + 30, "NEWS", A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       }
-      m_rail.Text(W / 2, cy + 42, (m_d.newsFF ? "FF" : "MT"), A(m_d.newsFF ? m_t.accent : m_t.dim), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
+      // v3.40 : the badge names the SOURCE of a rule. With no rule on this
+      // profile it named a source for nothing - the events still show, the
+      // claim of a binding source does not.
+      m_rail.Text(W / 2, cy + 42,
+                  (!m_d.newsApplies ? "-" : (m_d.newsFF ? "FF" : "MT")),
+                  A(m_d.newsApplies && m_d.newsFF ? m_t.accent : m_t.dim),
+                  RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
       ZAdd(m_railX, m_railY + cy, W, ch, RZ_RAIL_NEWS);
       // --- DISC : lock / SL guard / tilt / trades today -------------------
       cy = CellY(RZ_RAIL_DISC); ch = CellH(RZ_RAIL_DISC);
@@ -646,15 +759,33 @@ private:
       return "";
    }
    void SecHead(const string s, int &y) {
+      // v3.28 : in the accordion the header already carries the section name ;
+      // printing it again right underneath read as a stutter ("OPEN POSITIONS
+      // / OPEN POSITIONS"). Only an exact repeat is dropped, so a body whose
+      // first heading says something else keeps it.
+      if(StringLen(m_accTitle) > 0) {
+         const bool same = (s == m_accTitle);
+         m_accTitle = "";
+         if(same) return;
+      }
       m_side.Text(18, y, s, A(m_t.accent), RCS_F_LABEL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
       y += 15;
       m_side.Hairline(18, y, RCS_SIDE_W - 18, LineC());
       y += 9;
    }
    //--- one metered rule row : label, bar, value, status dot ---------------
-   int LimRow(int y, const string k, const double v, const double cap, const bool applies, const int zid) {
+   //--- the aggregate status, decided host-side with each rule's own
+   //--- threshold. Every surface that used to compare limRatio to a flat
+   //--- 0.80 reads this instead - that flat number was the reason the alarm
+   //--- could sound while the whole panel stayed green.
+   color LimStatC(void) const {
+      return (m_d.limStat >= 2 ? m_t.red : (m_d.limStat == 1 ? m_t.warn : m_t.ok));
+   }
+   int LimRow(int y, const string k, const double v, const double cap, const bool applies,
+              const int zid, const double warn) {
       const double ratio = (applies && cap > 0.0 ? v / cap : 0.0);
-      const color st = (!applies ? m_t.dim : (ratio >= 1.0 ? m_t.red : (ratio >= 0.80 ? m_t.warn : m_t.ok)));
+      const double wr = (warn > 0.0 && warn < 1.0 ? warn : 0.80);
+      const color st = (!applies ? m_t.dim : (ratio >= 1.0 ? m_t.red : (ratio >= wr ? m_t.warn : m_t.ok)));
       m_side.Text(18, y, k, A(m_t.text), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       const string val = (applies ? DoubleToString(v, 2) + " / " + DoubleToString(cap, 1) + "%" : "N/A");
       m_side.Text(RCS_SIDE_W - 18, y, val, A(applies ? m_t.text : m_t.dim), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
@@ -666,17 +797,23 @@ private:
    }
    int SecLimits(int y) {
       SecHead(L(RCL_LIM_HEAD, "LIMIT USAGE"), y);
-      y = LimRow(y, L(RCL_LIM_MARGIN, "Cumulative Margin"),  m_d.marginPct,  m_d.marginCap,  true,                 RZ_TIP_LIM_M0);
-      y = LimRow(y, L(RCL_LIM_RISK, "Cumulative Open Risk"),  m_d.riskPct,    m_d.riskCap,    m_d.riskCap > 0.0,    RZ_TIP_LIM_M1);
-      y = LimRow(y, L(RCL_LIM_DAILY, "Daily DD"),  m_d.dailyPct,   m_d.dailyCap,   m_d.dailyApplies,     RZ_TIP_LIM_M2);
-      y = LimRow(y, L(RCL_LIM_OVERALL, "Overall DD"),       m_d.overallPct, m_d.overallCap, m_d.overallApplies,   RZ_TIP_LIM_M3);
+      y = LimRow(y, L(RCL_LIM_MARGIN, "Cumulative Margin"),  m_d.marginPct,  m_d.marginCap,  true,                 RZ_TIP_LIM_M0, m_d.warnMargin);
+      y = LimRow(y, L(RCL_LIM_RISK, "Cumulative Open Risk"),  m_d.riskPct,    m_d.riskCap,    m_d.riskCap > 0.0,    RZ_TIP_LIM_M1, m_d.warnRisk);
+      // v3.35 : the number the FIRM scores. It locks to the stop posed AT
+      // OPENING, so trailing a stop lowers the row above and leaves this one
+      // where it is - the panel could read 1.2 % while the firm scored 3.1 %.
+      if(m_d.riskCap > 0.0)
+         y = LimRow(y, L(RCL_LIM_LOCKED, "Locked risk (scored)"), m_d.lockedRiskPct,
+                    m_d.riskCap, true, RZ_TIP_LIM_M1, m_d.warnRisk);
+      y = LimRow(y, L(RCL_LIM_DAILY, "Daily DD"),  m_d.dailyPct,   m_d.dailyCap,   m_d.dailyApplies,     RZ_TIP_LIM_M2, m_d.warnDaily);
+      y = LimRow(y, L(RCL_LIM_OVERALL, "Overall DD"),       m_d.overallPct, m_d.overallCap, m_d.overallApplies,   RZ_TIP_LIM_M3, m_d.warnOverall);
       // v3.01 parity : Quick Strike is a RULE too - it belongs with the meters.
       if(m_d.qsCap > 0.0)
-         y = LimRow(y, L(RCL_LIM_QS, "Quick Strike"), m_d.qsPct, m_d.qsCap, true, RZ_TIP_LIM_QS);
+         y = LimRow(y, L(RCL_LIM_QS, "Quick Strike"), m_d.qsPct, m_d.qsCap, true, RZ_TIP_LIM_QS, m_d.warnQuick);
       y += 6;
       SecHead(L(RCL_SURV_HEAD, "SURVIVAL ROOM"), y);
       if(m_d.roomMoney >= 0.0) {
-         const color rcol = (m_d.limRatio >= 1.0 ? m_t.red : (m_d.limRatio >= 0.80 ? m_t.warn : m_t.ok));
+         const color rcol = LimStatC();
          m_side.Text(18, y, L(RCL_ROOM, "Room to the limit"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
          m_side.Text(RCS_SIDE_W - 18, y - 3, DoubleToString(m_d.roomMoney, 2) + " $", A(rcol), RCS_F_TITLE, "Consolas", TA_RIGHT | TA_TOP, FW_BOLD);
          ZAdd(m_sideX + 18, m_sideY + y - 4, RCS_SIDE_W - 36, 22, RZ_TIP_LIM_ROOM);
@@ -696,8 +833,11 @@ private:
          // as every other limit : no new metric invented here.
          const double fdd = (m_d.overallApplies && m_d.overallCap > 0.0
                              ? m_d.overallPct / m_d.overallCap : 0.0);
-         const color  fc  = (fdd >= 1.0 ? m_t.red : (fdd >= 0.80 ? m_t.warn : m_t.text));
-         m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.floorMoney, 2) + " $", A(fc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, (fdd >= 0.80 ? FW_BOLD : 0));
+         // the floor is the OVERALL rule : it warns at that rule's threshold
+         // (50 % on a trailing profile), not at a flat 80 %.
+         const double fw = (m_d.warnOverall > 0.0 && m_d.warnOverall < 1.0 ? m_d.warnOverall : 0.80);
+         const color  fc  = (fdd >= 1.0 ? m_t.red : (fdd >= fw ? m_t.warn : m_t.text));
+         m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.floorMoney, 2) + " $", A(fc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, (fdd >= fw ? FW_BOLD : 0));
          ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 20, RZ_TIP_LIM_FLOOR);
          y += 18;
          m_side.Text(18, y, L(RCL_FLOOR_HINT, "Equity below this level = account lost."), A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
@@ -722,8 +862,20 @@ private:
                      A(pnlc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
          y += 15;
          string sub = IntegerToString(m_d.posAge[i] / 60) + " min";
-         if(!m_d.posHasSl[i]) sub += "   " + L(RCL_NOSL, "NO SL");
-         m_side.Text(30, y, sub, A(m_d.posHasSl[i] ? m_t.dim : m_t.red), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+         // v3.39 : FundedNext gives THREE MINUTES to place a stop. The label
+         // used to be the same red NO SL at second 2 and at minute 40 - the
+         // difference between "place your stop" and "you are in violation".
+         color slc = m_t.dim;
+         if(!m_d.posHasSl[i]) {
+            const int left = 180 - m_d.posAge[i];
+            sub += "   " + L(RCL_NOSL, "NO SL");
+            if(left > 0) {
+               sub += " " + IntegerToString(left / 60) + ":" +
+                      (left % 60 < 10 ? "0" : "") + IntegerToString(left % 60);
+               slc = m_t.warn;
+            } else slc = m_t.red;
+         }
+         m_side.Text(30, y, sub, A(slc), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
          ZAdd(m_sideX + 18, m_sideY + y - 15, RCS_SIDE_W - 36, 28, RZ_POS_ROW0 + i);
          y += 16;
       }
@@ -784,6 +936,20 @@ private:
          m_side.Text(RCS_SIDE_W - 18, y + 6, "lot", A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_RIGHT | TA_TOP);
       }
       y += 30;
+      {  // v3.35 : the advisor knew all of this and the panel said none of it.
+         string fl = "";
+         if(m_d.lotMarginShort) fl = L(RCL_LOT_MARGSHORT, "Free margin cannot cover the minimum lot.");
+         else if(m_d.lotOverBudget) fl = L(RCL_LOT_OVERBUD, "The tradable lot risks MORE than the budget.");
+         else if(m_d.lotBelowMin)   fl = L(RCL_LOT_BELOWMIN, "Maths asked for less than the broker minimum.");
+         else if(m_d.lotMarginBound) fl = L(RCL_LOT_MARGBOUND, "Free margin is what limits this lot.");
+         else if(m_d.lotReduce)      fl = L(RCL_LOT_REDUCE, "Cumulative budget left is under cap / N.");
+         if(StringLen(fl) > 0) {
+            m_side.Text(18, y, fl,
+                        A(m_d.lotMarginShort || m_d.lotOverBudget ? m_t.red : m_t.warn),
+                        RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+            y += 16;
+         }
+      }
       if(m_d.lotCapped) {
          m_side.Text(18, y, (m_d.lotZero ? L(RCL_LOT_NOROOM, "No room left : do not take this trade.")
                                          : L(RCL_LOT_CAP80, "Capped at 80% of the survival margin.")),
@@ -803,6 +969,7 @@ private:
       m_side.Text(18, y, L(RCL_LOT_FREE, "Free margin"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.freeMarginPct, 0) + "%", A(m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_LOT_FREE);
+      y += 18;      // this row never advanced y : the NEXT one was painted ON TOP
       // v3.01 parity : "Max lot allowed" - the biggest lot the caps still allow,
       // and WHICH cap binds (target margin / cumulative room / broker free margin).
       if(m_d.maxLot >= 0.0) {
@@ -836,6 +1003,15 @@ private:
    //--- NEWS : the RULE (red) vs the VIGILANCE (amber), and the source ------
    int SecNews(int y) {
       SecHead(L(RCL_SEC_NEWS, "NEWS WINDOW"), y);
+      // v3.37 : on a profile with NO news rule, this section used to print a
+      // source, a state, a window and a countdown - a rule invented for the
+      // reader. One honest line instead, and nothing else.
+      if(!m_d.newsApplies) {
+         m_side.Text(18, y, L(RCL_NEWS_NORULE, "No news rule on this profile."),
+                     A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+         ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_NEWS_RULE);
+         return y + 22;
+      }
       m_side.Text(18, y, L(RCL_NEWS_SRC, "Source"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       m_side.Text(RCS_SIDE_W - 18, y, (m_d.newsFF ? "ForexFactory [FF]" : L(RCL_SRC_MT, "MT5 calendar [MT]")),
                   A(m_d.newsFF ? m_t.accent : m_t.dim), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
@@ -891,7 +1067,17 @@ private:
       m_side.Text(18, y, line, A(lcol), RCS_F_TITLE, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
       y += 24;
       if(m_d.discLocked) {
-         m_side.Text(18, y, (m_d.selfLock ? L(RCL_SELFLOCK_T, "Self-lock (Ulysses)") : L(RCL_DAILYLOCK, "Daily lock")), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+         // v3.33 : three locks can hold, not two - the cooldown after N losses
+         // is back, and a lock that cannot name itself cannot be checked.
+         // v3.36 : a cooldown without its streak leaves out the one number that
+         // explains the lock - "12 min left" says when, never why.
+         m_side.Text(18, y, (m_d.lockKind == 3
+                             ? L(RCL_COOLDOWN_T, "Cooldown after losses") + "  " +
+                               IntegerToString(m_d.lossStreak) + " " +
+                               L(RCL_LOSSES, "losses")
+                             : (m_d.lockKind == 2 ? L(RCL_DAILYLOCK, "Daily lock")
+                                : L(RCL_SELFLOCK_T, "Self-lock (Ulysses)"))),
+                     A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
          m_side.Text(RCS_SIDE_W - 18, y, (m_d.lockMinsLeft > 0 ? IntegerToString(m_d.lockMinsLeft) + " min" : L(RCL_ON_NOW, "active")),
                      A(m_t.red), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
          ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_DISC_LOCK);
@@ -931,21 +1117,40 @@ private:
       y += 4;
       // ARMING a lock is irreversible for its duration : it takes two clicks.
       {
+         // v3.34 : RELEASE is offered for the SELF-lock only. Since v3.33 three
+         // locks can hold, and the other two are RULES, not pacts : a daily
+         // drawdown at 80 % of its cap and a cooldown after a losing streak both
+         // end on their own. Offering two clicks to dismiss them turned the rule
+         // into a suggestion. A pact you cannot leave IS a trap, so the self-lock
+         // keeps its release ; a rule you can dismiss is not a rule.
          const bool armed = m_lockArm;
-         const string txt = (m_d.discLocked
-                             ? (m_d.unlockArmed ? L(RCL_LOCK_ASK, "CONFIRM ?")
-                                                : L(RCL_UNLOCK, "RELEASE THE LOCK"))
-                             : (armed ? L(RCL_LOCK_ASK, "CONFIRM ?")
-                                      : L(RCL_LOCK_ARM, "ARM THE LOCK") + "  " +
-                                        IntegerToString(m_d.selfLockH) + " h"));
-         const color bc = (m_d.discLocked ? m_t.dim : (armed ? m_t.red : m_t.warn));
+         const bool pact  = (m_d.lockKind == 1);
+         string txt;
+         color  bc;
+         if(m_d.discLocked && !pact) {
+            txt = (m_d.lockKind == 3 ? L(RCL_COOLDOWN_T, "Cooldown after losses")
+                                     : L(RCL_DAILYLOCK, "Daily lock")) +
+                  (m_d.lockMinsLeft > 0
+                   ? "  -  " + IntegerToString(m_d.lockMinsLeft) + " " +
+                     L(RCL_MINS_LEFT, "min left")
+                   : "");
+            bc = m_t.red;
+         } else if(m_d.discLocked) {
+            txt = (m_d.unlockArmed ? L(RCL_LOCK_ASK, "CONFIRM ?")
+                                   : L(RCL_UNLOCK, "RELEASE THE LOCK"));
+            bc  = m_t.dim;
+         } else {
+            txt = (armed ? L(RCL_LOCK_ASK, "CONFIRM ?")
+                         : L(RCL_LOCK_ARM, "ARM THE LOCK") + "  " +
+                           IntegerToString(m_d.selfLockH) + " h");
+            bc  = (armed ? m_t.red : m_t.warn);
+         }
          m_side.Capsule(18, y, RCS_SIDE_W - 36, 24, Mix(m_t.surface, bc, 0.30));
          m_side.Text(RCS_SIDE_W / 2, y + 5, txt, A(bc), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
-         // Locked : the SAME capsule becomes the RELEASE control (two clicks within
-         // 5 s, host-side). A pact you cannot leave is a trap, not discipline - the
-         // legacy had an unlock button and the purge dropped it with the panel.
-         ZAdd(m_sideX + 18, m_sideY + y, RCS_SIDE_W - 36, 24,
-              (m_d.discLocked ? RZ_UNLOCK : RZ_SELFLOCK));
+         // no zone at all while a RULE holds : nothing to click, nothing to dismiss
+         if(!m_d.discLocked || pact)
+            ZAdd(m_sideX + 18, m_sideY + y, RCS_SIDE_W - 36, 24,
+                 (m_d.discLocked ? RZ_UNLOCK : RZ_SELFLOCK));
          y += 30;
       }
       // v3.01 parity : hyperactivity + server messages, the two "too much
@@ -954,7 +1159,7 @@ private:
          const double hy = 100.0 * m_d.tradesToday / m_d.tradesCap;
          // RZ_NONE reads as "no hit" in OnClick : clicking this row fell through to
          // the click-away rule and CLOSED the section. It gets its own hover id.
-         y = LimRow(y, L(RCL_HYPER, "Hyperactivity"), hy, 100.0, true, RZ_TIP_HYPER);
+         y = LimRow(y, L(RCL_HYPER, "Hyperactivity"), hy, 100.0, true, RZ_TIP_HYPER, m_d.warnHyper);
       }
       if(m_d.msgsCap > 0) {
          const double mp = 100.0 * m_d.msgsToday / m_d.msgsCap;
@@ -991,7 +1196,11 @@ private:
       else        m_side.CapsuleStroke(px, y, 34, 16, Mix(m_t.surface, m_t.dim, 0.45), Mix(m_t.surface, clrBlack, 0.10));
       m_side.Capsule(on ? px + 20 : px + 3, y + 3, 10, 10,
                      A(locked ? Mix(m_t.surface, m_t.dim, 0.55) : (on ? m_t.bg : m_t.dim)));
-      ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 20, zid);
+      // v3.26 : the zone used to be registered even when LOCKED, so a switch
+      // drawn inert was still clickable and still moved the setting - the two
+      // "after a violation" toggles really tightened the caps while telling the
+      // reader they could not. A control that cannot act must not be clickable.
+      if(!locked) ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 20, zid);
       y += 22;
       if(locked && StringLen(why) > 0) {
          m_side.Text(30, y - 4, why, A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
@@ -1058,6 +1267,26 @@ private:
                 IntegerToString(m_d.minDaysDone) + " / " + IntegerToString(m_d.minDays),
                 (m_d.minDaysDone >= m_d.minDays ? m_t.ok : m_t.warn));
       y = KV(y, L(RCL_ACCOUNT_N, "Account"), IntegerToString((int)m_d.login), m_t.dim);
+      // v3.25 : what the TERMINAL says about this login. The legacy Account
+      // tab carried it and the v3 panel had dropped all of it (JR : the account
+      // facts used to be in the menu and are not there any more).
+      y += 6;
+      SecHead(L(RCL_SEC_CPTST, "TERMINAL"), y);
+      if(StringLen(m_d.acctFirm) > 0)
+         y = KV(y, L(RCL_CPT_FIRM, "Broker"), m_d.acctFirm, m_t.text);
+      if(StringLen(m_d.acctServer) > 0)
+         y = KV(y, L(RCL_CPT_SERVER, "Server"), m_d.acctServer, m_t.text);
+      if(m_d.acctLev > 0)
+         y = KV(y, L(RCL_CPT_LEV, "Leverage"), "1:" + IntegerToString(m_d.acctLev), m_t.text);
+      y = KV(y, L(RCL_CPT_BAL, "Balance"),
+             DoubleToString(m_d.balance, 2) + " " + m_d.acctCurr, m_t.text);
+      y = KV(y, L(RCL_CPT_EQ, "Equity"),
+             DoubleToString(m_d.equity, 2) + " " + m_d.acctCurr,
+             (m_d.equity < m_d.balance ? m_t.warn : m_t.ok));
+      y = KV(y, L(RCL_CPT_MUSED, "Margin used"),
+             DoubleToString(m_d.marginUsed, 2) + " " + m_d.acctCurr, m_t.text);
+      y = KV(y, L(RCL_CPT_FREEM, "Free margin"),
+             DoubleToString(m_d.freeMargin, 2) + " " + m_d.acctCurr, m_t.text);
       // v3.01 parity : profit target - on a trailing (Instant) profile it is the
       // PAYOUT eligibility threshold, not a challenge target to pass.
       if(m_d.targetCap > 0.0) {
@@ -1146,7 +1375,8 @@ private:
    }
    //--- AIDE : the legend, and what this tool is (and is not) --------------
    int SecHelp(int y) {
-      SecHead(L(RCL_SEC_HELP, "LEGEND"), y);
+      // the panel title already says LEGEND : this one was a duplicate line
+      SecHead(L(RCL_HELP_COLOURS, "COLOURS"), y);
       m_side.Capsule(18, y + 4, 8, 8, A(m_t.ok));
       m_side.Text(34, y, L(RCL_HELP_SAFE, "SAFE - below 80% of the limit"), A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
       y += 17;
@@ -1156,11 +1386,24 @@ private:
       m_side.Capsule(18, y + 4, 8, 8, A(m_t.red));
       m_side.Text(34, y, L(RCL_HELP_BREACH, "BREACH - limit reached"), A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
       y += 22;
-      SecHead(L(RCL_HELP_R40, "40% RULE"), y);
+      // The heading was hardcoded "40% RULE" while the body prints the profile's
+      // REAL share : a personal account read "40% RULE / only 100% counts". The
+      // heading now carries the number it is talking about.
+      // v3.40 : the section already says "no news rule on this profile" ; this
+      // page kept explaining which share of the profit counts. Two surfaces,
+      // one fact, two answers - the reader believes whichever they saw last.
+      SecHead(L(RCL_HELP_R40, "NEWS RULE") +
+              (m_d.newsApplies ? "  " + DoubleToString(m_d.newsSharePct, 0) + "%" : ""), y);
+      if(!m_d.newsApplies) {
+         m_side.Text(18, y, L(RCL_NEWS_NORULE, "No news rule on this profile."),
+                     A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+         y += 14;
+      } else {
       m_side.Text(18, y, L(RCL_HELP_R40A, "News window : only ") + DoubleToString(m_d.newsSharePct, 0) + "%",
                   A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
       y += 14;
       m_side.Text(18, y, L(RCL_HELP_R40B, "of the profit counts ; losses count 100%."), A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+      }
       y += 22;
       SecHead(L(RCL_HELP_SURV, "SURVIVAL MARGIN"), y);
       m_side.Text(18, y, L(RCL_HELP_SURVA, "A trade never risks more than 80% of"), A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
@@ -1210,16 +1453,64 @@ private:
          int order[8];
          order[0] = RZ_RAIL_LIM;  order[1] = RZ_RAIL_POS;  order[2] = RZ_RAIL_LOT;  order[3] = RZ_RAIL_NEWS;
          order[4] = RZ_RAIL_DISC; order[5] = RZ_RAIL_CPT;  order[6] = RZ_RAIL_CFG;  order[7] = RZ_RAIL_HELP;
+         // v3.27 : ACCORDION. The eight sections never fitted, and the tail
+         // simply fell off the chart (JR : "on perd le bas du menu"). Every
+         // section keeps a clickable header ; only the BODIES fold, so nothing
+         // is hidden - what does not fit is one click away.
          int shown = 0;
          for(int i = 0; i < 8; i++) {
-            if(y > H - 60) {                               // honest truncation, never overflow
-               m_side.Text(18, y, "+" + IntegerToString(8 - shown) + " " + L(RCL_SECS_RESIZE, "sections : enlarge the window"),
-                           A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
-               break;
+            if(y > H - 46) break;      // no room left : the notice is drawn below
+            const bool op = m_secOpen[i];
+            m_side.CapsuleStroke(14, y - 2, W - 28, 20,
+                                 Mix(m_t.surface, m_t.dim, 0.30),
+                                 Mix(m_t.surface, m_t.accent, op ? 0.12 : 0.04));
+            m_side.Text(24, y + 1, ShortToString((ushort)(op ? 0x25BE : 0x25B8)),
+                        A(m_t.accent), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+            m_side.Text(40, y + 1, SectionTitle(order[i]),
+                        A(op ? m_t.accent : m_t.dim), RCS_F_LABEL, "Segoe UI",
+                        TA_LEFT | TA_TOP, FW_BOLD);
+            ZAdd(m_sideX + 14, m_sideY + y - 2, W - 28, 20, RZ_SECH0 + i);
+            y += 24;
+            if(op) {
+               m_accTitle = SectionTitle(order[i]);   // dropped if the body repeats it
+               y = SecBody(order[i], y) + 8;
+               m_accTitle = "";
             }
-            y = SecBody(order[i], y) + 8;
             shown++;
          }
+         // The notice used to be drawn AT y - that is, exactly where the bitmap
+         // ends - so the one line whose job is to say "there is more" was itself
+         // cut off. A section can also overflow from the inside (its body is
+         // drawn in one go), so count what is missing and say it at a FIXED spot.
+         // v3.32 : this used to ask "did a HEADER fail to fit". An instrumented
+         // run showed the other case : eight headers drawn, cursor at y=1047 on
+         // a 860 px surface - 187 px of the last section painted outside the
+         // bitmap, and the notice silent because shown == 8. The question is
+         // whether any CONTENT is cut. A strip behind it keeps it readable on
+         // top of whatever it covers.
+         if(shown < 8 || y > H - 12) {
+            m_side.RoundFill(14, H - 20, W - 28, 17, 8,
+                             Mix(m_t.surface, m_t.warn, 0.16));
+            m_side.Text(W / 2, H - 18, ShortToString((ushort)0x25BC) + " " +
+                        (shown < 8 ? "+" + IntegerToString(8 - shown) + " " : "") +
+                        L(RCL_SECS_RESIZE, "more : fold one, or enlarge the window"),
+                        A(m_t.warn), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+         }
+         // MEASURE the stack. Everything fitted : take the exact height.
+         // Something was cut and the chart still has room : grow a step and
+         // re-lay out. Already at the chart ceiling : stop growing and let
+         // the "+N sections" line above say so - a silent loop here would
+         // re-create the surfaces on EVERY frame.
+         // v3.28 : this used to accept ANY change, and it oscillated. The loop
+         // reserves room before starting a section while the measure asks for
+         // y + 14 : tall, everything fits and the measure asks to SHRINK ;
+         // short, the last header no longer fits and it asks to GROW. Two
+         // heights forever, one surface rebuild per frame. Growing only is
+         // stable, and folding a section resets m_secH[8] to zero - the one
+         // moment the stack may legitimately become shorter.
+         const int wantF = (shown >= 8 ? y + 14
+                            : (m_sideH < m_chH - 24 ? m_sideH + 120 : m_secH[8]));
+         if(wantF > m_secH[8]) { m_secH[8] = wantF; m_relayout = true; }
       } else {
          y = SecBody(m_sec, y);
          // MEASURE : the first frame of a section may be drawn at the default
@@ -1257,7 +1548,10 @@ private:
       }
 
       switch(q) {
-         case RZ_RAIL_LIM:   t = "Limits";      d = "Use of the nearest limit. Marker = 80%."; return true;
+         case RZ_RAIL_LIM:   t = "Limits";
+            d = "Use of the nearest limit. Marker = " +
+                DoubleToString(100.0 * (m_d.limMark > 0.0 ? m_d.limMark : 0.80), 0) + "%.";
+            return true;
          case RZ_RAIL_POS:   t = "Positions";    d = "Open positions + worst row status.";       return true;
          case RZ_RAIL_LOT:   t = "Advised lot";d = "Lot advisor. Amber = capped at 80%, red = 0.";    return true;
          case RZ_RAIL_NEWS:  t = "News";         d = "Minutes to the next rule-bound event."; return true;
@@ -1275,6 +1569,7 @@ private:
          case RZ_NAV_VITALS: t = "Vitals";       d = "Current equity and open position count.";          return true;
          case RZ_NAV_PALETTE:t = "Theme";        d = "Emerald / Indigo / Slate.";                     return true;
          case RZ_NAV_MODE:   t = "Mode";         d = "Dark / light.";                                  return true;
+         case RZ_NAV_FIT:    t = "Fit";          d = "Re-centre the chart with free room above and below."; return true;
          case RZ_NAV_CLOCK:  t = "Clock";      d = "Broker server time.";                         return true;
          case RZ_NAV_KILL:   t = "Remove";      d = "Removes RiskCockpit from this chart.";              return true;
          case RZ_TIP_LIM_ROOM:  t = "Room";     d = "Dollars before the nearest active limit.";   return true;
@@ -1466,8 +1761,10 @@ private:
       // anything - room to the nearest limit, advised lot, next binding news.
       {
          const int qy = RCS_FLT_HEAD + 3, cw = (W - 16) / 3;
-         const color rc2 = (m_d.limRatio >= 1.0 ? m_t.red : (m_d.limRatio >= 0.80 ? m_t.warn : m_t.ok));
-         m_float.Text(8 + cw / 2, qy, L(RCL_ROOM, "Room to the limit"), A(m_t.dim), RCS_F_SMALL,
+         const color rc2 = LimStatC();
+         // the PANEL wording ("Room to the limit" / "Marge avant limite") overflows
+         // an 80 px column and ran into its neighbour : the strip needs its own word
+         m_float.Text(8 + cw / 2, qy, L(RCL_ROOM_SHORT, "ROOM"), A(m_t.dim), RCS_F_SMALL,
                       "Segoe UI", TA_CENTER | TA_TOP);
          m_float.Text(8 + cw / 2, qy + 11,
                       (m_d.roomMoney >= 0.0 ? DoubleToString(m_d.roomMoney, 0) + " $" : "--"),
@@ -1504,8 +1801,17 @@ private:
                       A(pc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, FW_BOLD);
          y += 14;
          string sub = IntegerToString(m_d.posAge[i] / 60) + " min";
-         if(!m_d.posHasSl[i]) sub += "   " + L(RCL_NOSL, "NO SL");
-         m_float.Text(22, y, sub, A(m_d.posHasSl[i] ? m_t.dim : m_t.red), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+         color slc2 = m_t.dim;                     // v3.39 : same grace countdown
+         if(!m_d.posHasSl[i]) {
+            const int left2 = 180 - m_d.posAge[i];
+            sub += "   " + L(RCL_NOSL, "NO SL");
+            if(left2 > 0) {
+               sub += " " + IntegerToString(left2 / 60) + ":" +
+                      (left2 % 60 < 10 ? "0" : "") + IntegerToString(left2 % 60);
+               slc2 = m_t.warn;
+            } else slc2 = m_t.red;
+         }
+         m_float.Text(22, y, sub, A(slc2), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
          // CLOSE, drawn DISABLED (JR) : an indicator cannot send an order, and
          // this product never will. The button says where closing lives - it is
          // wired to a message, never to a trade call.
@@ -1542,8 +1848,12 @@ private:
       m_band.CapsuleGradient(0, 0, W, RCS_BAND_H, A(bc), Mix(bc, clrBlack, 0.35));
       string msg;
       if(m_d.discLocked)
-         msg = L(RCL_BAND_LOCKED, "DISCIPLINE LOCK ACTIVE") + (m_d.lockMinsLeft > 0
-               ? "  -  " + IntegerToString(m_d.lockMinsLeft) + " " + L(RCL_MINS_LEFT, "min left") : "");
+         msg = L(RCL_BAND_LOCKED, "DISCIPLINE LOCK ACTIVE") + "  -  " +
+               (m_d.lockKind == 3 ? L(RCL_COOLDOWN_T, "Cooldown after losses")
+                : (m_d.lockKind == 2 ? L(RCL_DAILYLOCK, "Daily lock")
+                   : L(RCL_SELFLOCK_T, "Self-lock (Ulysses)"))) +
+               (m_d.lockMinsLeft > 0
+                ? "  -  " + IntegerToString(m_d.lockMinsLeft) + " " + L(RCL_MINS_LEFT, "min left") : "");
       else if(m_d.slGuard)
          msg = L(RCL_BAND_SLLOW, "SL TOO LOW - breach risk") + (m_d.slGuardSym != "" && m_d.slGuardPrice > 0.0
                ? "  -  " + L(RCL_BAND_RAISE, "raise ") + m_d.slGuardSym + " >= " +
@@ -1554,6 +1864,10 @@ private:
          msg = "TILT - " + IntegerToString(m_d.tiltTrades) + " " +
                L(RCL_BAND_TRADES, "trades in") + " " +
                IntegerToString(m_d.tiltWinMin) + " " + L(RCL_BAND_SLOW, "min : slow down");
+      // v3.34 : a refused click must SAY it was refused - a control that does
+      // nothing and explains nothing reads as a bug.
+      if(m_lockBlocked && m_d.discLocked)
+         msg = L(RCL_LOCK_BLOCKED, "LOCKED - this control is disabled until the lock ends");
       m_band.Text(W / 2, 6, msg, Mix(m_t.bg, clrBlack, 0.25), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(0, 0, W, RCS_BAND_H, RZ_BAND);
       m_band.Commit();
@@ -1573,11 +1887,14 @@ private:
       m_band.Create(m_pfx + "band", 0, 0, m_chW, RCS_BAND_H); // safety band : above the UI
       m_band.Begin(); m_band.Commit();
       m_tip.Create(m_pfx + "tip", 0, 0, RCS_TIP_W, RCS_TIP_H); // created LAST = above everything
+      m_surfGen++;   // every canvas here is now NEWER than any object the host
+                     // created before : MT5 paints in creation order, so the
+                     // host must re-create its OBJ_EDIT to get back on top.
    }
 
 public:
    void Init(void) {
-      m_created = false; m_haveData = false; m_pfx = "";
+      m_created = false; m_haveData = false; m_pfx = ""; m_surfGen = 0;
       m_themeIdx = 0; m_state = 0; m_sec = RZ_RAIL_LIM;
       m_zn = 0; m_pendKill = false;
       m_chW = 1200; m_chH = 800;
@@ -1614,13 +1931,18 @@ public:
       m_navY = 0; m_bandOn = false;
       m_lotEditOn = false; m_lotEditX = 0; m_lotEditY = 0; m_lotEditW = 0; m_lotEditH = 0;
       m_fltX = -1; m_fltY = -1; m_fltW = RCS_FLT_W; m_fltH = RCS_FLT_HEAD + 40;
-      m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
+      m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
       m_closeNotice = false;
-      m_lastLeft = false; m_pendTheme = -1;
-      for(int si = 0; si < 8; si++) m_secH[si] = 0;
+      m_lastLeft = false; m_pendTheme = -1; m_pendFit = false;
+      for(int si = 0; si < 9; si++) m_secH[si] = 0;
+      // the three sections that answer "can I take this trade" start open ;
+      // the host overwrites this with the per-login mask it persisted.
+      for(int so = 0; so < 8; so++) m_secOpen[so] = (so < 3);
+      m_accTitle = "";
       m_relayout = false;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
+      m_lockBlocked = false;
       m_pendUnlock = false;
       m_maxEditOn = false; m_maxEditX = 0; m_maxEditY = 0;
       m_d.addonN = 0; m_d.violMargin = false; m_d.violRisk = false; m_d.beLines = false;
@@ -1658,6 +1980,24 @@ public:
    bool PendSelfLockTake(void) { const bool r = m_pendSelfLock; m_pendSelfLock = false; return r; }
    bool PendUnlockTake(void)   { const bool r = m_pendUnlock;   m_pendUnlock   = false; return r; }
    int  PendThemeTake(void)    { const int  r = m_pendTheme;    m_pendTheme    = -1;    return r; }
+   bool PendFitTake(void)      { const bool r = m_pendFit;      m_pendFit      = false; return r; }
+   //--- accordion of the FULL panel, as a bitmask the host can persist ----
+   int  SecOpenMask(void) const {
+      int m = 0;
+      for(int i = 0; i < 8; i++) if(m_secOpen[i]) m |= (1 << i);
+      return m;
+   }
+   //--- which panel was open, so a timeframe change does not forget it -----
+   int  StateGet(void) const { return m_state; }
+   int  SecGet(void)   const { return m_sec; }
+   void SetStateSec(const int st, const int sec) {
+      if(st >= 0 && st <= 2) m_state = st;
+      if(sec >= RZ_RAIL_LIM && sec <= RZ_RAIL_HELP) m_sec = sec;
+   }
+   void SetSecOpenMask(const int mask) {
+      for(int i = 0; i < 8; i++) m_secOpen[i] = ((mask & (1 << i)) != 0);
+      m_secH[8] = 0; m_relayout = true;
+   }
    bool PendCycTake(int &field, int &dir) {
       if(m_pendCyc < 0) return false;
       field = m_pendCyc / 10; dir = ((m_pendCyc % 10) == 1 ? 1 : -1); m_pendCyc = -1; return true;
@@ -1714,6 +2054,11 @@ public:
    int ZidCfg(const int i)   const { return RZ_CFG_PAL + i; }         // 0..9
    int ZidCptTip(void) const { return RZ_TIP_CPT; }
    int ZidHelpTip(void) const { return RZ_TIP_HELP; }
+   //--- how many times the canvases have been (re-)created. The host watches
+   //--- this : a re-created bitmap PAINTS OVER an older OBJ_EDIT (creation
+   //--- order rules painting ; OBJPROP_ZORDER only ranks mouse hits), so the
+   //--- copy boxes must be deleted and re-made after every rebuild.
+   int  SurfGen(void) const { return m_surfGen; }
    //--- copy-lot : true + rect when the host must show its native edit box ----
    bool LotEditRect(int &x, int &y, int &w, int &h) const {
       if(!m_lotEditOn) return false;
@@ -1878,6 +2223,23 @@ public:
          m_pendCfg = hit;                                   // host consumes on its next refresh
          return true;
       }
+      // v3.34 : while a HARD LOCK holds, the clicks that would END or LOOSEN it
+      // are swallowed. The band used to say "DISCIPLINE LOCK ACTIVE" while the
+      // navbar cross still removed the tool and every risk setting could still
+      // be widened : that is a label, not a lock. Everything that only READS
+      // stays live - rail navigation, folding, tooltips, the copy boxes - and
+      // so does the release path, which is the lock's own legitimate exit.
+      if(m_d.discLocked) {
+         if(hit == RZ_NAV_KILL) { m_lockBlocked = true; RenderAll(); return true; }
+         if((hit >= RZ_STEP_DEC0 && hit <= RZ_STEP_INC9) ||
+            (hit >= RZ_CAS_PREV0 && hit <= RZ_CAS_NEXT4) ||
+            (hit >= RZ_ADDON0    && hit <= RZ_ADDON6)    ||
+            (hit >= RZ_CFG_PAL   && hit <= RZ_CFG_RTOOLS && hit != RZ_CFG_PAL &&
+             hit != RZ_CFG_MODE  && hit != RZ_CFG_LANG)  ||
+            hit == RZ_CFG_MVIOL  || hit == RZ_CFG_RVIOL   || hit == RZ_SELFLOCK) {
+            m_lockBlocked = true; RenderAll(); return true;
+         }
+      }
       // any click elsewhere disarms a pending lock confirmation : an armed
       // question must never survive the user going somewhere else.
       if(hit != RZ_SELFLOCK && m_lockArm) m_lockArm = false;
@@ -1899,6 +2261,13 @@ public:
       // close the panel under the user's finger (RZ_TIP_TARGET and RZ_TIP_MSGS
       // did exactly that in v3.01.12, caught by the zone audit).
       if(hit >= RZ_TIP_CPT && hit <= RZ_TIP_NEWSTR) return true;
+      if(hit >= RZ_SECH0 && hit <= RZ_SECH7) {   // accordion header : fold / unfold
+         const int si = hit - RZ_SECH0;
+         m_secOpen[si] = !m_secOpen[si];
+         m_secH[8] = 0;                         // the stack changed : re-measure
+         OnChartChange();
+         return true;
+      }
       if(hit == RZ_LOT_EDIT) return true;      // native edit sits here : NEVER collapse the section
       if(hit >= RZ_CFG_TAB0 && hit <= RZ_CFG_TAB3) {          // settings sub-tab
          m_cfgTab = hit - RZ_CFG_TAB0; RenderAll(); return true;
@@ -1977,6 +2346,8 @@ public:
             RC_ThemeGet(m_themeIdx, m_t);
             m_pendTheme = m_themeIdx;
             RenderAll(); return true;
+         case RZ_NAV_FIT:
+            m_pendFit = true; return true;                  // the host re-centres the chart
          case RZ_NAV_KILL:
             m_pendKill = true; return true;                 // the host removes the indicator
          case RZ_NAV_TF: case RZ_NAV_SYM: {                  // chips open their dropdown
