@@ -86,6 +86,59 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.18.30 / v3.19.31 — la suite des 46 constats
+
+**Le gate avait deux faux OK, corrigés en premier** — un instrument qui ment est
+pire que pas d'instrument :
+
+- le motif « chemin local » exigeait des **backslashes doubles** : un chemin
+  utilisateur écrit normalement rendait **False**. Le contrôle de fuite le plus
+  important d'un dépôt public ne matchait rien, et l'auto-test ne l'exerçait
+  jamais — il n'injectait qu'une chaîne « login ». Motif réécrit (un OU deux
+  backslashes, identifiant de terminal ajouté), injection ajoutée à l'auto-test.
+- le contrôle des zones ne voyait que `ZAdd(..., RZ_LITTÉRAL)` : **toute zone
+  passée en paramètre d'un helper** (`Toggle`, `LimRow`, `KV`, `Stepper`) lui
+  était invisible. Il annonçait 119/119 alors qu'il y en a **149**.
+
+Ce que le gate réparé a trouvé dans la seconde :
+
+1. **Trois bascules dessinées, cliquables et MORTES** — `RZ_CFG_MVIOL`,
+   `RZ_CFG_RVIOL`, `RZ_CFG_BE` sont déclarées **après** les add-ons, hors du
+   bloc contigu du dispatch : leur clic était avalé, l'hôte jamais appelé.
+   ⚠️ **Correction de v3.11** : j'y écrivais que l'hôte *ignorait* les deux
+   « Violation » sur un profil non restreignable. C'était faux — **leur clic ne
+   l'atteignait jamais**. Diagnostic plausible, et faux.
+2. **L'identifiant du terminal MT5** était publié dans HISTORY.md → masqué.
+
+Autres correctifs du même lot :
+
+- **position du tableau flottant** restaurée *après* `Create()` : le bitmap
+  restait à sa place par défaut pendant que les zones de clic partaient à la
+  position mémorisée — visible ici, cliquable là. Lue avant `Create`, ré-ancrée.
+- **état masqué** persisté (la croix s'annulait à chaque changement de TF) ·
+  **cycleur de jour** basé sur `DaysInMonth` partagé (les années bissextiles
+  étaient fausses) · **`RiskCockpit_logo.bmp` livré** : le README demandait de
+  compiler sans la ressource que la source embarque · clé i18n dupliquée ·
+  apostrophe manquante dans le texte de conformité.
+- **le drag exige désormais une TRANSITION d'appui** : un pan du graphique qui
+  traversait la bande de 24 px de l'en-tête capturait le tableau et coupait le
+  défilement jusqu'au relâchement.
+- **le thème choisi dans le shell mourait avec la frame** : jamais persisté
+  (régression contre l'ancien panneau) et les lignes du graphique gardaient
+  l'ancienne palette. Il remonte à l'hôte, qui l'écrit et reteinte le chart.
+- **fausse alerte RED** : `rule_margin_pt` était une ligne de TEXTE sans alerte
+  dans l'ancien code ; je l'avais mise à alerter contre une bande *recommandée*
+  (20-30 %) — régler sa marge par trade à 40 % déclenchait un son RED contre un
+  chiffre qu'aucun écran n'affiche.
+- **les clics sont consommés immédiatement** : les intentions sont des slots
+  uniques lus au timer, donc deux clics dans une même période de rafraîchissement
+  n'en faisaient qu'un, sans retour visuel.
+
+⚠️ **Et un défaut dans MON PROPRE test** : le cas « les pertes ne baissent pas
+le plancher » comparait `RC_TrailingFloor(2100, 2000, 6)` **à lui-même** — il
+passait quelle que soit l'implémentation. Remplacé par une vraie attente
+(1980,00). Le script n'a toujours **jamais été exécuté**.
+
 ### v3.17.29 - ce qu'une relecture adversariale a trouvé dans MON code
 
 Sept relecteurs indépendants ont lu le diff `main..dev` (16 versions livrées en
