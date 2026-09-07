@@ -86,6 +86,40 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.41.53 — le drawdown JOURNALIER etait reconstruit sur une somme incomplete
+
+`Live_DailyDdPct` reconstruit le solde de debut de journee comme
+`solde_actuel - realise_du_jour`, et `realise_du_jour` ne comptait que
+`DEAL_ENTRY_OUT` et `DEAL_ENTRY_INOUT`. Deux choses passaient au travers :
+
+1. **`DEAL_ENTRY_OUT_BY`** — la cloture « close by », une position fermee CONTRE
+   une position opposee. L'outil tourne sur des comptes **hedge**, ou c'est une
+   facon ordinaire de se mettre a plat : son P&L disparaissait simplement de la
+   journee.
+2. 🔴 **Toute operation de SOLDE** — depot, **retrait**, credit, correction,
+   bonus. Elles deplacent `ACCOUNT_BALANCE` sans produire le moindre P&L de
+   trading, donc la soustraction ci-dessus est fausse **du montant exact
+   deplace**. Un retrait rendait le solde de debut de journee reconstruit trop
+   HAUT, et le panneau annoncait **un drawdown journalier qui n'avait pas eu
+   lieu** — potentiellement une breche un jour sans un seul trade perdant.
+
+Le premier rejoint la somme des P&L ; les operations de solde sont soustraites
+**a part**, parce qu'elles ne sont pas du P&L et ne doivent jamais etre comptees
+comme telles. Meme fenetre, meme cadence de 2 s : une passe bornee, jamais a
+chaque tick.
+
+**Et le gate affirmait plus qu'il ne prouve.** Son controle positif du scan
+binaire cherche la chaine `#property link` — or les `#property` sont stockees
+**NON COMPRESSEES** en UTF-16LE dans l'**en-tete** du `.ex5`, tandis que les
+chaines du corps sont compressees. Le controle prouvait donc qu'on sait lire
+**0,3 %** du fichier, et rien sur les 99,7 % ou une chaine fuitee vivrait
+vraiment — puis le rapport disait « 12 fichiers + binaire scannes », ce qui se
+lit « le binaire est propre ». **Ce n'est pas un verdict, c'est l'absence de
+verdict.** Le controle est desormais scinde : les **sources** portent le verdict
+(texte clair, aucun octet ne se cache), le **binaire** est rapporte a part et
+etiquete pour ce qu'il couvre — « en-tete lisible, corps COMPRESSE donc NON
+couvert ». 13 controles au lieu de 12.
+
 ### v3.37.49 -> v3.40.52 — la regle news : a qui elle s'applique, et ce qu'un jeton inconnu veut dire
 
 🔴 **ECHEC OUVERT SUR UNE ENTREE NON FIABLE.** `NewsCcyAffectsSymbol()` rendait

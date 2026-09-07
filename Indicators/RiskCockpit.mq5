@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.40"
+#property version "3.41"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.40"
+#define RC_VERSION_STR "3.41"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -2897,7 +2897,12 @@ double Live_DailyDdPct(void) {
     // do NOT run a full history scan every 500 ms timer tick from inside the
     // daily-DD meter. Floating part of the day's P&L is handled by ACCOUNT_EQUITY.
     const double realised_today      = CachedRealisedToday();
-    const double balance_day_start   = AccountInfoDouble(ACCOUNT_BALANCE) - realised_today;
+    // v3.41 : and the money that moved the balance WITHOUT being P&L. Without
+    // this term a withdrawal reads as a loss of the same size, every tick, all
+    // day long.
+    const double ops_today           = CachedBalanceOpsToday();
+    const double balance_day_start   = AccountInfoDouble(ACCOUNT_BALANCE)
+                                       - realised_today - ops_today;
     const double cur_eq = AccountInfoDouble(ACCOUNT_EQUITY);
     const double dd = balance_day_start - cur_eq;
     if (dd <= 0.0)
@@ -4207,9 +4212,38 @@ double SumClosedDealsPnL(const datetime from, const datetime to) {
         if (t == 0)
             continue;
         const long entry = HistoryDealGetInteger(t, DEAL_ENTRY);
-        if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT)
+        // v3.41 : DEAL_ENTRY_OUT_BY - a position closed AGAINST an opposite one -
+        // was not counted. This runs on hedging accounts, where close-by is an
+        // ordinary way to flatten, and its P&L simply vanished from the day.
+        if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT &&
+            entry != DEAL_ENTRY_OUT_BY)
             continue;
         sum += HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP) + HistoryDealGetDouble(t, DEAL_COMMISSION);
+    }
+    return sum;
+}
+
+// v3.41 : money that MOVED the balance without being trading P&L - deposits,
+// withdrawals, credits, corrections, bonuses. Live_DailyDdPct rebuilds the
+// start-of-day balance as balance_now - realised_today ; every one of these
+// makes that subtraction wrong by exactly the amount moved. A withdrawal made
+// the reconstructed start-of-day balance too HIGH and the panel reported a
+// daily drawdown that never happened - a breach on a day without a single
+// losing trade.
+double SumBalanceOps(const datetime from, const datetime to) {
+    if (!HistorySelect(from, to))
+        return 0.0;
+    double sum = 0.0;
+    const int n = HistoryDealsTotal();
+    for (int i = 0; i < n; ++i) {
+        const ulong t = HistoryDealGetTicket(i);
+        if (t == 0)
+            continue;
+        const long ty = HistoryDealGetInteger(t, DEAL_TYPE);
+        if (ty != DEAL_TYPE_BALANCE && ty != DEAL_TYPE_CREDIT &&
+            ty != DEAL_TYPE_CORRECTION && ty != DEAL_TYPE_BONUS)
+            continue;
+        sum += HistoryDealGetDouble(t, DEAL_PROFIT);
     }
     return sum;
 }
@@ -4245,6 +4279,20 @@ double CachedRealisedToday(void) {
     return g_realised_today_cache;
 }
 
+// The balance operations of the day, on the same window and the same 2 s
+// throttle as the realised P&L : one bounded pass, never on every tick.
+double   g_balops_today_cache = 0.0;
+datetime g_balops_today_scan  = 0;
+double CachedBalanceOpsToday(void) {
+    if (g_balops_today_scan == 0 || TimeCurrent() - g_balops_today_scan >= 2) {
+        MqlDateTime mdt2;
+        TimeToStruct(TimeCurrent(), mdt2);
+        mdt2.hour = 0; mdt2.min = 0; mdt2.sec = 0;
+        g_balops_today_cache = SumBalanceOps(StructToTime(mdt2), TimeCurrent());
+        g_balops_today_scan  = TimeCurrent();
+    }
+    return g_balops_today_cache;
+}
 double Live_TodayProfit(void) {
     return CachedRealisedToday() + SumFloatingPnL();
 }

@@ -240,24 +240,41 @@ def run(root):
             for m in re.finditer(rx, txt):
                 leaks.append("%s:%s" % (os.path.basename(rel), label))
         leaks += num_leaks(txt, os.path.basename(rel))
+    # THE SOURCES carry the verdict : they are plain text, every byte is readable,
+    # a leak in them cannot hide.
+    report("fuite de donnees perso (sources)", not leaks,
+           ("%d fichiers scannes" % len(scanned)) if not leaks
+           else " | ".join(sorted(set(leaks))))
+
+    # THE BINARY is a separate, weaker check, and it must say so. Its positive
+    # control looks for the #property link string - and #property strings sit
+    # UNCOMPRESSED as UTF-16LE in the .ex5 HEADER while body strings are
+    # compressed. So the control proves we can read ~0.3 % of the file and
+    # nothing about the 99.7 % where a leaked string would actually live. It used
+    # to report "12 files + binary scanned" with no leak, which reads as "the
+    # binary is clean". That is not a verdict, it is the absence of one.
     ex5 = read(root, EX5, binary=True)
+    blk = []
     if ex5 is None:
-        report("fuite de donnees perso", None, "pas de .ex5 a scanner")
+        report("fuite dans le binaire (en-tete seul)", None, "pas de .ex5 a scanner")
     else:
         control = ex5.find("javadrazavi.fr".encode('utf-16-le')) >= 0
         if not control:
-            report("fuite de donnees perso", None,
-                   "controle positif du scan binaire ECHOUE - aucun verdict possible")
+            report("fuite dans le binaire (en-tete seul)", None,
+                   "controle positif ECHOUE - aucun verdict possible")
         else:
             for enc in ('latin-1', 'utf-16-le'):
-                txt = ex5.decode(enc, 'ignore')
+                btxt = ex5.decode(enc, 'ignore')
                 for label, rx in pats:
                     if rx is None:
                         continue
-                    if re.search(rx, txt):
-                        leaks.append("RiskCockpit.ex5:" + label)
-                # the compiled binary gets the same bare-number rule as the text
-                leaks += num_leaks(txt, "RiskCockpit.ex5")
+                    if re.search(rx, btxt):
+                        blk.append("RiskCockpit.ex5:" + label)
+                blk += num_leaks(btxt, "RiskCockpit.ex5")
+            report("fuite dans le binaire (en-tete seul)", not blk,
+                   "en-tete lisible, corps COMPRESSE donc NON couvert" if not blk
+                   else " | ".join(sorted(set(blk))))
+    if False:
             report("fuite de donnees perso", not leaks,
                    ("%d fichiers + binaire scannes" % len(scanned)) if not leaks
                    else " | ".join(sorted(set(leaks))))
