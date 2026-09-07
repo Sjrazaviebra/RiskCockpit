@@ -81,6 +81,9 @@ struct RCDeckData {
    double floorMoney;       // trailing floor $ (0 when not applicable)
    bool   trailing;         // FN Instant style trailing max-loss
    double marginPct, marginCap, riskPct, riskCap;
+   // v3.35 : the risk FundedNext actually scores - locked at the stop posed
+   // AT OPENING. Trailing a stop lowers riskPct and leaves this one alone.
+   double lockedRiskPct;
    double dailyPct, dailyCap, overallPct, overallCap;
    bool   dailyApplies, overallApplies;
    // positions (cell POS)
@@ -91,6 +94,12 @@ struct RCDeckData {
    double sugLot;
    int    lotDigits;
    bool   lotCapped, lotZero;   // capped by the 80% survival guard / no room left
+   // v3.35 : the advisor computed all of these and the deck carried none.
+   bool   lotBelowMin;          // the maths asked for less than the broker minimum
+   bool   lotOverBudget;        // the tradable lot risks MORE than the budget
+   bool   lotMarginBound;       // real free margin is the tightest constraint
+   bool   lotMarginShort;       // free margin cannot cover even the minimum lot
+   bool   lotReduce;            // remaining cumulative budget < cap / N
    double budgetPct, freeMarginPct;
    // news (cell NEWS)
    bool   newsHasEvt, newsHigh, newsActive, newsFF;
@@ -132,6 +141,11 @@ struct RCDeckData {
    string slGuardSym;
    double slGuardPrice;
    bool   selfLock;
+   // v3.33 : WHICH lock is holding. 0 none, 1 self-lock, 2 daily drawdown,
+   // 3 cooldown after consecutive losses. "Locked" without a reason is an
+   // instruction the trader cannot check.
+   int    lockKind;
+   int    lossStreak;       // consecutive losing trades : what a cooldown is ABOUT
    // --- lot 2b : account card + config toggles --------------------------
    string planLabel, phaseLabel, acctTypeLabel, addonsLabel, cycleLabel, sizeLabelFull;
    long   login;
@@ -225,7 +239,9 @@ enum ERCZone {
 };
 //--- label slots : the shell ships FR defaults ; the host overrides them with
 //--- its own i18n (Tr) so one translation table serves the whole product.
-#define RCS_L_MAX 192      // MUST stay above the last ERCLabel id
+// v3.36 : 184 ids for 192 slots is how the v3.07 defect comes back - ids were
+// being silently dropped then, and eight slots of headroom is not headroom.
+#define RCS_L_MAX 256      // MUST stay above the last ERCLabel id
 #define RCS_TIP_MAX 192     // tooltip slots, indexed by zone id - MUST stay above the last ERCZone id
 enum ERCLabel {
    RCL_SEC_LIM = 0, RCL_SEC_POS, RCL_SEC_LOT, RCL_SEC_NEWS, RCL_SEC_DISC,
@@ -263,7 +279,10 @@ enum ERCLabel {
    RCL_NEWS_HI, RCL_NEWS_MED, RCL_LOCK_RTOOLS, RCL_LOCK_VIOL,
    RCL_SEC_CPTST, RCL_CPT_FIRM, RCL_CPT_SERVER, RCL_CPT_LEV, RCL_CPT_BAL,
    RCL_CPT_EQ, RCL_CPT_MUSED, RCL_CPT_FREEM,
-   RCL_NAV_ROOM, RCL_NAV_LOT, RCL_NAV_NEWS, RCL_NAV_FIT
+   RCL_NAV_ROOM, RCL_NAV_LOT, RCL_NAV_NEWS, RCL_NAV_FIT,
+   RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
+   RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
+   RCL_LOT_MARGSHORT, RCL_LOT_REDUCE
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -347,6 +366,7 @@ private:
    bool       m_pendSelfLock;    // host consumes : ARM the self-lock (confirmed)
    bool       m_pendUnlock;      // host consumes : RELEASE an active self-lock
    bool       m_lockArm;         // first click : the button asks for confirmation
+   bool       m_lockBlocked;     // v3.34 : a click was refused because of the lock
    bool       m_maxEditOn;       // second copy box (max lot)
    int        m_maxEditX, m_maxEditY;
    string     m_L[RCS_L_MAX];    // i18n slots (empty = the built-in FR default is used)
@@ -428,12 +448,17 @@ private:
    }
 
    void ReadChart(void) {
-      m_chW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+      // v3.35 : the floor below is for LAYOUT decisions (how much fits). It
+      // must never reach the ANCHOR : on a chart narrower than 400 px the rail
+      // was placed at 400 - 36 = 364, i.e. off-screen - and the rail is the only
+      // permanent surface, the one that opens everything else.
+      const int realW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+      m_chW = realW;
       m_chH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
       if(m_chW < 400) m_chW = 400;
       if(m_chH < 300) m_chH = 300;
       // ANCHOR CLAMP : every surface hugs its edge, never leaves the screen.
-      m_railX = m_chW - RCS_RAIL_W;
+      m_railX = (realW > RCS_RAIL_W ? realW - RCS_RAIL_W : 0);
       m_railH = (int)(m_chH * 0.60);                    // centred band ~60% (20% air top+bottom)
       const int minh = RCS_RAIL_HEAD + RCS_CELLS_TOT + 7 * RCS_RAIL_MING;
       if(m_railH < minh) m_railH = minh;
@@ -767,6 +792,12 @@ private:
       SecHead(L(RCL_LIM_HEAD, "LIMIT USAGE"), y);
       y = LimRow(y, L(RCL_LIM_MARGIN, "Cumulative Margin"),  m_d.marginPct,  m_d.marginCap,  true,                 RZ_TIP_LIM_M0, m_d.warnMargin);
       y = LimRow(y, L(RCL_LIM_RISK, "Cumulative Open Risk"),  m_d.riskPct,    m_d.riskCap,    m_d.riskCap > 0.0,    RZ_TIP_LIM_M1, m_d.warnRisk);
+      // v3.35 : the number the FIRM scores. It locks to the stop posed AT
+      // OPENING, so trailing a stop lowers the row above and leaves this one
+      // where it is - the panel could read 1.2 % while the firm scored 3.1 %.
+      if(m_d.riskCap > 0.0)
+         y = LimRow(y, L(RCL_LIM_LOCKED, "Locked risk (scored)"), m_d.lockedRiskPct,
+                    m_d.riskCap, true, RZ_TIP_LIM_M1, m_d.warnRisk);
       y = LimRow(y, L(RCL_LIM_DAILY, "Daily DD"),  m_d.dailyPct,   m_d.dailyCap,   m_d.dailyApplies,     RZ_TIP_LIM_M2, m_d.warnDaily);
       y = LimRow(y, L(RCL_LIM_OVERALL, "Overall DD"),       m_d.overallPct, m_d.overallCap, m_d.overallApplies,   RZ_TIP_LIM_M3, m_d.warnOverall);
       // v3.01 parity : Quick Strike is a RULE too - it belongs with the meters.
@@ -886,6 +917,20 @@ private:
          m_side.Text(RCS_SIDE_W - 18, y + 6, "lot", A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_RIGHT | TA_TOP);
       }
       y += 30;
+      {  // v3.35 : the advisor knew all of this and the panel said none of it.
+         string fl = "";
+         if(m_d.lotMarginShort) fl = L(RCL_LOT_MARGSHORT, "Free margin cannot cover the minimum lot.");
+         else if(m_d.lotOverBudget) fl = L(RCL_LOT_OVERBUD, "The tradable lot risks MORE than the budget.");
+         else if(m_d.lotBelowMin)   fl = L(RCL_LOT_BELOWMIN, "Maths asked for less than the broker minimum.");
+         else if(m_d.lotMarginBound) fl = L(RCL_LOT_MARGBOUND, "Free margin is what limits this lot.");
+         else if(m_d.lotReduce)      fl = L(RCL_LOT_REDUCE, "Cumulative budget left is under cap / N.");
+         if(StringLen(fl) > 0) {
+            m_side.Text(18, y, fl,
+                        A(m_d.lotMarginShort || m_d.lotOverBudget ? m_t.red : m_t.warn),
+                        RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+            y += 16;
+         }
+      }
       if(m_d.lotCapped) {
          m_side.Text(18, y, (m_d.lotZero ? L(RCL_LOT_NOROOM, "No room left : do not take this trade.")
                                          : L(RCL_LOT_CAP80, "Capped at 80% of the survival margin.")),
@@ -994,7 +1039,17 @@ private:
       m_side.Text(18, y, line, A(lcol), RCS_F_TITLE, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
       y += 24;
       if(m_d.discLocked) {
-         m_side.Text(18, y, (m_d.selfLock ? L(RCL_SELFLOCK_T, "Self-lock (Ulysses)") : L(RCL_DAILYLOCK, "Daily lock")), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+         // v3.33 : three locks can hold, not two - the cooldown after N losses
+         // is back, and a lock that cannot name itself cannot be checked.
+         // v3.36 : a cooldown without its streak leaves out the one number that
+         // explains the lock - "12 min left" says when, never why.
+         m_side.Text(18, y, (m_d.lockKind == 3
+                             ? L(RCL_COOLDOWN_T, "Cooldown after losses") + "  " +
+                               IntegerToString(m_d.lossStreak) + " " +
+                               L(RCL_LOSSES, "losses")
+                             : (m_d.lockKind == 2 ? L(RCL_DAILYLOCK, "Daily lock")
+                                : L(RCL_SELFLOCK_T, "Self-lock (Ulysses)"))),
+                     A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
          m_side.Text(RCS_SIDE_W - 18, y, (m_d.lockMinsLeft > 0 ? IntegerToString(m_d.lockMinsLeft) + " min" : L(RCL_ON_NOW, "active")),
                      A(m_t.red), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
          ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_DISC_LOCK);
@@ -1034,21 +1089,40 @@ private:
       y += 4;
       // ARMING a lock is irreversible for its duration : it takes two clicks.
       {
+         // v3.34 : RELEASE is offered for the SELF-lock only. Since v3.33 three
+         // locks can hold, and the other two are RULES, not pacts : a daily
+         // drawdown at 80 % of its cap and a cooldown after a losing streak both
+         // end on their own. Offering two clicks to dismiss them turned the rule
+         // into a suggestion. A pact you cannot leave IS a trap, so the self-lock
+         // keeps its release ; a rule you can dismiss is not a rule.
          const bool armed = m_lockArm;
-         const string txt = (m_d.discLocked
-                             ? (m_d.unlockArmed ? L(RCL_LOCK_ASK, "CONFIRM ?")
-                                                : L(RCL_UNLOCK, "RELEASE THE LOCK"))
-                             : (armed ? L(RCL_LOCK_ASK, "CONFIRM ?")
-                                      : L(RCL_LOCK_ARM, "ARM THE LOCK") + "  " +
-                                        IntegerToString(m_d.selfLockH) + " h"));
-         const color bc = (m_d.discLocked ? m_t.dim : (armed ? m_t.red : m_t.warn));
+         const bool pact  = (m_d.lockKind == 1);
+         string txt;
+         color  bc;
+         if(m_d.discLocked && !pact) {
+            txt = (m_d.lockKind == 3 ? L(RCL_COOLDOWN_T, "Cooldown after losses")
+                                     : L(RCL_DAILYLOCK, "Daily lock")) +
+                  (m_d.lockMinsLeft > 0
+                   ? "  -  " + IntegerToString(m_d.lockMinsLeft) + " " +
+                     L(RCL_MINS_LEFT, "min left")
+                   : "");
+            bc = m_t.red;
+         } else if(m_d.discLocked) {
+            txt = (m_d.unlockArmed ? L(RCL_LOCK_ASK, "CONFIRM ?")
+                                   : L(RCL_UNLOCK, "RELEASE THE LOCK"));
+            bc  = m_t.dim;
+         } else {
+            txt = (armed ? L(RCL_LOCK_ASK, "CONFIRM ?")
+                         : L(RCL_LOCK_ARM, "ARM THE LOCK") + "  " +
+                           IntegerToString(m_d.selfLockH) + " h");
+            bc  = (armed ? m_t.red : m_t.warn);
+         }
          m_side.Capsule(18, y, RCS_SIDE_W - 36, 24, Mix(m_t.surface, bc, 0.30));
          m_side.Text(RCS_SIDE_W / 2, y + 5, txt, A(bc), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
-         // Locked : the SAME capsule becomes the RELEASE control (two clicks within
-         // 5 s, host-side). A pact you cannot leave is a trap, not discipline - the
-         // legacy had an unlock button and the purge dropped it with the panel.
-         ZAdd(m_sideX + 18, m_sideY + y, RCS_SIDE_W - 36, 24,
-              (m_d.discLocked ? RZ_UNLOCK : RZ_SELFLOCK));
+         // no zone at all while a RULE holds : nothing to click, nothing to dismiss
+         if(!m_d.discLocked || pact)
+            ZAdd(m_sideX + 18, m_sideY + y, RCS_SIDE_W - 36, 24,
+                 (m_d.discLocked ? RZ_UNLOCK : RZ_SELFLOCK));
          y += 30;
       }
       // v3.01 parity : hyperactivity + server messages, the two "too much
@@ -1728,8 +1802,12 @@ private:
       m_band.CapsuleGradient(0, 0, W, RCS_BAND_H, A(bc), Mix(bc, clrBlack, 0.35));
       string msg;
       if(m_d.discLocked)
-         msg = L(RCL_BAND_LOCKED, "DISCIPLINE LOCK ACTIVE") + (m_d.lockMinsLeft > 0
-               ? "  -  " + IntegerToString(m_d.lockMinsLeft) + " " + L(RCL_MINS_LEFT, "min left") : "");
+         msg = L(RCL_BAND_LOCKED, "DISCIPLINE LOCK ACTIVE") + "  -  " +
+               (m_d.lockKind == 3 ? L(RCL_COOLDOWN_T, "Cooldown after losses")
+                : (m_d.lockKind == 2 ? L(RCL_DAILYLOCK, "Daily lock")
+                   : L(RCL_SELFLOCK_T, "Self-lock (Ulysses)"))) +
+               (m_d.lockMinsLeft > 0
+                ? "  -  " + IntegerToString(m_d.lockMinsLeft) + " " + L(RCL_MINS_LEFT, "min left") : "");
       else if(m_d.slGuard)
          msg = L(RCL_BAND_SLLOW, "SL TOO LOW - breach risk") + (m_d.slGuardSym != "" && m_d.slGuardPrice > 0.0
                ? "  -  " + L(RCL_BAND_RAISE, "raise ") + m_d.slGuardSym + " >= " +
@@ -1740,6 +1818,10 @@ private:
          msg = "TILT - " + IntegerToString(m_d.tiltTrades) + " " +
                L(RCL_BAND_TRADES, "trades in") + " " +
                IntegerToString(m_d.tiltWinMin) + " " + L(RCL_BAND_SLOW, "min : slow down");
+      // v3.34 : a refused click must SAY it was refused - a control that does
+      // nothing and explains nothing reads as a bug.
+      if(m_lockBlocked && m_d.discLocked)
+         msg = L(RCL_LOCK_BLOCKED, "LOCKED - this control is disabled until the lock ends");
       m_band.Text(W / 2, 6, msg, Mix(m_t.bg, clrBlack, 0.25), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(0, 0, W, RCS_BAND_H, RZ_BAND);
       m_band.Commit();
@@ -1814,6 +1896,7 @@ public:
       m_relayout = false;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
+      m_lockBlocked = false;
       m_pendUnlock = false;
       m_maxEditOn = false; m_maxEditX = 0; m_maxEditY = 0;
       m_d.addonN = 0; m_d.violMargin = false; m_d.violRisk = false; m_d.beLines = false;
@@ -2093,6 +2176,23 @@ public:
          }
          m_pendCfg = hit;                                   // host consumes on its next refresh
          return true;
+      }
+      // v3.34 : while a HARD LOCK holds, the clicks that would END or LOOSEN it
+      // are swallowed. The band used to say "DISCIPLINE LOCK ACTIVE" while the
+      // navbar cross still removed the tool and every risk setting could still
+      // be widened : that is a label, not a lock. Everything that only READS
+      // stays live - rail navigation, folding, tooltips, the copy boxes - and
+      // so does the release path, which is the lock's own legitimate exit.
+      if(m_d.discLocked) {
+         if(hit == RZ_NAV_KILL) { m_lockBlocked = true; RenderAll(); return true; }
+         if((hit >= RZ_STEP_DEC0 && hit <= RZ_STEP_INC9) ||
+            (hit >= RZ_CAS_PREV0 && hit <= RZ_CAS_NEXT4) ||
+            (hit >= RZ_ADDON0    && hit <= RZ_ADDON6)    ||
+            (hit >= RZ_CFG_PAL   && hit <= RZ_CFG_RTOOLS && hit != RZ_CFG_PAL &&
+             hit != RZ_CFG_MODE  && hit != RZ_CFG_LANG)  ||
+            hit == RZ_CFG_MVIOL  || hit == RZ_CFG_RVIOL   || hit == RZ_SELFLOCK) {
+            m_lockBlocked = true; RenderAll(); return true;
+         }
       }
       // any click elsewhere disarms a pending lock confirmation : an armed
       // question must never survive the user going somewhere else.

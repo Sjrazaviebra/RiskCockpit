@@ -86,6 +86,82 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.33.45 -> v3.36.48 — la DISCIPLINE etait declaree et n'etait plus nourrie
+
+🔴 **Le moteur de discipline ne tournait plus du tout.** `g_disc_consec`,
+`g_disc_lastloss`, `g_disc_trades_win` et `g_disc_revenge` etaient **declares**,
+**lus** par le modele du panneau, et ecrits par **RIEN** :
+`ComputeDisciplineMetrics()` — l'unique balayage d'historique qui les
+remplissait — est parti avec l'ancien panneau en v3.06 et n'a jamais ete
+remplace. Consequences, toutes silencieuses :
+
+- **Le TILT ne partait jamais.** Le bandeau ambre et son son etaient morts, et le
+  panneau affichait « Fenetre tilt : 0 en 5 min (max 5) » — **un compteur qui ne
+  pouvait pas bouger**.
+- **La PAUSE apres N pertes consecutives n'existait pas du tout.** Le reglage
+  etait toujours la, toujours persiste, toujours reglable — et ne commandait
+  rien. C'est pire que pas de reglage.
+- **Le verrou dur sur le drawdown journalier (>= 80 % du plafond) avait disparu.**
+  Seul l'auto-verrou pouvait encore verrouiller.
+- **La bascule maitresse « Verrou discipline » ne commandait donc rien** : elle
+  gardait un tilt qui ne pouvait pas partir et un verrou qui n'existait plus.
+
+Et le bloc de commentaires au-dessus de l'etat **decrivait toujours l'echelle
+complete, dans l'ordre**. Le code n'en faisait rien. Pour un outil de discipline,
+une regle qui cesse silencieusement de s'appliquer est pire qu'une regle jamais
+promise. Le balayage est celui de l'ancien build (borne, cache 5 s, hors du
+chemin des 500 ms) ; l'echelle est celle de l'ancien build ; **seul le rendu
+change** — il alimente le bandeau de securite v3 au lieu de l'overlay supprime.
+
+**v3.34 — ce qu'un verrou doit reellement empecher.**
+- **RELACHER etait propose pour TOUS les verrous.** Depuis la v3.33 trois verrous
+  peuvent tenir : l'auto-verrou (le pacte du trader — relachable en deux clics,
+  sinon c'est un piege), le verrou de drawdown journalier et la pause apres une
+  serie de pertes. Les deux derniers sont des **REGLES**, pas des pactes :
+  offrir deux clics pour les congedier transformait la regle en suggestion.
+- **Un verrou dur laissait toutes les portes de sortie ouvertes.** Le bandeau
+  disait « VERROU DISCIPLINE ACTIF » pendant que la croix de la navbar retirait
+  encore l'outil du graphique et que **chaque reglage de risque pouvait encore
+  etre desserre**. Ce n'est pas un verrou, c'est une etiquette. Le shell avale
+  desormais les clics qui mettraient fin au verrou ou le desserreraient, garde
+  vivant tout ce qui ne fait que LIRE, et **dit** que le clic a ete refuse.
+- **`PersistViolationFlags()` existait, etait declaree, et n'etait appelee par
+  RIEN.** Les deux bascules de violation n'ecrivaient que la variable GLOBALE,
+  jamais la copie par login que le chargeur lit en premier : le drapeau fuyait
+  d'un compte a l'autre et n'etait jamais enregistre la ou on le cherche.
+
+**v3.35 — quatre choses que le code savait deja et ne disait pas.**
+- 🔴 **Le chiffre que FundedNext NOTE reellement n'etait pas a l'ecran.**
+  `Live_LockedRiskPct()` est definie, documentee, et appelee par **RIEN**. FN
+  verrouille la regle des 3 % de risque ouvert sur le stop pose **A
+  L'OUVERTURE** — deplacer le stop ensuite ne change pas ce qu'ils notent
+  (leur mail du 29/05/2026). Le panneau n'affichait que le risque cumule VIVANT,
+  qui baisse des qu'on suit le stop : **il pouvait afficher 1,2 % pendant que la
+  firme notait 3,1 %.** Les deux chiffres sont desormais cote a cote.
+- **Le statut d'une ligne de position suivait le SIGNE de son P&L.** Vert quand
+  ca monte, ambre quand ca descend — ce n'est pas une regle, c'est une humeur.
+  Une perte dans son risque prevu est normale ; **un trade GAGNANT qui porte tout
+  le budget est celui qui met fin au compte.** Le statut est desormais le risque
+  propre de la position face au budget par trade (plafond / N).
+- **Le conseiller de lot jetait ses drapeaux.** `below_min`, `over_budget`,
+  `margin_bound`, `margin_insufficient`, `reduce_flag` : tous calcules, aucun
+  transporte. Le panneau donnait un lot sans jamais pouvoir dire « votre marge
+  libre ne couvre meme pas le lot minimum du courtier ».
+- **Le rail pouvait s'ancrer HORS ECRAN.** Le plancher de 400 px sert aux
+  decisions de mise en page ; il atteignait l'ANCRE, donc sur un graphique plus
+  etroit le rail — **la seule surface permanente, celle qui ouvre tout le
+  reste** — etait place en dehors de la zone visible.
+- Et la **palette** : le shell demarrait toujours sur `InpPalette` alors que la
+  palette choisie par l'utilisateur, deja restauree, se trouvait deux lignes plus
+  haut.
+
+**v3.36** — 156 libelles pousses pour 155 demandes : `RCL_LOSSES` avait ete cree
+et jamais utilise. Il porte maintenant le nombre de pertes d'affilee qui a
+declenche la pause (« 12 min restantes » dit quand, jamais pourquoi). Et le
+plafond des libelles passe de 192 a **256** : 184 ids pour 192 slots, c'est
+exactement ainsi que revient le defaut de la v3.07, ou des ids etaient
+silencieusement jetes.
+
 ### v3.31.43 / v3.32.44 — l'alarme et l'ecran disent enfin la meme chose
 
 Premier lot de la revue de PARITE (66 agents contre l'ancien panneau

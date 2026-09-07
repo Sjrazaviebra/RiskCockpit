@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.32"
+#property version "3.36"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.32"
+#define RC_VERSION_STR "3.36"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1095,7 +1095,11 @@ int OnInit(void) {
     // a fresh attach already matches the product's brand language.
     {
         g_shell.Init();
-        g_shell.SetThemeIdx((int)InpPalette * 2 + (EffectiveTheme() == RC_THEME_GLASS_DARK ? 0 : 1));
+        // v3.35 : this read InpPalette while g_active_palette_idx - the palette
+        // the user picked, restored a few lines above - sat right next to it.
+        // The shell reopened on the input palette after every restart.
+        g_shell.SetThemeIdx((int)EffectivePalette() * 2 +
+                            (EffectiveTheme() == RC_THEME_GLASS_DARK ? 0 : 1));
         g_shell.SetTipDelay(InpShellTipMs);
         {   // WHERE the floating table was left, per login - read BEFORE Create()
             // so the first frame is drawn at the restored spot. Setting it after
@@ -1354,6 +1358,75 @@ datetime g_disc_last_alert = 0;     // tilt sound/Telegram throttle
 
 // One bounded history scan (cached 5 s) feeding all the discipline metrics, so
 // nothing heavy runs on the 500 ms refresh path (LOT 1 freeze lesson).
+//
+// v3.33 : this function went out with the legacy panel in v3.06 and was never
+// replaced, while every variable it fills stayed declared and stayed READ.
+// Tilt could not fire, revenge sizing could not be detected, and the cooldown
+// after N consecutive losses simply did not exist - its setting was still in
+// the panel, still persisted, commanding nothing. Restored verbatim from the
+// legacy build : the SCAN is the same, only what consumes it changed.
+void ComputeDisciplineMetrics(void) {
+    if (g_disc_scan != 0 && TimeCurrent() - g_disc_scan < 5) return;
+    g_disc_scan = TimeCurrent();
+    g_disc_consec = 0; g_disc_lastloss = 0; g_disc_trades_win = 0; g_disc_revenge = false;
+    const datetime now = TimeCurrent();
+    const datetime win_from = now - (datetime)MathMax(1, g_eff_tilt_win) * 60;
+    if (!HistorySelect(now - 30 * 86400, now)) return;
+    const int n = HistoryDealsTotal();
+    bool   streak_open = true;
+    double last_loss_vol = -1.0;
+    for (int i = n - 1; i >= 0; --i) {
+        const ulong t = HistoryDealGetTicket(i);
+        if (t == 0) continue;
+        const long     e  = HistoryDealGetInteger(t, DEAL_ENTRY);
+        const datetime dt = (datetime)HistoryDealGetInteger(t, DEAL_TIME);
+        if (e == DEAL_ENTRY_IN && dt >= win_from) g_disc_trades_win++;
+        if (e == DEAL_ENTRY_OUT || e == DEAL_ENTRY_INOUT) {
+            const double pnl = HistoryDealGetDouble(t, DEAL_PROFIT) +
+                               HistoryDealGetDouble(t, DEAL_SWAP) +
+                               HistoryDealGetDouble(t, DEAL_COMMISSION);
+            if (streak_open) {
+                if (pnl < 0.0) { g_disc_consec++; if (g_disc_lastloss == 0) g_disc_lastloss = dt; }
+                else           { streak_open = false; }   // a win / breakeven ends the streak
+            }
+            if (last_loss_vol < 0.0 && pnl < 0.0) last_loss_vol = HistoryDealGetDouble(t, DEAL_VOLUME);
+        }
+    }
+    // revenge sizing : the newest OPEN position is bigger than the last closed LOSS
+    if (last_loss_vol > 0.0) {
+        double newest_vol = 0.0; datetime newest_time = 0;
+        const int np = PositionsTotal();
+        for (int i = 0; i < np; ++i) {
+            const ulong pt = PositionGetTicket(i);
+            if (pt == 0 || !PositionSelectByTicket(pt)) continue;
+            const datetime ot = (datetime)PositionGetInteger(POSITION_TIME);
+            if (ot >= newest_time) { newest_time = ot; newest_vol = PositionGetDouble(POSITION_VOLUME); }
+        }
+        if (newest_vol > last_loss_vol + 1e-9) g_disc_revenge = true;
+    }
+}
+
+// The hard-lock ladder, by priority : self-lock > daily DD at 80 % of its cap
+// > cooldown after N consecutive losses. Returns the kind (0 none, 1 self,
+// 2 daily, 3 cooldown) and how many minutes are left when that is known.
+// The whole ladder is gated by the discipline master switch and by the risk
+// toolkit, exactly as in the legacy build - which is what makes that master
+// switch command something again.
+int DisciplineLockKind(const double daily_dd_pct, const double daily_cap, int &mins_left) {
+    mins_left = 0;
+    const datetime now = TimeCurrent();
+    if (g_selflock_until > now) {                 // the Ulysses pact outranks all
+        mins_left = (int)((g_selflock_until - now) / 60) + 1;
+        return 1;
+    }
+    if (!g_eff_discipline || !g_eff_risktools) return 0;
+    if (daily_cap > 0.0 && daily_dd_pct >= 0.80 * daily_cap) return 2;
+    if (g_eff_cooldown_n > 0 && g_disc_consec >= g_eff_cooldown_n && g_disc_lastloss > 0) {
+        const datetime until = g_disc_lastloss + (datetime)MathMax(0, g_eff_cooldown_m) * 60;
+        if (now < until) { mins_left = (int)((until - now) / 60) + 1; return 3; }
+    }
+    return 0;
+}
 
 // Full-panel red STOP overlay used by self-lock / daily-DD / cooldown.
 
@@ -1417,6 +1490,7 @@ void BuildDeckData(RCDeckData &d) {
     // --- limits (cell LIM) ----------------------------------------------
     d.marginPct = Live_CumulativeMarginPct(); d.marginCap = EffectiveMarginCap();
     d.riskPct   = Live_CumulativeRiskPct();   d.riskCap   = EffectiveRiskCap();
+    d.lockedRiskPct = Live_LockedRiskPct();   // v3.35 : what the FIRM scores
     d.dailyPct  = Live_DailyDdPct();          d.dailyCap  = g_profile.daily_loss_pct;
     d.overallPct= Live_OverallDdPct();        d.overallCap= g_profile.max_loss_pct;
     d.dailyApplies   = (d.dailyCap > 0.0);
@@ -1470,7 +1544,26 @@ void BuildDeckData(RCDeckData &d) {
             d.posRowPnl[k] = rp;
             d.posAge[k]    = (int)(TimeCurrent() - (datetime)PositionGetInteger(POSITION_TIME));
             d.posHasSl[k]  = hsl;
-            d.posStat[k]   = (hsl ? (rp >= 0.0 ? 0 : 1) : 2);   // no SL = the only red row state
+            // v3.35 : this was (profit >= 0 ? green : amber) - the sign of the
+            // P&L, which is a mood, not a rule. A losing trade inside its planned
+            // risk is normal ; a WINNING trade carrying the whole budget is the
+            // one that ends the account. The status is the position's own risk
+            // against the per-trade budget (cap / N) ; no stop stays red.
+            double prisk = 0.0;
+            if (hsl && g_profile.initial_balance > 0.0) {
+                prisk = 100.0 * ComputePositionRiskMoney(
+                            PositionGetString(POSITION_SYMBOL),
+                            (int)PositionGetInteger(POSITION_TYPE),
+                            PositionGetDouble(POSITION_PRICE_OPEN),
+                            PositionGetDouble(POSITION_SL),
+                            PositionGetDouble(POSITION_VOLUME),
+                            PositionGetDouble(POSITION_SWAP))
+                        / g_profile.initial_balance;
+            }
+            const double per_trade = (g_max_parallel > 0
+                                      ? EffectiveRiskCap() / g_max_parallel : 0.0);
+            d.posStat[k]   = (!hsl ? 2
+                              : (per_trade > 0.0 && prisk > per_trade ? 1 : 0));
             d.posN++;
         }
     }
@@ -1479,11 +1572,19 @@ void BuildDeckData(RCDeckData &d) {
     d.slGuard    = Live_SlGuardBreached(gsym, gsl);
     d.slGuardSym = gsym;
     d.slGuardPrice = gsl;
-    d.discLocked = (g_selflock_until > TimeCurrent());
-    d.selfLock   = d.discLocked;
-    d.lockMinsLeft = (d.discLocked ? (int)((g_selflock_until - TimeCurrent()) / 60) + 1 : 0);
+    // v3.33 : the full ladder is back. This used to read the self-lock and
+    // nothing else, so a daily drawdown at 80 % of its cap and a losing streak
+    // past its cooldown both went unnoticed.
+    ComputeDisciplineMetrics();
+    int lk_mins = 0;
+    d.lockKind     = DisciplineLockKind(d.dailyPct, d.dailyCap, lk_mins);
+    d.discLocked   = (d.lockKind != 0);
+    d.selfLock     = (d.lockKind == 1);
+    d.lockMinsLeft = lk_mins;
+    d.lossStreak   = g_disc_consec;
     d.unlockArmed  = (g_unlock_arm > 0 && TimeCurrent() - g_unlock_arm <= 5);
-    d.discTilt   = (g_eff_discipline && ((g_eff_tilt_n > 0 && g_disc_trades_win > g_eff_tilt_n) || g_disc_revenge));
+    d.discTilt   = (g_eff_discipline && g_eff_risktools &&
+                    ((g_eff_tilt_n > 0 && g_disc_trades_win > g_eff_tilt_n) || g_disc_revenge));
     d.tiltTrades = g_disc_trades_win;
     d.tiltN      = g_eff_tilt_n;
     d.tiltWinMin = g_eff_tilt_win;
@@ -1505,12 +1606,19 @@ void BuildDeckData(RCDeckData &d) {
         d.lotDigits     = LotDigits(s.vol_step);
         d.lotCapped     = s.floor_capped;
         d.lotZero       = (s.floor_capped && s.risk_budget_money <= 0.005);
+        d.lotBelowMin    = s.below_min;          // v3.35 : all computed, none shown
+        d.lotOverBudget  = s.over_budget;
+        d.lotMarginBound = s.margin_bound;
+        d.lotMarginShort = s.margin_insufficient;
+        d.lotReduce      = s.reduce_flag;
         d.budgetPct     = s.budget_pct;
         d.budgetMoney   = s.risk_budget_money;
         d.freeMarginPct = s.free_margin_pct;
         d.nPlanned      = s.n_planned;
     } else {
         d.sugLot = 0.0; d.lotDigits = 2; d.lotCapped = false; d.lotZero = false;
+        d.lotBelowMin = false; d.lotOverBudget = false; d.lotMarginBound = false;
+        d.lotMarginShort = false; d.lotReduce = false;
         d.budgetPct = 0.0; d.budgetMoney = 0.0; d.freeMarginPct = 0.0; d.nPlanned = 0;
     }
     d.spreadPts  = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
@@ -1797,6 +1905,15 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_NAV_LOT,   Tr("shl_navlot"));
     g_shell.SetLabel(RCL_NAV_NEWS,  Tr("shl_navnews"));
     g_shell.SetLabel(RCL_NAV_FIT,   Tr("shl_navfit"));
+    g_shell.SetLabel(RCL_COOLDOWN_T, Tr("shl_cooldownt"));
+    g_shell.SetLabel(RCL_LOSSES,     Tr("shl_losses"));
+    g_shell.SetLabel(RCL_LOCK_BLOCKED, Tr("shl_lockblocked"));
+    g_shell.SetLabel(RCL_LIM_LOCKED,    Tr("shl_limlocked"));
+    g_shell.SetLabel(RCL_LOT_BELOWMIN,  Tr("shl_lotbelowmin"));
+    g_shell.SetLabel(RCL_LOT_OVERBUD,   Tr("shl_lotoverbud"));
+    g_shell.SetLabel(RCL_LOT_MARGBOUND, Tr("shl_lotmargbound"));
+    g_shell.SetLabel(RCL_LOT_MARGSHORT, Tr("shl_lotmargshort"));
+    g_shell.SetLabel(RCL_LOT_REDUCE,    Tr("shl_lotreduce"));
     g_shell.SetLabel(RCL_SEC_CPTST,  Tr("shl_cptstate"));
     g_shell.SetLabel(RCL_CPT_FIRM,   Tr("shl_cptfirm"));
     g_shell.SetLabel(RCL_CPT_SERVER, Tr("shl_cptserver"));
@@ -1976,11 +2093,15 @@ void ShellApplyCfg(const int id) {
         GlobalVariableSet("RC_lang", (double)g_lang);
         ShellPushLabels();                 // the shell's chrome follows the language
     } else if (id == g_shell.CfgIdViolMargin()) {
+        // v3.34 : these two wrote the GLOBAL variable only. PersistViolationFlags()
+        // - which also writes the PER-LOGIN copy the loader reads first - existed,
+        // was declared, and was called by nothing : the flag leaked from one
+        // account to the next and was never saved where it is looked for.
         g_margin_violation_active = !g_margin_violation_active;
-        GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
+        PersistViolationFlags();
     } else if (id == g_shell.CfgIdViolRisk()) {
         g_risk_violation_active = !g_risk_violation_active;
-        GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0);
+        PersistViolationFlags();
     } else if (id == g_shell.CfgIdBe()) {
         g_be_visible = !g_be_visible;
         PersistBE();
@@ -4928,6 +5049,39 @@ void InitI18n(void) {
         "basket",
         "panier",
         "cesta");
+    AddTr("shl_cooldownt",
+        "Cooldown after losses",
+        "Pause après pertes",
+        "Pausa tras pérdidas");
+    AddTr("shl_losses", "losses", "pertes", "pérdidas");
+    AddTr("shl_limlocked",
+        "Locked risk (scored)",
+        "Risque verrouillé (noté)",
+        "Riesgo bloqueado (puntuado)");
+    AddTr("shl_lotbelowmin",
+        "Maths asked for less than the broker minimum.",
+        "Le calcul demandait moins que le minimum du courtier.",
+        "El cálculo pedía menos que el mínimo del bróker.");
+    AddTr("shl_lotoverbud",
+        "The tradable lot risks MORE than the budget.",
+        "Le lot réel risque PLUS que le budget.",
+        "El lote real arriesga MÁS que el presupuesto.");
+    AddTr("shl_lotmargbound",
+        "Free margin is what limits this lot.",
+        "C'est la marge libre qui limite ce lot.",
+        "El margen libre es lo que limita este lote.");
+    AddTr("shl_lotmargshort",
+        "Free margin cannot cover the minimum lot.",
+        "La marge libre ne couvre même pas le lot minimum.",
+        "El margen libre no cubre ni el lote mínimo.");
+    AddTr("shl_lotreduce",
+        "Cumulative budget left is under cap / N.",
+        "Le budget cumulé restant est sous plafond / N.",
+        "El presupuesto acumulado restante está bajo tope / N.");
+    AddTr("shl_lockblocked",
+        "LOCKED - this control is disabled until the lock ends",
+        "VERROUILLÉ - ce contrôle est désactivé jusqu'à la fin du verrou",
+        "BLOQUEADO - este control está desactivado hasta el fin del bloqueo");
     AddTr("shl_navroom", "ROOM", "MARGE", "MARGEN");
     AddTr("shl_navlot",  "LOT",  "LOT",   "LOTE");
     AddTr("shl_navnews", "NEWS", "NEWS",  "NEWS");
