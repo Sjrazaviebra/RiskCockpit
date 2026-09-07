@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.26"
+#property version "3.30"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.26"
+#define RC_VERSION_STR "3.30"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1106,6 +1106,20 @@ int OnInit(void) {
             GVGetLogin("RC_v3_flthid", fh);
             g_shell.SetFloatPos((int)fx, (int)fy);
             g_shell.SetFloatHidden(fh != 0.0);   // a hidden table stayed hidden
+            // v3.27 : which sections of the FULL panel are unfolded. Without
+            // this the accordion reset on every timeframe change - the panel
+            // would forget what the trader had opened, every single time.
+            double sm = 0.0;
+            if (GVGetLogin("RC_v3_secopen", sm) && (int)sm != 0)
+                g_shell.SetSecOpenMask((int)sm);
+            // v3.30 : and WHICH panel was open. A timeframe change used to
+            // close everything - the trader re-opened the same section after
+            // every switch, and a tool you have to re-open is a tool you stop
+            // opening. Restored BEFORE Create(), like the table's position.
+            double st = -1.0, sc = -1.0;
+            GVGetLogin("RC_v3_state", st);
+            GVGetLogin("RC_v3_sec",   sc);
+            if (st >= 0.0) g_shell.SetStateSec((int)st, (int)sc);
         }
         g_shell.Create(RC_PREFIX + "V3_");
         ShellPushLabels();   // the shell's chrome speaks the product's language
@@ -1748,6 +1762,10 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_LOCK_TG,   Tr("shl_locktg"));
     g_shell.SetLabel(RCL_ROOM_SHORT, Tr("shl_roomshort"));
     g_shell.SetLabel(RCL_HELP_COLOURS, Tr("shl_colours"));
+    g_shell.SetLabel(RCL_NAV_ROOM,  Tr("shl_navroom"));
+    g_shell.SetLabel(RCL_NAV_LOT,   Tr("shl_navlot"));
+    g_shell.SetLabel(RCL_NAV_NEWS,  Tr("shl_navnews"));
+    g_shell.SetLabel(RCL_NAV_FIT,   Tr("shl_navfit"));
     g_shell.SetLabel(RCL_SEC_CPTST,  Tr("shl_cptstate"));
     g_shell.SetLabel(RCL_CPT_FIRM,   Tr("shl_cptfirm"));
     g_shell.SetLabel(RCL_CPT_SERVER, Tr("shl_cptserver"));
@@ -2284,6 +2302,28 @@ void ShellRefresh(void) {
         ShellApplyAddon(g_shell.PendAddonTake());
         if (g_shell.PendSelfLockTake())     ShellArmSelfLock();
         if (g_shell.PendUnlockTake())       ShellReleaseSelfLock();
+        if (g_shell.PendFitTake()) {
+            // v3.27 : the FIT chip. It ARMS the comfort padding (a button that
+            // only works while a setting is already on is a trap) and re-pads
+            // at once - force, because ApplyComfortScale(false) refuses to act
+            // on a fixed scale it does not recognise as its own.
+            g_eff_comfort = true;
+            GlobalVariableSet("RC_comfort", 1.0);
+            ApplyComfortScale(true);
+        }
+        {   // v3.27 : persist the accordion as soon as it moves, per login.
+            static int s_secmask = -1;
+            const int sm2 = g_shell.SecOpenMask();
+            if (sm2 != s_secmask) {
+                s_secmask = sm2;
+                GVSetLogin("RC_v3_secopen", (double)sm2);
+            }
+            // v3.30 : and which panel is open, same rule.
+            static int s_state = -1, s_sec = -1;
+            const int st2 = g_shell.StateGet(), sc2 = g_shell.SecGet();
+            if (st2 != s_state) { s_state = st2; GVSetLogin("RC_v3_state", (double)st2); }
+            if (sc2 != s_sec)   { s_sec   = sc2; GVSetLogin("RC_v3_sec",   (double)sc2); }
+        }
         {   // The theme picked in the shell used to die with the frame : never
             // persisted (a regression against the legacy panel) and the chart-side
             // lines kept the previous palette.
@@ -4849,6 +4889,10 @@ void InitI18n(void) {
         "basket",
         "panier",
         "cesta");
+    AddTr("shl_navroom", "ROOM", "MARGE", "MARGEN");
+    AddTr("shl_navlot",  "LOT",  "LOT",   "LOTE");
+    AddTr("shl_navnews", "NEWS", "NEWS",  "NEWS");
+    AddTr("shl_navfit",  "FIT",  "CADR",  "AJUS");
     AddTr("shl_cptstate",  "TERMINAL",   "TERMINAL",    "TERMINAL");
     AddTr("shl_cptfirm",   "Broker",     "Courtier",    "Bróker");
     AddTr("shl_cptserver", "Server",     "Serveur",     "Servidor");
@@ -5197,9 +5241,9 @@ void InitI18n(void) {
         "ne ferme AUCUN trade. Aucun signal.",
         "modifica ni cierra NINGUNA operación. Sin señal.");
     AddTr("shl_secsize",
-        "sections : enlarge the window",
-        "sections : agrandis la fenêtre",
-        "secciones : agranda la ventana");
+        "more : fold one, or enlarge the window",
+        "de plus : replie-en une, ou agrandis la fenêtre",
+        "más : pliega una, o agranda la ventana");
     AddTr("shl_rtoolsoff",
         "Risk toolkit OFF (personal account).",
         "Outils de risque OFF (compte perso).",

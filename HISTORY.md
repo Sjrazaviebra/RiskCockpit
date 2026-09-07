@@ -86,6 +86,47 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.27.39 -> v3.30.42 — le panneau complet devient un ACCORDEON, et la barre du haut porte les chiffres
+
+JR, apres avoir vu la v3.26 tourner : « on perd le bas du menu », « les infos
+importantes sur la barre horizontale du haut », « un bouton pour centrer le chart
+a cote du theme ». Il a laisse le choix de la solution pour le premier point,
+entre montrer moins, faire defiler, ou plier les sections.
+
+**1. Le panneau complet est un ACCORDEON.** Il empilait huit sections a la
+suite : les dernieres tombaient hors du graphique et rien ne le disait — la
+ligne d'honnetete elle-meme etait peinte au curseur `y`, donc hors du bitmap.
+Chaque section garde desormais un **en-tete cliquable** ; seuls les **corps** se
+plient. Rien n'est cache : ce qui ne rentre pas est a un clic. L'etat est
+**persiste par login**, avec l'etat du panneau (ouvert / quelle section / plein)
+— avant, chaque changement d'unite de temps refermait tout, et un outil qu'il
+faut rouvrir est un outil qu'on cesse d'ouvrir.
+
+⚠️ **Deux defauts de mon propre accordeon, trouves a l'ecran, pas au compilateur :**
+- Le panneau **OSCILLAIT** entre deux hauteurs. La boucle reservait 46 px avant
+  d'ouvrir une section, mais la mesure demandait `y + 14` : haut, tout rentre et
+  la mesure demande a RETRECIR ; bas, le dernier en-tete ne rentre plus et elle
+  demande a GRANDIR. Deux hauteurs, indefiniment, **une reconstruction complete
+  des surfaces a chaque frame**. La mesure ne fait plus que GRANDIR, et elle est
+  remise a zero au repli d'une section — le seul moment ou la pile peut
+  legitimement raccourcir.
+- **Titres en double** : l'en-tete disait « POSITIONS OUVERTES » et le corps le
+  repetait mot pour mot juste en dessous. Le premier titre d'un corps est
+  supprime **uniquement** s'il repete l'en-tete a l'identique, donc un corps dont
+  le premier titre dit autre chose (« ETAT », « CONSOMMATION DES LIMITES ») le
+  garde.
+
+**2. La barre du haut porte les trois chiffres qui decident du clic suivant** —
+marge jusqu'a la limite la plus proche, lot conseille, prochaine news — colores
+par leur propre etat, puis l'equite et le nombre de positions. Elle repond
+« est-ce que je peux prendre ce trade » sans rien ouvrir. Barre elargie de 750 a
+980 px, avec degradation progressive : sur un graphique etroit les chips tombent
+une par une, jamais de debordement.
+
+**3. Bouton CADR (FIT)**, entre la palette et le D/L : il **arme** l'echelle
+confort et re-cadre immediatement. Un bouton qui n'agirait que si un reglage est
+deja actif est un piege — il allume le reglage lui-meme.
+
 ### v3.26.38 — passe de SECURITE
 
 Revue adversariale a 53 agents (fuite de donnees, garantie lecture seule,

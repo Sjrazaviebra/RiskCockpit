@@ -171,7 +171,7 @@ enum ERCZone {
    RZ_PANEL_CLOSE, RZ_PANEL_PIN,
    // navbar
    RZ_NAV_LOGO, RZ_NAV_SYM, RZ_NAV_TF, RZ_NAV_VITALS, RZ_NAV_HEALTH,
-   RZ_NAV_PALETTE, RZ_NAV_MODE, RZ_NAV_CLOCK, RZ_NAV_KILL,
+   RZ_NAV_PALETTE, RZ_NAV_MODE, RZ_NAV_FIT, RZ_NAV_CLOCK, RZ_NAV_KILL,
    // hover-only info zones (click = swallowed no-op, never collapses a section)
    RZ_TIP_LIM_ROOM, RZ_TIP_LIM_FLOOR, RZ_TIP_LIM_M0, RZ_TIP_LIM_M1,
    RZ_TIP_LIM_M2, RZ_TIP_LIM_M3,
@@ -212,7 +212,10 @@ enum ERCZone {
    RZ_SELFLOCK, RZ_UNLOCK,
    RZ_CYC_PREV0, RZ_CYC_PREV1, RZ_CYC_PREV2,
    RZ_CYC_NEXT0, RZ_CYC_NEXT1, RZ_CYC_NEXT2,
-   RZ_MAXLOT_EDIT
+   RZ_MAXLOT_EDIT,
+   // --- v3.27 : the full panel is an ACCORDION - one clickable header per
+   // section, contiguous so the index is the offset.
+   RZ_SECH0, RZ_SECH1, RZ_SECH2, RZ_SECH3, RZ_SECH4, RZ_SECH5, RZ_SECH6, RZ_SECH7
 };
 //--- label slots : the shell ships FR defaults ; the host overrides them with
 //--- its own i18n (Tr) so one translation table serves the whole product.
@@ -253,7 +256,8 @@ enum ERCLabel {
    RCL_BAND_TRADES, RCL_BAND_SLOW,
    RCL_NEWS_HI, RCL_NEWS_MED, RCL_LOCK_RTOOLS, RCL_LOCK_VIOL,
    RCL_SEC_CPTST, RCL_CPT_FIRM, RCL_CPT_SERVER, RCL_CPT_LEV, RCL_CPT_BAL,
-   RCL_CPT_EQ, RCL_CPT_MUSED, RCL_CPT_FREEM
+   RCL_CPT_EQ, RCL_CPT_MUSED, RCL_CPT_FREEM,
+   RCL_NAV_ROOM, RCL_NAV_LOT, RCL_NAV_NEWS, RCL_NAV_FIT
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -262,7 +266,7 @@ struct RCZone { int x, y, w, h, id; };
 #define RCS_CELLS_TOT  402      // 74+46+50+52+48+48+44+40 (see CellH)
 #define RCS_RAIL_HEAD   44      // pad 4 + chevron band 22 + 18 breathing
 #define RCS_RAIL_MING    4      // gap floor before degrading
-#define RCS_NAV_W      750
+#define RCS_NAV_W      980      // v3.27 : room for ROOM / LOT / NEWS
 #define RCS_NAV_MINW   330      // floor = the MANDATORY controls (logo+sym+tf+pal+D/L+X)
 #define RCS_NAV_H       34
 #define RCS_SIDE_W     340
@@ -314,11 +318,14 @@ private:
    bool       m_fltOn, m_fltHidden, m_drag;
    bool       m_lastLeft;        // previous button state : a drag needs a TRANSITION
    int        m_pendTheme;       // host consumes : new theme index, -1 = none
+   bool       m_pendFit;         // host consumes : re-centre the chart NOW
    bool       m_closeNotice;     // a disabled CLOSE was clicked : highlight the EA line
    // v3.09 : measured height of each section (0 = never drawn yet). The panel
    // surface is sized from it, so a body can no longer be painted outside its
    // own bitmap - the defect that made the floating table vanish.
    int        m_secH[9];        // 0..7 = one section ; 8 = the FULL stack
+   bool       m_secOpen[8];     // v3.27 : accordion state of the FULL panel
+   string     m_accTitle;       // v3.28 : title just drawn by the accordion
    bool       m_relayout;        // a measurement moved : re-create the surfaces
    int        m_dragOffX, m_dragOffY;
    int        m_sideX, m_sideY, m_sideH;
@@ -486,6 +493,25 @@ private:
    }
 
    //================= NAVBAR (session state - top centre) ==================
+   //--- one navbar chip : LABEL then value, returns the next x -------------
+   int NavChip(const int x, const string lab, const string val, const color vc,
+               const int zid) {
+      const int w = 86;
+      m_nav.CapsuleStroke(x, 7, w, 20, Mix(m_t.surface, m_t.dim, 0.30),
+                          Mix(m_t.surface, clrBlack, 0.10));
+      m_nav.Text(x + 7, 12, lab, A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
+      m_nav.Text(x + w - 7, 11, val, A(vc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, FW_BOLD);
+      ZAdd(m_navX + x, m_navY + 7, w, 20, zid);
+      return x + w + 4;
+   }
+   //--- money that always fits a chip : 1 234 -> 1.2K, 12 345 -> 12K --------
+   string MoneyShort(const double v) const {
+      const double a = MathAbs(v);
+      if(a >= 100000.0) return "$" + DoubleToString(v / 1000.0, 0) + "K";
+      if(a >= 10000.0)  return "$" + DoubleToString(v / 1000.0, 1) + "K";
+      if(a >= 1000.0)   return "$" + DoubleToString(v / 1000.0, 2) + "K";
+      return "$" + DoubleToString(v, 0);
+   }
    void RenderNavbar(void) {
       if(!m_nav.Ready()) return;
       m_nav.Begin();
@@ -502,7 +528,8 @@ private:
       m_nav.Text(144, 11, m_d.tf, A(m_t.accent), RCS_F_BODY, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(m_navX + 122, m_navY + 7, 44, 20, RZ_NAV_TF);
       // --- right cluster : palette / mode / clock / remove ----------------
-      const int killX = W - 28, clkX = W - 96, modeX = W - 130, palX = W - 172;
+      const int killX = W - 28, clkX = W - 96, modeX = W - 130,
+                fitX  = W - 166, palX = W - 210;
       m_nav.Text(killX + 9, 9, ShortToString((ushort)0x00D7), A(m_t.dim), RCS_F_BTN, "Segoe UI", TA_CENTER | TA_TOP);
       ZAdd(m_navX + killX, m_navY + 4, 22, 26, RZ_NAV_KILL);
       // v3.06 : the legacy title clock switched to the news countdown ; here the
@@ -515,6 +542,15 @@ private:
       m_nav.CapsuleStroke(modeX, 7, 30, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.10));
       m_nav.Text(modeX + 15, 11, (m_themeIdx % 2 == 1 ? "L" : "D"), A(m_t.text), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(m_navX + modeX, m_navY + 7, 30, 20, RZ_NAV_MODE);
+      // v3.27 : centre the chart, next to the theme chips (JR). It turns the
+      // comfort padding ON and re-pads immediately - the host does the work.
+      m_nav.CapsuleStroke(fitX, 7, 32, 20,
+                          Mix(m_t.surface, m_d.cfgComfort ? m_t.accent : m_t.dim, 0.45),
+                          Mix(m_t.surface, clrBlack, 0.10));
+      m_nav.Text(fitX + 16, 11, L(RCL_NAV_FIT, "FIT"),
+                 A(m_d.cfgComfort ? m_t.accent : m_t.dim), RCS_F_SMALL, "Segoe UI",
+                 TA_CENTER | TA_TOP, FW_BOLD);
+      ZAdd(m_navX + fitX, m_navY + 7, 32, 20, RZ_NAV_FIT);
       m_nav.CapsuleGradient(palX, 7, 38, 20, A(m_t.accent), A(m_t.accent2));
       m_nav.Text(palX + 19, 11, StringSubstr(m_t.name, 0, 4), Mix(m_t.bg, clrBlack, 0.35), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(m_navX + palX, m_navY + 7, 38, 20, RZ_NAV_PALETTE);
@@ -526,11 +562,38 @@ private:
          string hb = m_d.verdictWord + " " + IntegerToString(m_d.score) + "/100";
          m_nav.Text(midX + 52, 11, hb, A(vc), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
          ZAdd(m_navX + midX, m_navY + 7, 104, 20, RZ_NAV_HEALTH);
-         if(midW >= 260) {
+         // v3.27 : the three numbers that decide the next click, on the top bar
+         // (JR : "les infos importantes sur la barre horizontale du haut").
+         // They are the same three the floating table carries - room to the
+         // nearest limit, advised lot, next news - so the bar answers "can I
+         // take this trade" without opening anything.
+         int cx = midX + 112;
+         if(midW >= 250) {
+            const color rc = (m_d.limRatio >= 1.0 ? m_t.red
+                              : (m_d.limRatio >= 0.80 ? m_t.warn : m_t.ok));
+            cx = NavChip(cx, L(RCL_NAV_ROOM, "ROOM"),
+                         (m_d.roomMoney < 0.0 ? "N/A" : MoneyShort(m_d.roomMoney)),
+                         rc, RZ_NAV_VITALS);
+         }
+         if(midW >= 340) {
+            const color lc2 = (m_d.lotZero ? m_t.red : (m_d.lotCapped ? m_t.warn : m_t.accent));
+            cx = NavChip(cx, L(RCL_NAV_LOT, "LOT"),
+                         (m_d.sugLot > 0.0 ? DoubleToString(m_d.sugLot, m_d.lotDigits) : "--"),
+                         lc2, RZ_NAV_VITALS);
+         }
+         if(midW >= 430) {
+            const color nc2 = (!m_d.newsHasEvt ? m_t.dim
+                               : (m_d.newsActive ? m_t.red
+                                  : (m_d.newsMins <= 60 ? m_t.warn : m_t.text)));
+            cx = NavChip(cx, L(RCL_NAV_NEWS, "NEWS"),
+                         (m_d.newsHasEvt ? IntegerToString(m_d.newsMins) + "m" : "--"),
+                         nc2, RZ_NAV_VITALS);
+         }
+         if(midW >= 560) {
             string vit = "$" + DoubleToString(m_d.equity, 2) + "  " +
                          IntegerToString(m_d.posCount) + " pos";
-            m_nav.Text(midX + 116, 11, vit, A(m_t.dim), RCS_F_NUM, "Consolas", TA_LEFT | TA_TOP);
-            ZAdd(m_navX + midX + 116, m_navY + 7, midW - 116, 20, RZ_NAV_VITALS);
+            m_nav.Text(cx + 6, 11, vit, A(m_t.dim), RCS_F_NUM, "Consolas", TA_LEFT | TA_TOP);
+            ZAdd(m_navX + cx + 6, m_navY + 7, midX + midW - cx - 6, 20, RZ_NAV_VITALS);
          }
       }
       m_nav.Commit();
@@ -656,6 +719,15 @@ private:
       return "";
    }
    void SecHead(const string s, int &y) {
+      // v3.28 : in the accordion the header already carries the section name ;
+      // printing it again right underneath read as a stutter ("OPEN POSITIONS
+      // / OPEN POSITIONS"). Only an exact repeat is dropped, so a body whose
+      // first heading says something else keeps it.
+      if(StringLen(m_accTitle) > 0) {
+         const bool same = (s == m_accTitle);
+         m_accTitle = "";
+         if(same) return;
+      }
       m_side.Text(18, y, s, A(m_t.accent), RCS_F_LABEL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
       y += 15;
       m_side.Hairline(18, y, RCS_SIDE_W - 18, LineC());
@@ -1250,10 +1322,29 @@ private:
          int order[8];
          order[0] = RZ_RAIL_LIM;  order[1] = RZ_RAIL_POS;  order[2] = RZ_RAIL_LOT;  order[3] = RZ_RAIL_NEWS;
          order[4] = RZ_RAIL_DISC; order[5] = RZ_RAIL_CPT;  order[6] = RZ_RAIL_CFG;  order[7] = RZ_RAIL_HELP;
+         // v3.27 : ACCORDION. The eight sections never fitted, and the tail
+         // simply fell off the chart (JR : "on perd le bas du menu"). Every
+         // section keeps a clickable header ; only the BODIES fold, so nothing
+         // is hidden - what does not fit is one click away.
          int shown = 0;
          for(int i = 0; i < 8; i++) {
-            if(y > H - 60) break;      // no room left : the notice is drawn below
-            y = SecBody(order[i], y) + 8;
+            if(y > H - 46) break;      // no room left : the notice is drawn below
+            const bool op = m_secOpen[i];
+            m_side.CapsuleStroke(14, y - 2, W - 28, 20,
+                                 Mix(m_t.surface, m_t.dim, 0.30),
+                                 Mix(m_t.surface, m_t.accent, op ? 0.12 : 0.04));
+            m_side.Text(24, y + 1, ShortToString((ushort)(op ? 0x25BE : 0x25B8)),
+                        A(m_t.accent), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+            m_side.Text(40, y + 1, SectionTitle(order[i]),
+                        A(op ? m_t.accent : m_t.dim), RCS_F_LABEL, "Segoe UI",
+                        TA_LEFT | TA_TOP, FW_BOLD);
+            ZAdd(m_sideX + 14, m_sideY + y - 2, W - 28, 20, RZ_SECH0 + i);
+            y += 24;
+            if(op) {
+               m_accTitle = SectionTitle(order[i]);   // dropped if the body repeats it
+               y = SecBody(order[i], y) + 8;
+               m_accTitle = "";
+            }
             shown++;
          }
          // The notice used to be drawn AT y - that is, exactly where the bitmap
@@ -1270,9 +1361,16 @@ private:
          // re-lay out. Already at the chart ceiling : stop growing and let
          // the "+N sections" line above say so - a silent loop here would
          // re-create the surfaces on EVERY frame.
+         // v3.28 : this used to accept ANY change, and it oscillated. The loop
+         // reserves room before starting a section while the measure asks for
+         // y + 14 : tall, everything fits and the measure asks to SHRINK ;
+         // short, the last header no longer fits and it asks to GROW. Two
+         // heights forever, one surface rebuild per frame. Growing only is
+         // stable, and folding a section resets m_secH[8] to zero - the one
+         // moment the stack may legitimately become shorter.
          const int wantF = (shown >= 8 ? y + 14
-                            : (m_sideH < m_chH - 24 ? m_sideH + 200 : m_secH[8]));
-         if(wantF > 0 && wantF != m_secH[8]) { m_secH[8] = wantF; m_relayout = true; }
+                            : (m_sideH < m_chH - 24 ? m_sideH + 120 : m_secH[8]));
+         if(wantF > m_secH[8]) { m_secH[8] = wantF; m_relayout = true; }
       } else {
          y = SecBody(m_sec, y);
          // MEASURE : the first frame of a section may be drawn at the default
@@ -1328,6 +1426,7 @@ private:
          case RZ_NAV_VITALS: t = "Vitals";       d = "Current equity and open position count.";          return true;
          case RZ_NAV_PALETTE:t = "Theme";        d = "Emerald / Indigo / Slate.";                     return true;
          case RZ_NAV_MODE:   t = "Mode";         d = "Dark / light.";                                  return true;
+         case RZ_NAV_FIT:    t = "Fit";          d = "Re-centre the chart with free room above and below."; return true;
          case RZ_NAV_CLOCK:  t = "Clock";      d = "Broker server time.";                         return true;
          case RZ_NAV_KILL:   t = "Remove";      d = "Removes RiskCockpit from this chart.";              return true;
          case RZ_TIP_LIM_ROOM:  t = "Room";     d = "Dollars before the nearest active limit.";   return true;
@@ -1674,8 +1773,12 @@ public:
       m_fltX = -1; m_fltY = -1; m_fltW = RCS_FLT_W; m_fltH = RCS_FLT_HEAD + 40;
       m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
       m_closeNotice = false;
-      m_lastLeft = false; m_pendTheme = -1;
+      m_lastLeft = false; m_pendTheme = -1; m_pendFit = false;
       for(int si = 0; si < 9; si++) m_secH[si] = 0;
+      // the three sections that answer "can I take this trade" start open ;
+      // the host overwrites this with the per-login mask it persisted.
+      for(int so = 0; so < 8; so++) m_secOpen[so] = (so < 3);
+      m_accTitle = "";
       m_relayout = false;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
@@ -1716,6 +1819,24 @@ public:
    bool PendSelfLockTake(void) { const bool r = m_pendSelfLock; m_pendSelfLock = false; return r; }
    bool PendUnlockTake(void)   { const bool r = m_pendUnlock;   m_pendUnlock   = false; return r; }
    int  PendThemeTake(void)    { const int  r = m_pendTheme;    m_pendTheme    = -1;    return r; }
+   bool PendFitTake(void)      { const bool r = m_pendFit;      m_pendFit      = false; return r; }
+   //--- accordion of the FULL panel, as a bitmask the host can persist ----
+   int  SecOpenMask(void) const {
+      int m = 0;
+      for(int i = 0; i < 8; i++) if(m_secOpen[i]) m |= (1 << i);
+      return m;
+   }
+   //--- which panel was open, so a timeframe change does not forget it -----
+   int  StateGet(void) const { return m_state; }
+   int  SecGet(void)   const { return m_sec; }
+   void SetStateSec(const int st, const int sec) {
+      if(st >= 0 && st <= 2) m_state = st;
+      if(sec >= RZ_RAIL_LIM && sec <= RZ_RAIL_HELP) m_sec = sec;
+   }
+   void SetSecOpenMask(const int mask) {
+      for(int i = 0; i < 8; i++) m_secOpen[i] = ((mask & (1 << i)) != 0);
+      m_secH[8] = 0; m_relayout = true;
+   }
    bool PendCycTake(int &field, int &dir) {
       if(m_pendCyc < 0) return false;
       field = m_pendCyc / 10; dir = ((m_pendCyc % 10) == 1 ? 1 : -1); m_pendCyc = -1; return true;
@@ -1962,6 +2083,13 @@ public:
       // close the panel under the user's finger (RZ_TIP_TARGET and RZ_TIP_MSGS
       // did exactly that in v3.01.12, caught by the zone audit).
       if(hit >= RZ_TIP_CPT && hit <= RZ_TIP_NEWSTR) return true;
+      if(hit >= RZ_SECH0 && hit <= RZ_SECH7) {   // accordion header : fold / unfold
+         const int si = hit - RZ_SECH0;
+         m_secOpen[si] = !m_secOpen[si];
+         m_secH[8] = 0;                         // the stack changed : re-measure
+         OnChartChange();
+         return true;
+      }
       if(hit == RZ_LOT_EDIT) return true;      // native edit sits here : NEVER collapse the section
       if(hit >= RZ_CFG_TAB0 && hit <= RZ_CFG_TAB3) {          // settings sub-tab
          m_cfgTab = hit - RZ_CFG_TAB0; RenderAll(); return true;
@@ -2040,6 +2168,8 @@ public:
             RC_ThemeGet(m_themeIdx, m_t);
             m_pendTheme = m_themeIdx;
             RenderAll(); return true;
+         case RZ_NAV_FIT:
+            m_pendFit = true; return true;                  // the host re-centres the chart
          case RZ_NAV_KILL:
             m_pendKill = true; return true;                 // the host removes the indicator
          case RZ_NAV_TF: case RZ_NAV_SYM: {                  // chips open their dropdown
