@@ -86,6 +86,33 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.21.33 — la queue de la relecture
+
+- **Cliquer une ligne de position ramène le graphique sur son symbole** — le
+  comportement de l'ancien panneau. La réécriture avait rangé ces lignes dans
+  un fourre-tout « lignes d'information » qui se contente d'avaler le clic.
+  Vaut pour la section POSITIONS et pour le tableau flottant.
+- **Le conseiller pyramide parlait français quelle que soit la langue** : ses
+  neuf phrases étaient écrites en dur. Elles passent par la table i18n.
+- **Les drapeaux « 2e strike » étaient globaux** alors que la taille, la phase
+  et le plan sont par login : une violation suivait le trader sur tous ses
+  autres comptes. Ils sont désormais écrits et lus par login, avec la valeur
+  globale comme graine de migration.
+- **(0,0) est un coin légitime** : le tableau flottant y était traité comme
+  « jamais placé » et revenait à sa position par défaut dès qu'on l'y déposait.
+  Sentinelle à −1.
+- **`CHART_EVENT_MOUSE_MOVE` est rendu à `OnDeinit`** : le drapeau était pris à
+  l'attachement et jamais restitué.
+
+**Ce qui reste ouvert et qui n'est pas de mon ressort** :
+
+- l'identifiant de compte est toujours dans **l'historique git** des deux
+  branches (le purger = réécriture + `force-push`, donc casse des clones) ;
+- la **LICENSE** (« évaluation seule, non commerciale, aucun usage dans un
+  produit ») contredit le README, qui explique comment installer l'outil et
+  trader avec — et ne dit rien du `.ex5` fourni. Un texte juridique ne se
+  corrige pas en passant.
+
 ### v3.20.32 — le travail lourd deux fois par seconde, et les infobulles coupées
 
 - **Les lignes SL/TP étaient reconstruites sur TOUS les graphiques ouverts à

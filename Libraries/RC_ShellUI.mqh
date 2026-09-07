@@ -441,7 +441,9 @@ private:
       m_fltOn = !m_fltHidden;                            // v3.05 : always there, even flat
       m_fltW  = RCS_FLT_W;
       m_fltH  = FloatWantH();
-      if(m_fltX <= 0 && m_fltY <= 0) { m_fltX = 12; m_fltY = m_navY + RCS_NAV_H + 12; }   // first run
+      // (0,0) is a legitimate corner : treating it as 'never placed' sent the table
+      // back to its default spot every time the user dropped it there.
+      if(m_fltX < 0 || m_fltY < 0) { m_fltX = 12; m_fltY = m_navY + RCS_NAV_H + 12; }
       if(m_fltX > m_chW - m_fltW) m_fltX = m_chW - m_fltW;
       if(m_fltX < 0) m_fltX = 0;
       if(m_fltY > m_chH - m_fltH) m_fltY = m_chH - m_fltH;
@@ -1611,7 +1613,7 @@ public:
       for(int q = 0; q < 6; q++) { m_d.newsWhen[q] = ""; m_d.newsCcy[q] = ""; m_d.newsRestr[q] = false; }
       m_navY = 0; m_bandOn = false;
       m_lotEditOn = false; m_lotEditX = 0; m_lotEditY = 0; m_lotEditW = 0; m_lotEditH = 0;
-      m_fltX = 0; m_fltY = 0; m_fltW = RCS_FLT_W; m_fltH = RCS_FLT_HEAD + 40;
+      m_fltX = -1; m_fltY = -1; m_fltW = RCS_FLT_W; m_fltH = RCS_FLT_HEAD + 40;
       m_fltOn = false; m_fltHidden = false; m_drag = false; m_dragOffX = 0; m_dragOffY = 0;
       m_closeNotice = false;
       m_lastLeft = false; m_pendTheme = -1;
@@ -1882,6 +1884,15 @@ public:
       // hover-only info zones : swallow the click, never collapse the section
       if(hit >= RZ_TIP_LIM_ROOM && hit <= RZ_TIP_LIM_M3) return true;
       if(hit == RZ_TIP_HYPER) return true;                  // hover-only, never collapses
+      // Legacy behaviour : clicking a position row takes the chart to its symbol.
+      // The rewrite folded these rows into the generic info-row catch-all below,
+      // which only swallows the click.
+      if(hit >= RZ_POS_ROW0 && hit <= RZ_POS_ROW7) {
+         const int pr = hit - RZ_POS_ROW0;
+         if(pr < m_d.posN && StringLen(m_d.posSym[pr]) > 0)
+            ChartSetSymbolPeriod(0, m_d.posSym[pr], (ENUM_TIMEFRAMES)ChartPeriod(0));
+         return true;
+      }
       if(hit >= RZ_POS_ROW0 && hit <= RZ_BAND) return true;   // info rows + safety band
       // every hover-only info row, as ONE contiguous range : a zone added here
       // and forgotten in OnClick would fall through to the auto-collapse and
@@ -1920,7 +1931,12 @@ public:
       }
       if(hit == RZ_UNLOCK) { m_pendUnlock = true; return true; }   // host arms / confirms
       if(hit == RZ_MAXLOT_EDIT) return true;                  // native edit : no-op zone
-      if(hit >= RZ_FLT_ROW0 && hit <= RZ_FLT_ROW7) return true;   // position rows : read-only
+      if(hit >= RZ_FLT_ROW0 && hit <= RZ_FLT_ROW7) {          // same, from the float
+         const int fr = hit - RZ_FLT_ROW0;
+         if(fr < m_d.posN && StringLen(m_d.posSym[fr]) > 0)
+            ChartSetSymbolPeriod(0, m_d.posSym[fr], (ENUM_TIMEFRAMES)ChartPeriod(0));
+         return true;
+      }
       if(hit >= RZ_FLT_CLOSE0 && hit <= RZ_FLT_CLOSE7) {          // disabled on purpose
          m_closeNotice = true; RenderFloat(); ChartRedraw(); return true;
       }

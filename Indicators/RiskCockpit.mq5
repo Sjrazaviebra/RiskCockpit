@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.20"
+#property version "3.21"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.20"
+#define RC_VERSION_STR "3.21"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -964,6 +964,12 @@ int OnInit(void) {
     g_risk_violation_active   = InpRiskViolationActive;
     if (GlobalVariableCheck("RC_margin_violation"))
         g_margin_violation_active = (GlobalVariableGet("RC_margin_violation") != 0.0);
+    {   // A 2nd strike belongs to ONE account, like size / phase / plan. Stored
+        // globally, it followed the trader onto every other login.
+        double mv = 0.0, rv = 0.0;
+        if (GVGetLogin("RC_margin_violation", mv)) g_margin_violation_active = (mv != 0.0);
+        if (GVGetLogin("RC_risk_violation",   rv)) g_risk_violation_active   = (rv != 0.0);
+    }
     if (GlobalVariableCheck("RC_risk_violation"))
         g_risk_violation_active = (GlobalVariableGet("RC_risk_violation") != 0.0);
 
@@ -1134,6 +1140,7 @@ void OnDeinit(const int reason) {
         if (MathAbs(cmn - g_cs_min) < tol && MathAbs(cmx - g_cs_max) < tol)
             ChartSetInteger(0, CHART_SCALEFIX, false);
     }
+    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, false);   // taken at attach, given back
     DestroyAllObjects();
     // Clean SL / TP / NEWS / BE objects we may have drawn on ANY open chart.
     long cid = ChartFirst();
@@ -4691,6 +4698,42 @@ void InitI18n(void) {
         "Profit target",
         "Objectif de profit",
         "Objetivo de beneficio");
+    AddTr("pyr_nopos",
+        "No position on",
+        "Pas de position sur",
+        "Sin posicion en");
+    AddTr("pyr_hedged",
+        "Hedged basket (BUY+SELL) : not supported",
+        "Panier couvert (BUY+SELL) : non gere",
+        "Cesta cubierta (BUY+SELL) : no soportada");
+    AddTr("pyr_needsl",
+        "Place a stop on every position before planning",
+        "Place un SL sur toutes les positions avant de planifier",
+        "Pon un SL en todas las posiciones antes de planificar");
+    AddTr("pyr_riskfree",
+        "Basket risk-free : the stops lock profit",
+        "Panier sans risque : les SL verrouillent du profit",
+        "Cesta sin riesgo : los SL aseguran beneficio");
+    AddTr("pyr_zerovol",
+        "Basket volume = 0",
+        "Volume du panier = 0",
+        "Volumen de la cesta = 0");
+    AddTr("pyr_if",
+        "If px",
+        "Si px",
+        "Si px");
+    AddTr("pyr_moveall",
+        "lot and move EVERY stop to",
+        "lot et deplace TOUS les SL vers",
+        "lote y mueve TODOS los SL a");
+    AddTr("pyr_locks",
+        "locks",
+        "verrouille",
+        "asegura");
+    AddTr("pyr_basket",
+        "basket",
+        "panier",
+        "cesta");
     AddTr("shl_unlock",
         "RELEASE THE LOCK",
         "LEVER LE VERROU",
@@ -5531,6 +5574,8 @@ bool ProfileCanBeRestricted(void) {
 }
 
 void PersistViolationFlags(void) {
+    GVSetLogin("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
+    GVSetLogin("RC_risk_violation",   g_risk_violation_active   ? 1.0 : 0.0);
     GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
     GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0);
 }
@@ -5834,25 +5879,24 @@ bool BuildPyramidLine(string &line, int &stat) {
     }
 
     if (basket_n == 0) {
-        line = "Pas de position sur " + sym;
+        line = Tr("pyr_nopos") + " " + sym;
         stat = 2;
         return false;
     }
     if (mixed) {
-        line = "Panier couvert (BUY+SELL) : non gere";
+        line = Tr("pyr_hedged");
         stat = 1;
         return true;
     }
     if (any_missing_sl || worst_sl_dist <= 0.0) {
         // Phase 3.5 : worst_sl_dist==0 with all SLs present = every leg's SL locks profit
         // (risk-free basket) ; only truly-missing SLs warrant the "place SL" warning.
-        line = any_missing_sl ? "Place un SL sur toutes les positions avant de planifier"
-                   : "Panier sans risque : les SL verrouillent du profit";
+        line = (any_missing_sl ? Tr("pyr_needsl") : Tr("pyr_riskfree"));
         stat = (any_missing_sl ? 1 : 0);
         return true;
     }
     if (sum_vol <= 0.0) {
-        line = "Volume du panier = 0";
+        line = Tr("pyr_zerovol");
         stat = 2;
         return false;
     }
@@ -5876,14 +5920,14 @@ bool BuildPyramidLine(string &line, int &stat) {
 
     const int pld = LotDigits(sym);  // B-LOTPRECISION
     StringConcatenate(line,
-                      "Si px ", (is_buy ? ">=" : "<="), " ",
+                      Tr("pyr_if"), " ", (is_buy ? ">=" : "<="), " ",
                       DoubleToString(step.trigger_price, _Digits),
                       " add ", DoubleToString(step.add_lot, pld),
-                      " lot et deplace TOUS les SL -> ", DoubleToString(step.new_unified_stop, _Digits),
-                      " = verrouille ",
+                      " " + Tr("pyr_moveall") + " ", DoubleToString(step.new_unified_stop, _Digits),
+                      " = " + Tr("pyr_locks") + " ",
                       (step.worst_case_money >= 0.0 ? "min +$" : "perte -$"),
                       DoubleToString(MathAbs(step.worst_case_money), 2),
-                      "  [panier ", DoubleToString(sum_vol, pld),
+                      "  [" + Tr("pyr_basket") + " ", DoubleToString(sum_vol, pld),
                       " @", DoubleToString(anchor_entry, _Digits), "]");
     stat = (step.worst_case_money >= 0.0 ? 0 : 1);
     return true;
