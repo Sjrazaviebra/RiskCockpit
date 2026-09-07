@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.30"
+#property version "3.32"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.30"
+#define RC_VERSION_STR "3.32"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1422,16 +1422,29 @@ void BuildDeckData(RCDeckData &d) {
     d.dailyApplies   = (d.dailyCap > 0.0);
     d.overallApplies = (d.overallCap > 0.0);
     d.trailing       = g_profile.max_loss_trailing;
-    double worst = 0.0;
-    if (d.marginCap > 0.0)              worst = MathMax(worst, d.marginPct  / d.marginCap);
-    if (d.riskCap > 0.0)                worst = MathMax(worst, d.riskPct    / d.riskCap);
-    if (d.dailyApplies)                 worst = MathMax(worst, d.dailyPct   / d.dailyCap);
-    if (d.overallApplies)               worst = MathMax(worst, d.overallPct / d.overallCap);
-    d.limRatio  = worst;
-    // verdict + health score, derived from the ratios just computed
-    d.score       = (int)MathRound(100.0 * (1.0 - MathMin(1.0, MathMax(0.0, worst))));
-    d.verdict     = (worst >= 1.0 ? 2 : (worst >= 0.80 ? 1 : 0));
-    d.verdictWord = Tr(d.verdict == 2 ? "v_violation" : (d.verdict == 1 ? "v_atrisk" : "v_ontrack"));
+    // v3.31 : the thresholds the SOUND uses, carried to the shell so every
+    // surface warns at the same moment the alarm does.
+    d.warnMargin  = RuleWarnRatio("rule_margin_cum", d.trailing);
+    d.warnRisk    = RuleWarnRatio("rule_risk_cum",   d.trailing);
+    d.warnDaily   = RuleWarnRatio("rule_daily_dd",   d.trailing);
+    d.warnOverall = RuleWarnRatio("rule_overall_dd", d.trailing);
+    d.warnQuick   = RuleWarnRatio("rule_qs",         d.trailing);
+    d.warnHyper   = RuleWarnRatio("rule_hyper",      d.trailing);
+    // worst = raw consumption (what a BAR must show) ; sev = consumption
+    // measured against each rule's OWN warning threshold (what a COLOUR must
+    // show). They are not the same question and they had been conflated.
+    // v3.31 also puts Quick Strike, hyperactivity and server messages INTO
+    // the aggregate : the score counted four rules out of seven, so 100/100
+    // was reachable with the hyperactivity counter sitting at its cap.
+    double worst = 0.0, sev = 0.0, mark = 0.80;
+    RC_WorstRule(worst, sev, mark, d.marginPct,  d.marginCap,  true,               d.warnMargin);
+    RC_WorstRule(worst, sev, mark, d.riskPct,    d.riskCap,    d.riskCap > 0.0,    d.warnRisk);
+    RC_WorstRule(worst, sev, mark, d.dailyPct,   d.dailyCap,   d.dailyApplies,     d.warnDaily);
+    RC_WorstRule(worst, sev, mark, d.overallPct, d.overallCap, d.overallApplies,   d.warnOverall);
+    // The aggregate stays OPEN here : Quick Strike, hyperactivity and server
+    // messages are only filled a hundred lines below, and folding them in at
+    // this point would have counted three of the seven rules as ZERO - the
+    // very defect this change removes. It closes right after msgsCap.
     d.roomMoney = Live_NearestLimitRoom();                 // -1 = no active limit
     d.floorMoney = 0.0;
     if (d.trailing && init > 0.0) {
@@ -1517,6 +1530,24 @@ void BuildDeckData(RCDeckData &d) {
     d.qsCap     = g_profile.quick_strike_violate_pct;
     d.msgsToday = Live_OrdersToday();
     d.msgsCap   = g_profile.hyperactivity_msgs_per_day;
+    {   // v3.31 : the aggregate CLOSES here, now that every rule has its
+        // numbers. worst drives the bar and the score (consumption) ; sev
+        // drives the colour (each rule against its OWN threshold) ; mark
+        // carries the threshold that actually applies, for the gauge tick and
+        // the tooltip that used to claim a flat 80 %.
+        RC_WorstRule(worst, sev, mark, d.qsPct, d.qsCap, d.qsCap > 0.0, d.warnQuick);
+        RC_WorstRule(worst, sev, mark, (double)d.tradesToday, (double)d.tradesCap,
+                     d.tradesCap > 0, d.warnHyper);
+        RC_WorstRule(worst, sev, mark, (double)d.msgsToday, (double)d.msgsCap,
+                     d.msgsCap > 0, d.warnHyper);
+        d.limRatio    = worst;
+        d.limMark     = mark;
+        d.limStat     = (worst >= 1.0 ? 2 : (sev >= 1.0 ? 1 : 0));
+        d.score       = (int)MathRound(100.0 * (1.0 - MathMin(1.0, MathMax(0.0, worst))));
+        d.verdict     = d.limStat;
+        d.verdictWord = Tr(d.verdict == 2 ? "v_violation"
+                           : (d.verdict == 1 ? "v_atrisk" : "v_ontrack"));
+    }
     ComputeNewsStats();                                    // cached ~60 s inside
     d.newsTrades   = g_news_trades;
     d.newsPnl      = g_news_pnl;
@@ -2253,6 +2284,17 @@ void ShellEditsTopmost(void) {
 // SILENT since the switch to v3, with nothing on screen to say so. They now run
 // on the shell's own model, through the SAME registry (g_rows), the same
 // thresholds and the same per-rule Telegram cooldown.
+// v3.31 : at what fraction of its cap does a rule start to WARN. This used
+// to live inline in ShellRuleAlerts, where only the SOUND could see it, while
+// five drawing sites compared the same ratios to a flat 0.80. The alarm fired
+// on a green panel : the corrected threshold had no voice. One function, both
+// consumers - the sound and the deck the shell paints from.
+double RuleWarnRatio(const string key, const bool trailing) {
+    if (key == "rule_risk_cum" || key == "rule_daily_dd") return 0.70;
+    if (key == "rule_overall_dd") return (trailing ? 0.50 : 0.70);   // trailing = account killer
+    if (key == "rule_hyper" || key == "rule_msgs")        return 0.75;
+    return 0.80;
+}
 void ShellRuleAlerts(const RCDeckData &d) {
     if (!g_eff_risktools) return;
     for (int i = 0; i < RC_RULE_COUNT; ++i) {
@@ -2283,10 +2325,7 @@ void ShellRuleAlerts(const RCDeckData &d) {
         // warned at 70 %, a TRAILING overall at 50 % (it is the account killer),
         // hyper / msgs at 75 %. Flattening everything to 80 % made every alert
         // fire later than it used to - a risk tool must not warn later.
-        double warn = 0.80;
-        if (k == "rule_risk_cum" || k == "rule_daily_dd") warn = 0.70;
-        else if (k == "rule_overall_dd") warn = (d.trailing ? 0.50 : 0.70);
-        else if (k == "rule_hyper" || k == "rule_msgs")   warn = 0.75;
+        const double warn = RuleWarnRatio(k, d.trailing);   // v3.31 : ONE source
         g_rows[i].status     = ComputeRangeStatus(used, cap, warn, 1.00);
         TryFireSoundAlert(i, g_rows[i].status);
     }

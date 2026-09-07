@@ -71,6 +71,12 @@ struct RCDeckData {
    double marginUsed, freeMargin;        // $ ; the % lives in freeMarginPct
    // limits (cell LIM)
    double limRatio;         // 0..1 : worst consumption among the ACTIVE limits
+   // v3.31 : the sound warned at 70/50/75 % per rule while every screen
+   // compared to a flat 0.80 - the alarm fired on a green panel. The HOST
+   // now decides once, here, and every surface obeys.
+   int    limStat;          // 0 ok / 1 watch / 2 breach, each rule's OWN threshold
+   double limMark;          // the threshold that actually applies (gauge tick)
+   double warnMargin, warnRisk, warnDaily, warnOverall, warnQuick, warnHyper;
    double roomMoney;        // $ to the nearest active limit (-1 = no limit applies)
    double floorMoney;       // trailing floor $ (0 when not applicable)
    bool   trailing;         // FN Instant style trailing max-loss
@@ -569,8 +575,7 @@ private:
          // take this trade" without opening anything.
          int cx = midX + 112;
          if(midW >= 250) {
-            const color rc = (m_d.limRatio >= 1.0 ? m_t.red
-                              : (m_d.limRatio >= 0.80 ? m_t.warn : m_t.ok));
+            const color rc = LimStatC();
             cx = NavChip(cx, L(RCL_NAV_ROOM, "ROOM"),
                          (m_d.roomMoney < 0.0 ? "N/A" : MoneyShort(m_d.roomMoney)),
                          rc, RZ_NAV_VITALS);
@@ -622,13 +627,16 @@ private:
       double ratio = m_d.limRatio;
       if(ratio < 0.0) ratio = 0.0;
       if(ratio > 1.0) ratio = 1.0;
-      const color rc = (ratio >= 1.0 ? m_t.red : (ratio >= 0.80 ? m_t.warn : m_t.ok));
+      const color rc = LimStatC();
       const int mx = W / 2 - 3, mh = 46;
       m_rail.Capsule(mx, cy + 2, 6, mh, A(TrackC()));
       const int fh = (int)(mh * ratio);
       if(fh > 1) m_rail.CapsuleGradient(mx, cy + 2 + (mh - fh), 6, fh, A(rc), Mix(rc, clrBlack, 0.25));
-      // 80% survival marker (the v2.13 guard threshold)
-      m_rail.Capsule(mx - 2, cy + 2 + (int)(mh * 0.20), 10, 2, Mix(TrackC(), m_t.text, 0.45));
+      // v3.31 : the tick used to sit at 80 % no matter what, while the rule
+      // closest to warning could be warning at 50 %. It now marks the
+      // threshold that actually applies, and the tooltip says the number.
+      const double mk = (m_d.limMark > 0.0 && m_d.limMark < 1.0 ? m_d.limMark : 0.80);
+      m_rail.Capsule(mx - 2, cy + 2 + (int)(mh * (1.0 - mk)), 10, 2, Mix(TrackC(), m_t.text, 0.45));
       m_rail.Text(W / 2, cy + mh + 6, IntegerToString((int)(ratio * 100.0)) + "%", A(rc), RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(m_railX, m_railY + cy, W, ch, RZ_RAIL_LIM);
       // --- POS : open count + worst row status ---------------------------
@@ -734,9 +742,18 @@ private:
       y += 9;
    }
    //--- one metered rule row : label, bar, value, status dot ---------------
-   int LimRow(int y, const string k, const double v, const double cap, const bool applies, const int zid) {
+   //--- the aggregate status, decided host-side with each rule's own
+   //--- threshold. Every surface that used to compare limRatio to a flat
+   //--- 0.80 reads this instead - that flat number was the reason the alarm
+   //--- could sound while the whole panel stayed green.
+   color LimStatC(void) const {
+      return (m_d.limStat >= 2 ? m_t.red : (m_d.limStat == 1 ? m_t.warn : m_t.ok));
+   }
+   int LimRow(int y, const string k, const double v, const double cap, const bool applies,
+              const int zid, const double warn) {
       const double ratio = (applies && cap > 0.0 ? v / cap : 0.0);
-      const color st = (!applies ? m_t.dim : (ratio >= 1.0 ? m_t.red : (ratio >= 0.80 ? m_t.warn : m_t.ok)));
+      const double wr = (warn > 0.0 && warn < 1.0 ? warn : 0.80);
+      const color st = (!applies ? m_t.dim : (ratio >= 1.0 ? m_t.red : (ratio >= wr ? m_t.warn : m_t.ok)));
       m_side.Text(18, y, k, A(m_t.text), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       const string val = (applies ? DoubleToString(v, 2) + " / " + DoubleToString(cap, 1) + "%" : "N/A");
       m_side.Text(RCS_SIDE_W - 18, y, val, A(applies ? m_t.text : m_t.dim), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
@@ -748,17 +765,17 @@ private:
    }
    int SecLimits(int y) {
       SecHead(L(RCL_LIM_HEAD, "LIMIT USAGE"), y);
-      y = LimRow(y, L(RCL_LIM_MARGIN, "Cumulative Margin"),  m_d.marginPct,  m_d.marginCap,  true,                 RZ_TIP_LIM_M0);
-      y = LimRow(y, L(RCL_LIM_RISK, "Cumulative Open Risk"),  m_d.riskPct,    m_d.riskCap,    m_d.riskCap > 0.0,    RZ_TIP_LIM_M1);
-      y = LimRow(y, L(RCL_LIM_DAILY, "Daily DD"),  m_d.dailyPct,   m_d.dailyCap,   m_d.dailyApplies,     RZ_TIP_LIM_M2);
-      y = LimRow(y, L(RCL_LIM_OVERALL, "Overall DD"),       m_d.overallPct, m_d.overallCap, m_d.overallApplies,   RZ_TIP_LIM_M3);
+      y = LimRow(y, L(RCL_LIM_MARGIN, "Cumulative Margin"),  m_d.marginPct,  m_d.marginCap,  true,                 RZ_TIP_LIM_M0, m_d.warnMargin);
+      y = LimRow(y, L(RCL_LIM_RISK, "Cumulative Open Risk"),  m_d.riskPct,    m_d.riskCap,    m_d.riskCap > 0.0,    RZ_TIP_LIM_M1, m_d.warnRisk);
+      y = LimRow(y, L(RCL_LIM_DAILY, "Daily DD"),  m_d.dailyPct,   m_d.dailyCap,   m_d.dailyApplies,     RZ_TIP_LIM_M2, m_d.warnDaily);
+      y = LimRow(y, L(RCL_LIM_OVERALL, "Overall DD"),       m_d.overallPct, m_d.overallCap, m_d.overallApplies,   RZ_TIP_LIM_M3, m_d.warnOverall);
       // v3.01 parity : Quick Strike is a RULE too - it belongs with the meters.
       if(m_d.qsCap > 0.0)
-         y = LimRow(y, L(RCL_LIM_QS, "Quick Strike"), m_d.qsPct, m_d.qsCap, true, RZ_TIP_LIM_QS);
+         y = LimRow(y, L(RCL_LIM_QS, "Quick Strike"), m_d.qsPct, m_d.qsCap, true, RZ_TIP_LIM_QS, m_d.warnQuick);
       y += 6;
       SecHead(L(RCL_SURV_HEAD, "SURVIVAL ROOM"), y);
       if(m_d.roomMoney >= 0.0) {
-         const color rcol = (m_d.limRatio >= 1.0 ? m_t.red : (m_d.limRatio >= 0.80 ? m_t.warn : m_t.ok));
+         const color rcol = LimStatC();
          m_side.Text(18, y, L(RCL_ROOM, "Room to the limit"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
          m_side.Text(RCS_SIDE_W - 18, y - 3, DoubleToString(m_d.roomMoney, 2) + " $", A(rcol), RCS_F_TITLE, "Consolas", TA_RIGHT | TA_TOP, FW_BOLD);
          ZAdd(m_sideX + 18, m_sideY + y - 4, RCS_SIDE_W - 36, 22, RZ_TIP_LIM_ROOM);
@@ -778,8 +795,11 @@ private:
          // as every other limit : no new metric invented here.
          const double fdd = (m_d.overallApplies && m_d.overallCap > 0.0
                              ? m_d.overallPct / m_d.overallCap : 0.0);
-         const color  fc  = (fdd >= 1.0 ? m_t.red : (fdd >= 0.80 ? m_t.warn : m_t.text));
-         m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.floorMoney, 2) + " $", A(fc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, (fdd >= 0.80 ? FW_BOLD : 0));
+         // the floor is the OVERALL rule : it warns at that rule's threshold
+         // (50 % on a trailing profile), not at a flat 80 %.
+         const double fw = (m_d.warnOverall > 0.0 && m_d.warnOverall < 1.0 ? m_d.warnOverall : 0.80);
+         const color  fc  = (fdd >= 1.0 ? m_t.red : (fdd >= fw ? m_t.warn : m_t.text));
+         m_side.Text(RCS_SIDE_W - 18, y, DoubleToString(m_d.floorMoney, 2) + " $", A(fc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, (fdd >= fw ? FW_BOLD : 0));
          ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 20, RZ_TIP_LIM_FLOOR);
          y += 18;
          m_side.Text(18, y, L(RCL_FLOOR_HINT, "Equity below this level = account lost."), A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
@@ -1037,7 +1057,7 @@ private:
          const double hy = 100.0 * m_d.tradesToday / m_d.tradesCap;
          // RZ_NONE reads as "no hit" in OnClick : clicking this row fell through to
          // the click-away rule and CLOSED the section. It gets its own hover id.
-         y = LimRow(y, L(RCL_HYPER, "Hyperactivity"), hy, 100.0, true, RZ_TIP_HYPER);
+         y = LimRow(y, L(RCL_HYPER, "Hyperactivity"), hy, 100.0, true, RZ_TIP_HYPER, m_d.warnHyper);
       }
       if(m_d.msgsCap > 0) {
          const double mp = 100.0 * m_d.msgsToday / m_d.msgsCap;
@@ -1351,11 +1371,20 @@ private:
          // ends - so the one line whose job is to say "there is more" was itself
          // cut off. A section can also overflow from the inside (its body is
          // drawn in one go), so count what is missing and say it at a FIXED spot.
-         if(shown < 8)
-            m_side.Text(W / 2, H - 15, ShortToString((ushort)0x25BC) + " +" +
-                        IntegerToString(8 - shown) + " " +
-                        L(RCL_SECS_RESIZE, "sections : enlarge the window"),
-                        A(m_t.warn), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
+         // v3.32 : this used to ask "did a HEADER fail to fit". An instrumented
+         // run showed the other case : eight headers drawn, cursor at y=1047 on
+         // a 860 px surface - 187 px of the last section painted outside the
+         // bitmap, and the notice silent because shown == 8. The question is
+         // whether any CONTENT is cut. A strip behind it keeps it readable on
+         // top of whatever it covers.
+         if(shown < 8 || y > H - 12) {
+            m_side.RoundFill(14, H - 20, W - 28, 17, 8,
+                             Mix(m_t.surface, m_t.warn, 0.16));
+            m_side.Text(W / 2, H - 18, ShortToString((ushort)0x25BC) + " " +
+                        (shown < 8 ? "+" + IntegerToString(8 - shown) + " " : "") +
+                        L(RCL_SECS_RESIZE, "more : fold one, or enlarge the window"),
+                        A(m_t.warn), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+         }
          // MEASURE the stack. Everything fitted : take the exact height.
          // Something was cut and the chart still has room : grow a step and
          // re-lay out. Already at the chart ceiling : stop growing and let
@@ -1408,7 +1437,10 @@ private:
       }
 
       switch(q) {
-         case RZ_RAIL_LIM:   t = "Limits";      d = "Use of the nearest limit. Marker = 80%."; return true;
+         case RZ_RAIL_LIM:   t = "Limits";
+            d = "Use of the nearest limit. Marker = " +
+                DoubleToString(100.0 * (m_d.limMark > 0.0 ? m_d.limMark : 0.80), 0) + "%.";
+            return true;
          case RZ_RAIL_POS:   t = "Positions";    d = "Open positions + worst row status.";       return true;
          case RZ_RAIL_LOT:   t = "Advised lot";d = "Lot advisor. Amber = capped at 80%, red = 0.";    return true;
          case RZ_RAIL_NEWS:  t = "News";         d = "Minutes to the next rule-bound event."; return true;
@@ -1618,7 +1650,7 @@ private:
       // anything - room to the nearest limit, advised lot, next binding news.
       {
          const int qy = RCS_FLT_HEAD + 3, cw = (W - 16) / 3;
-         const color rc2 = (m_d.limRatio >= 1.0 ? m_t.red : (m_d.limRatio >= 0.80 ? m_t.warn : m_t.ok));
+         const color rc2 = LimStatC();
          // the PANEL wording ("Room to the limit" / "Marge avant limite") overflows
          // an 80 px column and ran into its neighbour : the strip needs its own word
          m_float.Text(8 + cw / 2, qy, L(RCL_ROOM_SHORT, "ROOM"), A(m_t.dim), RCS_F_SMALL,

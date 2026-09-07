@@ -86,6 +86,54 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.31.43 / v3.32.44 — l'alarme et l'ecran disent enfin la meme chose
+
+Premier lot de la revue de PARITE (66 agents contre l'ancien panneau
+`v3.05.16`, 8803 lignes). Chaque constat a ete **reverifie ligne par ligne** ici
+avant d'etre touche.
+
+🔴 **Le seuil qui SONNE et le seuil qui COLORE n'etaient pas le meme nombre.**
+Le son utilisait un seuil **par regle** — 70 % pour le risque cumule et le DD
+journalier, **50 %** pour un DD total TRAILING (la regle qui tue le compte),
+75 % pour l'hyperactivite et les messages serveur — pendant que **cinq surfaces**
+comparaient les memes ratios a un **0,80 en dur**. Un DD journalier a 3,6 % d'un
+plafond de 5 % vaut 0,72 : **l'alarme part, la barre reste VERTE**. Sur un
+Instant, un DD total a 3,1 % de 6 % vaut 0,517 : l'alarme part a 0,50, la barre
+reste verte jusqu'a 4,8 % — **trente points d'ecart sur la regle qui met fin au
+compte**. Le trader entend une alarme, regarde un panneau qui dit que tout va
+bien, et conclut que l'alarme est un faux positif. Pire que l'un ou l'autre
+comportement pris seul.
+
+Et le chiffre corrige **n'avait aucun porte-voix** : `g_rows[i].status`, seul
+porteur des 0,70 / 0,50 / 0,75, n'etait lu que par le son et par un bloc Telegram
+mort (`if (false && ...)`). Le correctif v3.17 vivait entierement **hors du champ
+visuel**. Desormais **une** fonction decide, `RuleWarnRatio()`, et elle alimente
+le son ET le modele que le shell peint. Le repere de la jauge se place sur le
+seuil qui s'applique vraiment, et son infobulle cesse d'affirmer « Marqueur =
+80 % ».
+
+🔴 **Le score de sante comptait QUATRE regles sur les SEPT qui peuvent partir.**
+Quick Strike, hyperactivite et messages serveur n'entraient pas dans l'agregat :
+**100/100 restait atteignable avec le compteur d'hyperactivite a son plafond.**
+Les sept comptent. ⚠️ Mon premier correctif repliait ces trois regles **cent
+lignes avant** que leurs champs soient remplis — elles auraient compte pour zero,
+exactement le defaut a corriger. L'agregat **ouvre** sur les quatre limites et
+**ferme** la ou chaque regle a ses chiffres.
+
+⭐ **Le self-test a ete EXECUTE pour la premiere fois** (il existait depuis la
+v3.16 sans avoir jamais tourne) : **37 PASS, 0 FAIL**, dont six cas neufs qui
+verrouillent exactement le defaut ci-dessus — 72 % d'un plafond a seuil 70 %
+avertit, 72 % d'un plafond a seuil 80 % **n'avertit pas**. `#property
+script_show_inputs` a ete retire : il ne montrait aucun input, il ne mettait
+qu'une boite de dialogue entre l'utilisateur et le resultat.
+
+**v3.32** — la ligne de troncature repondait a la mauvaise question. Une sonde
+posee dans le rendu a montre le cas reel : `H=860`, huit en-tetes dessines,
+curseur a `y=1047` — **187 px de la derniere section peints hors du bitmap**, et
+la ligne muette parce que `shown == 8`. Elle demandait « est-ce qu'un EN-TETE
+manque » alors que la question est « est-ce qu'un CONTENU est coupe ». Elle part
+sur les deux, sur un bandeau qui la garde lisible.
+
 ### v3.27.39 -> v3.30.42 — le panneau complet devient un ACCORDEON, et la barre du haut porte les chiffres
 
 JR, apres avoir vu la v3.26 tourner : « on perd le bas du menu », « les infos

@@ -97,6 +97,23 @@ string YmdToIso(const double ymd) {
     const int v = (int)ymd;
     return StringFormat("%04d-%02d-%02d", v / 10000, (v / 100) % 100, v % 100);
 }
+// One rule's contribution to the panel's aggregate.
+//   worst = raw consumption - what a BAR must show.
+//   sev   = consumption measured against THIS rule's own warning threshold
+//           - what a COLOUR must show. The two are different questions, and
+//           conflating them is what let the alarm sound on a green panel.
+//   mark  = the threshold of whichever rule is driving sev, so a gauge can
+//           draw the tick where it really is instead of always at 80%.
+void RC_WorstRule(double &worst, double &sev, double &mark,
+                  const double used, const double cap, const bool applies,
+                  const double warn) {
+    if (!applies || cap <= 0.0 || used < 0.0) return;
+    const double r = used / cap;
+    if (r > worst) worst = r;
+    const double w = (warn > 0.0 && warn < 1.0 ? warn : 0.80);
+    const double s = r / w;
+    if (s > sev) { sev = s; mark = w; }
+}
 datetime FFParseIso8601Utc(const string s) {
     if (StringLen(s) < 19) return 0;
     MqlDateTime dt;
