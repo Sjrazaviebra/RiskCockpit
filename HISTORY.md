@@ -86,6 +86,23 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.20.32 — le travail lourd deux fois par seconde, et les infobulles coupées
+
+- **Les lignes SL/TP étaient reconstruites sur TOUS les graphiques ouverts à
+  chaque rafraîchissement** (500 ms), et depuis v3.19 à chaque clic en plus.
+  C'est exactement la charge que l'ancien code plafonnait à 30 s en la
+  qualifiant de « cause n°1 de gel ». Cadence ramenée à 2 s ; un changement de
+  position les rafraîchit toujours immédiatement via `OnTradeTransaction`.
+- **Le bloc news scannait le calendrier trois fois par appel** et reconstruisait
+  une liste de 64 entrées, à 2 Hz, dans le thread d'interface. Cache de 15 s,
+  avec le compte à rebours qui continue de descendre entre deux scans — il est
+  affiché en minutes, la mise en cache est invisible.
+- **Les infobulles étaient tronquées en plein milieu** : la description était
+  écrite sur UNE ligne dans un bitmap fixe de 236 px, donc coupée au-delà d'une
+  cinquantaine de caractères — dans les trois langues, et le français est plus
+  long que l'anglais. Deux lignes avec retour sur espace, bulle à 58 px, et une
+  marque explicite si ça déborde encore.
+
 ### v3.18.30 / v3.19.31 — la suite des 46 constats
 
 **Le gate avait deux faux OK, corrigés en premier** — un instrument qui ment est

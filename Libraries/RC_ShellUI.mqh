@@ -262,7 +262,7 @@ struct RCZone { int x, y, w, h, id; };
 #define RCS_SIDE_TALLH 620      // sections with controls (settings / account)
 #define RCS_SIDE_FULLH 740
 #define RCS_TIP_W      236
-#define RCS_TIP_H       44
+#define RCS_TIP_H       58    // 2 description lines : one line was truncating
 #define RCS_MENU_W     120
 #define RCS_BAND_H      26      // full-width blocking banner (hard lock / SL guard / tilt)
 #define RCS_FLT_W      256      // floating positions table (shown while trades are open)
@@ -1334,7 +1334,25 @@ private:
          m_tip.SoftShadow(4, 4, RCS_TIP_W - 8, RCS_TIP_H - 8, 10, clrBlack, 4, 60);
          m_tip.Card(1, 1, RCS_TIP_W - 2, RCS_TIP_H - 2, 9, MixC(m_t.surface, clrWhite, 0.06), m_t.surface, MixC(m_t.surface, m_t.accent, 0.35));
          m_tip.Text(12, 7, ti, A(m_t.accent), RCS_F_LABEL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
-         m_tip.Text(12, 23, ds, A(m_t.text, 235), RCS_F_SMALL, "Segoe UI");
+         // The description was drawn as ONE line in a fixed 236 px bitmap : past
+      // ~50 characters it was cut mid-sentence, in every language. Wrap on a
+      // space over two lines, and mark it if it still does not fit.
+      {
+         string rest = ds;
+         for(int tl = 0; tl < 2 && StringLen(rest) > 0; tl++) {
+            string cut = rest;
+            if(StringLen(cut) > 50) {
+               int sp = -1;
+               for(int k = 50; k > 24; k--)
+                  if(StringGetCharacter(rest, k) == ' ') { sp = k; break; }
+               if(sp < 0) sp = 50;
+               cut  = StringSubstr(rest, 0, sp);
+               rest = StringSubstr(rest, sp + 1);
+            } else rest = "";
+            if(tl == 1 && StringLen(rest) > 0) cut = StringSubstr(cut, 0, 47) + "...";
+            m_tip.Text(12, 23 + tl * 13, cut, A(m_t.text, 235), RCS_F_SMALL, "Segoe UI");
+         }
+      }
       }
       m_tip.Commit();
    }

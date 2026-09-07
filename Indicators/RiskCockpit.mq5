@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.19"
+#property version "3.20"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.19"
+#define RC_VERSION_STR "3.20"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1493,6 +1493,26 @@ void BuildDeckData(RCDeckData &d) {
     d.newsPnl      = g_news_pnl;
     d.newsEligible = g_news_eligible;
     // --- news (cell NEWS) --------------------------------------------------
+    // Three calendar scans + a 64-slot rebuild, at 2 Hz, in the UI thread. The
+    // legacy code capped the same scan at 30 s because it froze the terminal.
+    // The countdown is displayed in minutes : a 15 s cache is invisible.
+    static datetime s_newsScan = 0;
+    static RCDeckData s_newsCache;
+    if (TimeCurrent() - s_newsScan < 15 && s_newsScan > 0) {
+        d.newsFF     = s_newsCache.newsFF;      d.newsActive = s_newsCache.newsActive;
+        d.newsHasEvt = s_newsCache.newsHasEvt;  d.newsHigh   = s_newsCache.newsHigh;
+        d.newsMins   = s_newsCache.newsMins;    d.newsMeterPct = s_newsCache.newsMeterPct;
+        d.newsWinMin = s_newsCache.newsWinMin;  d.newsSharePct = s_newsCache.newsSharePct;
+        d.newsN      = s_newsCache.newsN;
+        for (int nc = 0; nc < d.newsN && nc < 6; ++nc) {
+            d.newsWhen[nc]  = s_newsCache.newsWhen[nc];
+            d.newsCcy[nc]   = s_newsCache.newsCcy[nc];
+            d.newsRestr[nc] = s_newsCache.newsRestr[nc];
+        }
+        d.newsMins -= (int)((TimeCurrent() - s_newsScan) / 60);   // let it tick down
+        if (d.newsMins < 0) d.newsMins = 0;
+    } else {
+    s_newsScan = TimeCurrent();
     const datetime nevt = Live_NextNewsEvt();              // RULE class (FF restricted / MT5 HIGH)
     d.newsFF     = g_ff_active;
     d.newsActive = Live_InNewsWindow();
@@ -1572,6 +1592,19 @@ void BuildDeckData(RCDeckData &d) {
             d.newsN++;
         }
     }
+    // Keep this scan's result : the next 15 s reuse it instead of hitting the
+    // calendar again twice a second.
+    s_newsCache.newsFF     = d.newsFF;      s_newsCache.newsActive = d.newsActive;
+    s_newsCache.newsHasEvt = d.newsHasEvt;  s_newsCache.newsHigh   = d.newsHigh;
+    s_newsCache.newsMins   = d.newsMins;    s_newsCache.newsMeterPct = d.newsMeterPct;
+    s_newsCache.newsWinMin = d.newsWinMin;  s_newsCache.newsSharePct = d.newsSharePct;
+    s_newsCache.newsN      = d.newsN;
+    for (int nk = 0; nk < d.newsN && nk < 6; ++nk) {
+        s_newsCache.newsWhen[nk]  = d.newsWhen[nk];
+        s_newsCache.newsCcy[nk]   = d.newsCcy[nk];
+        s_newsCache.newsRestr[nk] = d.newsRestr[nk];
+    }
+    }   // end of the 15 s news cache
     // --- account card + config toggles (sections CPT / CFG / AIDE) ---------
     d.planLabel     = g_catalog.ModelLabel(EffectivePlan());
     d.phaseLabel    = PhaseLabelLocal(g_eff_phase);
@@ -2192,8 +2225,17 @@ void ShellRefresh(void) {
     RCDeckData d;
     BuildDeckData(d);
     g_shell.SetData(d);
-    RefreshSlLines();                    // chart-side advisory lines stay live under the shell
-    if (g_be_visible) DrawBreakevenLines();   // v3.06 : BE lines follow the basket again
+    {   // Chart-side lines : advisory levels that follow price. Rebuilding them
+        // on every open chart at 2 Hz (and on every click) is the same load the
+        // legacy code throttled to 30 s "n#1 freeze cause". A position change
+        // still refreshes them at once, through OnTradeTransaction.
+        static datetime s_lines = 0;
+        if (TimeCurrent() - s_lines >= 2) {
+            s_lines = TimeCurrent();
+            RefreshSlLines();
+            if (g_be_visible) DrawBreakevenLines();
+        }
+    }
     ShellRuleAlerts(d);                  // v3.06 : sound + Telegram were silent under v3
     if (g_shell.Created()) g_shell.Tick();
     ShellSyncLotEdit(d.sugLot, d.lotDigits);   // AFTER the render : the rect is known
