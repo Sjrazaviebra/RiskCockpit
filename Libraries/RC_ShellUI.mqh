@@ -92,7 +92,7 @@ struct RCDeckData {
    // v3.70 : le P&L du JOUR - realise + flottant. La barre du haut portait le
    // P&L flottant, que le tableau flottant detaille deja position par position.
    double dayPnl;
-   bool   tpMarks;              // les marques jaunes posees sur le prix courant
+   bool   showTp, showSl;       // v3.72 : une famille de traits, un bouton
    bool   posNoSl;              // at least one open position without a stop
    // lot advisor (cell LOT)
    double sugLot;
@@ -2050,27 +2050,26 @@ private:
          // et deux reperes de sortie a 0,1 % et 1 % du prix. Les reperes s effacent
          // seuls : c est un rappel, pas un dessin a nettoyer.
          const int qy = RCS_FLT_HEAD + 4, cw = (W - 16) / 3, bh = RCS_FLT_QUICK - 10;
-         const bool beon = m_d.beLines, tpmon = m_d.tpMarks;
+         const bool beon = m_d.beLines, tpon = m_d.showTp, slon = m_d.showSl;
          m_float.CapsuleStroke(8, qy, cw - 4, bh,
                                Mix(m_t.surface, beon ? m_t.accent : m_t.dim, 0.45),
                                Mix(m_t.surface, beon ? m_t.accent : clrBlack, beon ? 0.18 : 0.10));
          m_float.Text(8 + (cw - 4) / 2, qy + 4, L(RCL_FLT_BE, "BE"),
                       A(beon ? m_t.accent : m_t.dim), RCS_F_LABEL, "Segoe UI",
                       TA_CENTER | TA_TOP, FW_BOLD);
-         // v3.70 : « TP 0,1 % » et « TP 1 % » tracaient deux traits autour du prix
-         // qui ne decrivaient aucune position. Le premier bouton revoit maintenant
-         // CHAQUE position - stop conseille et cible - le second allume les
-         // marques jaunes posees sur le prix courant.
-         m_float.CapsuleStroke(8 + cw, qy, cw - 4, bh, Mix(m_t.surface, m_t.dim, 0.45),
-                               Mix(m_t.surface, clrBlack, 0.10));
-         m_float.Text(8 + cw + (cw - 4) / 2, qy + 4, "TP / SL", A(m_t.text),
-                      RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+         // v3.72 : une famille de traits, un bouton. TP montre la cible de chaque
+         // position, SL le stop que le budget autorise - allume, la pastille prend
+         // la couleur de sa famille, comme PM.
+         m_float.CapsuleStroke(8 + cw, qy, cw - 4, bh,
+                               Mix(m_t.surface, tpon ? m_t.ok : m_t.dim, 0.45),
+                               Mix(m_t.surface, tpon ? m_t.ok : clrBlack, tpon ? 0.18 : 0.10));
+         m_float.Text(8 + cw + (cw - 4) / 2, qy + 4, "TP", A(tpon ? m_t.ok : m_t.dim),
+                      RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
          m_float.CapsuleStroke(8 + 2 * cw, qy, cw - 4, bh,
-                               Mix(m_t.surface, tpmon ? m_t.warn : m_t.dim, 0.45),
-                               Mix(m_t.surface, tpmon ? m_t.warn : clrBlack, tpmon ? 0.18 : 0.10));
-         m_float.Text(8 + 2 * cw + (cw - 4) / 2, qy + 4, "MARKS",
-                      A(tpmon ? m_t.warn : m_t.text),
-                      RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+                               Mix(m_t.surface, slon ? m_t.red : m_t.dim, 0.45),
+                               Mix(m_t.surface, slon ? m_t.red : clrBlack, slon ? 0.18 : 0.10));
+         m_float.Text(8 + 2 * cw + (cw - 4) / 2, qy + 4, "SL", A(slon ? m_t.red : m_t.dim),
+                      RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
          m_float.Hairline(8, RCS_FLT_HEAD + RCS_FLT_QUICK - 3, W - 8, LineC());
          ZAdd(m_fltX + 8, m_fltY + qy, cw - 4, bh, RZ_FLT_QLIM);
          ZAdd(m_fltX + 8 + cw, m_fltY + qy, cw - 4, bh, RZ_FLT_QLOT);
@@ -2259,7 +2258,7 @@ public:
       m_pendUnlock = false;
       m_maxEditOn = false; m_maxEditX = 0; m_maxEditY = 0;
       m_d.addonN = 0; m_d.violMargin = false; m_d.violRisk = false; m_d.beLines = false;
-      m_d.dayPnl = 0.0; m_d.tpMarks = false;
+      m_d.dayPnl = 0.0; m_d.showTp = true; m_d.showSl = true;
       m_d.selfLockH = 4; m_d.cycY = 0; m_d.cycM = 0; m_d.cycD = 0;
       for(int ai = 0; ai < 7; ai++) { m_d.addonName[ai] = ""; m_d.addonOn[ai] = false; }
       m_d.stepN = 0; m_d.casN = 0;

@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.71"
+#property version "3.72"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.71"
+#define RC_VERSION_STR "3.72"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -555,10 +555,13 @@ string g_i18n_es[];
 // SELECTABLE so the user can drag them by hand (the companion EA V2 executes
 // the actual move-to-BE on the broker).
 bool g_be_visible = false;
-// v3.70 : les deux segments jaunes poses de part et d autre du prix courant,
-// a la distance du TP. Ils repondent a « si j entre ici, ma cible est ou »,
-// donc ils suivent le PRIX et non une position. Allumes par defaut.
-bool g_tp_marks = true;
+// v3.72 : une famille de traits, un interrupteur. Le bouton TP montre la cible
+// de chaque position, le bouton SL montre le stop que le budget de risque
+// autorise. JR : « deux boutons TP et SL qui m aident a verifier si tout va
+// bien ». Les deux sont allumes par defaut : un repere qu il faut aller
+// chercher n aide personne.
+bool g_show_tp = true;
+bool g_show_sl = true;
 // M1c : debug breadcrumbs filled by MarginPerLot (path = ocm/ocm_retry/mi/calcmode/fail).
 string g_maxlot_path = "none";
 string g_maxlot_dbg2 = ""; // FIX 2 : fallback diagnostics (mccy/fx/tv/ts/cs) for the debug line
@@ -1077,9 +1080,12 @@ int OnInit(void) {
     g_be_visible = false;
     if (GlobalVariableCheck("RC_be_visible"))
         g_be_visible = (GlobalVariableGet("RC_be_visible") != 0.0);
-    g_tp_marks = true;                       // v3.70 : visibles tant qu on ne les eteint pas
-    if (GlobalVariableCheck("RC_tp_marks"))
-        g_tp_marks = (GlobalVariableGet("RC_tp_marks") != 0.0);
+    g_show_tp = true;
+    if (GlobalVariableCheck("RC_show_tp"))
+        g_show_tp = (GlobalVariableGet("RC_show_tp") != 0.0);
+    g_show_sl = true;
+    if (GlobalVariableCheck("RC_show_sl"))
+        g_show_sl = (GlobalVariableGet("RC_show_sl") != 0.0);
     InitI18n();
 
     DestroyAllObjects();
@@ -1853,7 +1859,8 @@ void BuildDeckData(RCDeckData &d) {
     d.violMargin = g_margin_violation_active;
     d.violRisk   = g_risk_violation_active;
     d.beLines    = g_be_visible;
-    d.tpMarks    = g_tp_marks;
+    d.showTp     = g_show_tp;
+    d.showSl     = g_show_sl;
     d.selfLockH  = g_eff_selflock_h;
     {
         double ymd = g_eff_cycle_ymd;
@@ -2683,13 +2690,12 @@ void ShellRefresh(void) {
         if (g_shell.PendCasTake(row, dir))  ShellApplyCascade(row, dir);
         if (g_shell.PendCycTake(row, dir))  ShellApplyCycle(row, dir);
         ShellApplyAddon(g_shell.PendAddonTake());
-        // v3.70 : le premier bouton REVERIFIE chaque position ouverte - son SL
-        // conseille et sa cible - le second allume ou eteint la barre jaune
-        // posee sur le prix. Sans position, le premier ne dessine rien : c est
-        // la reponse juste, il n y a pas de sortie a placer.
+        // v3.72 : un bouton par famille de traits. Sans position ouverte, ni l un
+        // ni l autre ne dessine quoi que ce soit : c est la reponse juste, il n y
+        // a pas de sortie a placer.
         const int tpg = g_shell.PendTpTake();
-        if (tpg == 1) RefreshSlLines();
-        else if (tpg == 2) { g_tp_marks = !g_tp_marks; PersistTpMarks(); }
+        if (tpg == 1)      { g_show_tp = !g_show_tp; PersistShowTp(); RefreshSlLines(); }
+        else if (tpg == 2) { g_show_sl = !g_show_sl; PersistShowSl(); RefreshSlLines(); }
         RefreshTpMarks();
         if (g_shell.PendSelfLockTake())     ShellArmSelfLock();
         if (g_shell.PendUnlockTake())       ShellReleaseSelfLock();
@@ -2840,7 +2846,9 @@ void FireDisciplineAlerts(const RCDeckData &d) {
 // un objet recree a chaque tick clignote et repasse au-dessus du reste.
 void ClearTpMarks(void) { ObjectsDeleteAll(0, "RC_TPM_"); }
 void RefreshTpMarks(void) {
-    if (!g_tp_marks) { ClearTpMarks(); return; }
+    // v3.72 : elles n ont plus de bouton. JR : « les marques sont toujours la et
+    // on n a pas besoin de bouton ». Le seul reglage qui compte est la distance,
+    // et elle vit dans les parametres - 0,1 % du prix par defaut.
     const double px = SymbolInfoDouble(_Symbol, SYMBOL_BID);
     if (px <= 0.0) { ClearTpMarks(); return; }
     const double d   = px * g_eff_tp_pct / 100.0;
@@ -2869,7 +2877,8 @@ void RefreshTpMarks(void) {
                         DoubleToString(pr, dg));
     }
 }
-void PersistTpMarks(void) { GlobalVariableSet("RC_tp_marks", g_tp_marks ? 1.0 : 0.0); }
+void PersistShowTp(void) { GlobalVariableSet("RC_show_tp", g_show_tp ? 1.0 : 0.0); }
+void PersistShowSl(void) { GlobalVariableSet("RC_show_sl", g_show_sl ? 1.0 : 0.0); }
 void PersistLang(void) { GlobalVariableSet("RC_lang",        (double)g_lang); }
 void PersistBE(void)   { GlobalVariableSet("RC_be_visible",  g_be_visible ? 1.0 : 0.0); }
 
@@ -3236,23 +3245,28 @@ double Live_DailyDdPct(void) {
     const double ops_today           = CachedBalanceOpsToday();
     const double balance_day_start   = AccountInfoDouble(ACCOUNT_BALANCE)
                                        - realised_today - ops_today;
-    const double cur_eq = AccountInfoDouble(ACCOUNT_EQUITY);
+    // v3.72 : les mouvements de compte etaient retires du SOLDE DE DEBUT, ce qui
+    // est juste - le jour a bien commence a ce montant - mais alors l equity, qui
+    // les porte encore, les comptait comme du resultat. Un retrait de 100 sur un
+    // compte a 10 000 sans un seul trade affichait 100 de perte du jour : le
+    // contraire de ce que la v3.41 voulait corriger. On compare le solde de debut
+    // a l equity NETTE des mouvements du jour, et la perte du jour redevient
+    // exactement l oppose du P/L du jour.
+    const double cur_eq = AccountInfoDouble(ACCOUNT_EQUITY) - ops_today;
     const double dd = balance_day_start - cur_eq;
     if (dd <= 0.0)
         return 0.0;
     return 100.0 * dd / g_profile.initial_balance;
 }
 
-// v3.70 : le P&L du JOUR - realise plus flottant - a partir du MEME solde de
-// debut de journee que le compteur de perte journaliere ci-dessus. Deux
-// chiffres qui pretendent mesurer la journee et qui ne tombent pas d accord
-// font douter des deux : il n y en a donc qu une definition. Les mouvements de
-// balance du jour - depot, retrait - sont retires : un retrait n est pas une
-// perte.
+// v3.72 : ma v3.70 passait par « equity - solde de debut de journee ». Developpe,
+// ce detour vaut realise + flottant PLUS LES MOUVEMENTS DE COMPTE : un depot de
+// 500 se lisait comme 500 de benefice du jour. Le chiffre se dit en trois mots -
+// ce que j ai ferme aujourd hui, plus ce que je porte - alors il se calcule en
+// trois mots. Meme borne de journee que le compteur de perte journaliere (heure
+// SERVEUR), et meme contenu que lui : profit + swap + commission.
 double Live_DayPnl(void) {
-    const double bal_day_start = AccountInfoDouble(ACCOUNT_BALANCE)
-                                 - CachedRealisedToday() - CachedBalanceOpsToday();
-    return AccountInfoDouble(ACCOUNT_EQUITY) - bal_day_start;
+    return CachedRealisedToday() + SumFloatingPnL();
 }
 
 double Live_OverallDdPct(void) {
@@ -4003,6 +4017,11 @@ void RefreshSlLinesForChart(const long chart_id) {
 
         const color line_clr = palette[drawn % 6];
         const string type_str = (type == POSITION_TYPE_BUY ? "BUY" : "SELL");
+        // v3.72 : le montant que le trait represente, dans la devise du compte.
+        // Les traits ne disaient que le pourcentage - le chiffre qui decide,
+        // l argent, etait a refaire de tete pour chaque position.
+        const string ccy = " " + AccountInfoString(ACCOUNT_CURRENCY);
+        const double money_per_price = (tick_value / tick_size) * vol;
 
         // --- Recommended SL ---
         const double money_per_tick = tick_value * vol;
@@ -4020,7 +4039,14 @@ void RefreshSlLinesForChart(const long chart_id) {
             const bool sl_locks_profit = has_user_sl &&
                 (type == POSITION_TYPE_BUY ? (existing_sl >= entry) : (existing_sl <= entry));
             const bool user_over_budget = (has_user_sl && !sl_locks_profit && user_dist > proposed_dist);
-            const bool draw_line = (!has_user_sl || user_over_budget);
+            // v3.72 : la recommandation n etait tracee QUE si la position n avait
+            // pas de stop, ou un stop trop large. Or le bouton SL sert a verifier
+            // que tout va bien : sans reference affichee il n y a rien a comparer,
+            // et sur une position deja reglee le bouton semblait mort. On la trace
+            // des que la famille est allumee - la couleur dit l etat. Seule
+            // exception : un stop qui verrouille du profit n a plus de risque a
+            // encadrer, un trait sous le prix d entree n y dirait rien.
+            const bool draw_line = (g_show_sl && !sl_locks_profit);
 
             if (draw_line) {
                 const color final_line_clr = (user_over_budget ? g_theme.red : line_clr);
@@ -4035,9 +4061,10 @@ void RefreshSlLinesForChart(const long chart_id) {
                 ObjectSetInteger(chart_id, line_id, OBJPROP_BACK, true);
                 ObjectSetInteger(chart_id, line_id, OBJPROP_SELECTABLE, false);
                 ObjectSetInteger(chart_id, line_id, OBJPROP_HIDDEN, true);
+                const string sl_money = "  -" + DoubleToString(proposed_dist * money_per_price, 2) + ccy;
                 ObjectSetString(chart_id, line_id, OBJPROP_TEXT,
                                 Tr("sl_rec") + " " + DoubleToString(budget_pct, 2) +
-                                    "% - " + sym + " " + type_str + " #" +
+                                    "%" + sl_money + " - " + sym + " " + type_str + " #" +
                                     IntegerToString((int)ticket) + status_suffix);
 
                 const string txt_id = "RC_SL_TXT_" + IntegerToString((int)ticket);
@@ -4051,8 +4078,9 @@ void RefreshSlLinesForChart(const long chart_id) {
                 // le graphique s affichait mi-anglaise mi-francaise. La traduction
                 // existait deja - elle etait ecrite la ou personne ne la lit.
                 ObjectSetString(chart_id, txt_id, OBJPROP_TEXT,
-                                Tr("sl_rec") + " " + DoubleToString(budget_pct, 2) + "%  " +
-                                    type_str + " " + DoubleToString(vol, 2) + "  #" +
+                                Tr("sl_rec") + " " + DoubleToString(budget_pct, 2) + "%" +
+                                    sl_money + "  " + type_str + " " +
+                                    DoubleToString(vol, 2) + "  #" +
                                     IntegerToString((int)ticket) + status_suffix);
                 ObjectSetInteger(chart_id, txt_id, OBJPROP_COLOR, final_line_clr);
                 ObjectSetInteger(chart_id, txt_id, OBJPROP_FONTSIZE, 8);
@@ -4071,9 +4099,13 @@ void RefreshSlLinesForChart(const long chart_id) {
             // its row amber, computed from the risk itself.
         }
 
-        // --- Recommended TP : scalping default, skip if user placed one ---
-        if (existing_tp <= 0.0) {
+        // --- La cible : X % du PRIX d entree, et ce que ce X % rapporte ---
+        // v3.72 : tracee des que la famille est allumee, meme si un TP est deja
+        // pose - c est la reference a laquelle le comparer.
+        if (g_show_tp) {
             const double tp_distance_price = entry * g_eff_tp_pct / 100.0;
+            const string tp_money = "  +" +
+                DoubleToString(tp_distance_price * money_per_price, 2) + ccy;
             const double tp_price =
                 (type == POSITION_TYPE_BUY ? entry + tp_distance_price : entry - tp_distance_price);
 
@@ -4088,7 +4120,7 @@ void RefreshSlLinesForChart(const long chart_id) {
             ObjectSetInteger(chart_id, tp_line_id, OBJPROP_HIDDEN, true);
             ObjectSetString(chart_id, tp_line_id, OBJPROP_TEXT,
                             Tr("tp_rec") + " " + DoubleToString(g_eff_tp_pct, 2) +
-                                "% - " + sym + " " + type_str + " #" +
+                                "%" + tp_money + " - " + sym + " " + type_str + " #" +
                                 IntegerToString((int)ticket));
 
             const string tp_txt_id = "RC_TP_TXT_" + IntegerToString((int)ticket);
@@ -4096,8 +4128,9 @@ void RefreshSlLinesForChart(const long chart_id) {
             ObjectSetInteger(chart_id, tp_txt_id, OBJPROP_TIME, anchor_time);
             ObjectSetDouble(chart_id, tp_txt_id, OBJPROP_PRICE, tp_price);
             ObjectSetString(chart_id, tp_txt_id, OBJPROP_TEXT,
-                            "TP " + DoubleToString(g_eff_tp_pct, 2) + "%  " +
-                                type_str + " " + DoubleToString(vol, 2) + "  #" +
+                            Tr("tp_rec") + " " + DoubleToString(g_eff_tp_pct, 2) + "%" +
+                                tp_money + "  " + type_str + " " +
+                                DoubleToString(vol, 2) + "  #" +
                                 IntegerToString((int)ticket));
             ObjectSetInteger(chart_id, tp_txt_id, OBJPROP_COLOR, tp_clr);
             ObjectSetInteger(chart_id, tp_txt_id, OBJPROP_FONTSIZE, 8);
@@ -5499,10 +5532,10 @@ void InitI18n(void) {
     AddTr("set_size",      "Size :",               "Taille :",               "Tamaño :");
     AddTr("set_acct_type", "Account type :",       "Type de compte :",       "Tipo de cuenta :");
     AddTr("set_maxparallel", "Max parallel :",        "Trades max :",          "Trades max :");
-    AddTr("set_sl",          "SL distance % :",       "Distance SL % :",       "Distancia SL % :");
+    AddTr("set_sl",          "SL % (lot advisor) :",  "SL % (conseil lot) :",  "SL % (consejo lote) :");
     AddTr("set_tp",          "TP distance % :",       "Distance TP % :",       "Distancia TP % :");
     AddTr("set_maxmargin",   "Max margin/trade % :",  "Marge max/trade % :",   "Margen máx/op % :");
-    AddTr("set_maxrisk",     "Max risk/trade % :",    "Risque max/trade % :",  "Riesgo máx/op % :");
+    AddTr("set_maxrisk",     "Risk/trade % (SL) :",   "Risque/trade % (SL) :", "Riesgo/op % (SL) :");
     // v1.4 : hover tooltips - explain each key param (unit + what it does).
     // v2.02 MULTI-THEMES : palette (brand) axis + dark/light relabelled as MODE ;
     // hover taglines for the 3 palettes.
@@ -6618,12 +6651,12 @@ void InitI18n(void) {
     AddTr("tipq_0",     "Break-even|Draws the basket break-even line. Click again to remove it.",
                         "Point mort|Trace la ligne de point mort du panier. Reclique pour l'enlever.",
                         "Punto de equilibrio|Traza la línea de equilibrio de la cesta. Vuelve a hacer clic para quitarla.");
-    AddTr("tipq_1",     "TP / SL|Re-checks every open position : advised stop and target. Flat, nothing drawn.",
-                        "TP / SL|Revérifie chaque position ouverte : stop conseillé et cible. Sans position, rien n'est tracé.",
-                        "TP / SL|Revisa cada posición abierta : stop aconsejado y objetivo. Sin posición, no se traza nada.");
-    AddTr("tipq_2",     "Price marks|Two yellow marks at the TP distance around the live price.",
-                        "Repères de prix|Deux marques jaunes à la distance du TP autour du prix.",
-                        "Marcas de precio|Dos marcas amarillas a la distancia del TP alrededor del precio.");
+    AddTr("tipq_1",     "Targets|Shows each position's target : X% of its entry price, and what that pays.",
+                        "Cibles|Montre la cible de chaque position : X% de son prix d'entrée, et ce que ça rapporte.",
+                        "Objetivos|Muestra el objetivo de cada posición : X% de su precio de entrada, y lo que paga.");
+    AddTr("tipq_2",     "Stops|Shows the stop your risk budget allows on each position, and what it costs.",
+                        "Stops|Montre le stop que votre budget de risque autorise sur chaque position, et ce qu'il coûte.",
+                        "Stops|Muestra el stop que su presupuesto de riesgo permite en cada posición, y lo que cuesta.");
     AddTr("tpm_tip",    "Target if entered here",
                         "Cible si entrée ici",
                         "Objetivo si entra aquí");
