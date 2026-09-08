@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.77"
+#property version "3.78"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.77"
+#define RC_VERSION_STR "3.78"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1572,8 +1572,10 @@ void BuildDeckData(RCDeckData &d) {
                             PositionGetDouble(POSITION_SWAP))
                         / g_profile.initial_balance;
             }
-            const double per_trade = (g_max_parallel > 0
-                                      ? EffectiveRiskCap() / g_max_parallel : 0.0);
+            // v3.78 : c etait EffectiveRiskCap() / N - donc ZERO sur un compte
+            // personnel, et comme le test est garde par « per_trade > 0 », une
+            // position qui risque plus que son budget n y virait JAMAIS a l ambre.
+            const double per_trade = PerTradeRiskCapPct();
             d.posStat[k]   = (!hsl ? 2
                               : (per_trade > 0.0 && prisk > per_trade ? 1 : 0));
             d.posN++;
@@ -3936,7 +3938,6 @@ void RefreshSlLinesForChart(const long chart_id) {
     // count -> the recommended SL reflects the user's intended split. Recomputed
     // when N changes (panel +/-) or a position opens/closes (OnTradeTransaction).
     // So : 1 trade -> b=1% -> wide SL ; 2 trades -> b=0.5% -> SL twice as tight.
-    const int N = MathMax(1, g_max_parallel);
     // v3.70 : ce budget sortait de EffectiveRiskCap(), qui vaut ZERO sans
     // programme prop - donc sur un profil PERSONNEL budget_money valait 0 et la
     // fonction s arretait ici : aucun repere de SL ni de TP n etait dessine, sur
@@ -3944,9 +3945,7 @@ void RefreshSlLinesForChart(const long chart_id) {
     // exactement la ou aucune regle exterieure ne le tient. Sans plafond de
     // programme, le budget est le risque par trade : InpMaxRiskPerTradePct, 1 %
     // du solde par defaut - reglable dans les parametres comme dans le panneau.
-    const double cap = EffectiveRiskCap();
-    const double budget_pct = (cap > 0.0 ? MathMin(cap / N, g_eff_max_risk_pt)
-                                         : g_eff_max_risk_pt);
+    const double budget_pct = PerTradeRiskCapPct();
     const double budget_money = g_profile.initial_balance * budget_pct / 100.0;
     if (budget_money <= 0.0)
         return;
@@ -4908,6 +4907,13 @@ double Live_PerTradeBudgetPct(int n_for_share) {
 //| informs the panel display "you plan N total". Budget is paced by |
 //| ACTUAL cumulative usage, not by planned slots.                   |
 //+------------------------------------------------------------------+
+double PerTradeRiskCapPct(void) {
+    const double cap = EffectiveRiskCap();
+    if (cap <= 0.0)
+        return g_eff_max_risk_pt;
+    return MathMin(cap / MathMax(1, g_max_parallel), g_eff_max_risk_pt);
+}
+
 double Live_NextTradeBudgetPct(void) {
     // B9 (calibrated 2026-05-20) : DD/trade budget = EffectiveRiskCap() / N,
     // pure cap/N with NO extra ceiling. Then clamp by the cumulative budget
@@ -4916,17 +4922,13 @@ double Live_NextTradeBudgetPct(void) {
     if (g_profile.initial_balance <= 0.0)
         return 0.0;
     const double cap = EffectiveRiskCap();          // 3% normal, 1% if violation (B7)
-    // v3.77 : sans programme prop, EffectiveRiskCap() vaut ZERO - donc ce budget
-    // valait zero, le lot mathematique valait zero, et l ecran retombait sur le
-    // minimum du courtier : 0,01 quel que soit le compte. C est la TROISIEME
-    // fonction que ce meme zero eteint sur un profil personnel, apres les traits de
-    // SL et le budget qui les place. Sans plafond cumule a partager, le budget d un
-    // trade est simplement le risque par trade - 1 % du solde par defaut, reglable.
+    // v3.77/78 : sans programme prop ce budget valait ZERO - le lot mathematique
+    // valait zero et l ecran retombait sur le minimum du courtier, 0,01 quel que
+    // soit le compte. Il n y a alors pas non plus de plafond cumule a consommer :
+    // le budget d un trade est le reglage par trade, sans autre clamp.
+    const double dd_per_trade = PerTradeRiskCapPct();
     if (cap <= 0.0)
-        return g_eff_max_risk_pt;
-    const int    N   = MathMax(1, g_max_parallel);
-    // B9 (calib 2026-05-20) : cap/N capped by the per-trade strategy ceiling.
-    const double dd_per_trade = MathMin(cap / N, g_eff_max_risk_pt);
+        return dd_per_trade;
     const double used = Live_CumulativeRiskPct();
     const double remaining = MathMax(0.0, cap - used);
     return MathMin(dd_per_trade, remaining);
@@ -5071,7 +5073,9 @@ bool Live_ComputeSuggestedLot(SuggestedLot& out) {
     // ====== B9 display fields ===========================================
     const double cap_b9      = EffectiveRiskCap();
     out.n_planned            = MathMax(1, g_max_parallel);
-    out.dd_per_trade_pct     = MathMin(cap_b9 / out.n_planned, g_eff_max_risk_pt); // B9 : cap/N capped by per-trade ceiling
+    // v3.78 : affichait 0,00 % sur un compte personnel pendant que le conseiller,
+    // lui, calculait sur le reglage par trade - l ecran contredisait son propre lot.
+    out.dd_per_trade_pct     = PerTradeRiskCapPct();
     out.risk_cap             = cap_b9;
     out.used_risk_pct        = Live_CumulativeRiskPct();
     // reduce flag : the cumulative-remaining clamp pulled the budget below cap/N
@@ -6981,6 +6985,21 @@ double EffectiveMarginCap(void) {
         return g_eff_margin_cap_viol; // V1.27 : runtime-editable (was InpMarginCapViolated)
     return g_profile.margin_max_cumulative_pct;
 }
+
+// v3.78 : LA reponse a « combien ce trade a-t-il le droit de risquer, en % du
+// solde initial ». Avec un programme prop : le plafond CUMULE partage par le
+// nombre de trades prevus, lui-meme plafonne par le reglage par trade. Sans
+// programme, EffectiveRiskCap() vaut ZERO - il n y a pas de plafond cumule a
+// partager - et la reponse est simplement le reglage par trade.
+//
+// Ce zero avait deja eteint QUATRE endroits, chacun repare separement : les
+// traits de SL, le budget qui les place, le lot conseille, et - trouves en
+// relisant tous les appels - la pastille d alerte d une position (qui ne virait
+// jamais a l ambre) et le « budget/trade » affiche dans la section LOT (qui
+// montrait 0,00 % pendant que le conseiller calculait sur 1 %). Une question, une
+// fonction : quatre corrections identiques ecrites quatre fois, c est trois
+// occasions de se tromper.
+double PerTradeRiskCapPct(void);
 
 double EffectiveRiskCap(void) {
     if (g_risk_violation_active && g_eff_risk_cap_viol > 0.0)
