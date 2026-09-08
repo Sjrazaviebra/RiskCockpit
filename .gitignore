@@ -7,5 +7,5 @@ desktop.ini
 # l'identique avec tools/build-market-music.py puis tools/build-market-video.py.
 # Ce qui est versionné, c'est la RECETTE, pas le rendu — un dépôt public n'a pas
 # à porter dix mégaoctets qu'une commande rejoue.
-market_video/*.wav
-market_video/*.mp4
+market/video/*.wav
+market/video/*.mp4

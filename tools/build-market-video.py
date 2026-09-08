@@ -2,7 +2,7 @@
 u"""Vidéo produit RiskCockpit pour la fiche MQL5 Market (lien YouTube non répertorié).
 
 ⛔ AUCUN pilotage de MT5 : ce script n'assemble que des captures DÉJÀ prises et vérifiées. La
-séance de captures est décrite dans market_screens/SHOTLIST.md et se fait à part.
+séance de captures est décrite dans market/screens/SHOTLIST.md et se fait à part.
 
 🎨 Palette et police ÉCHANTILLONNÉES SUR LE PRODUIT (pas choisies) : fond du thème EMER D
 (7,20,16), surface (16,36,28), accent (45,212,191), texte (236,253,245), estompé (107,155,138),
@@ -25,8 +25,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, 'market_screens')
-VID = os.path.join(ROOT, 'market_video')
+SRC = os.path.join(ROOT, 'market', 'screens')
+VID = os.path.join(ROOT, 'market', 'video')
 MUTE = os.path.join(VID, 'RiskCockpit-overview-mute.mp4')
 WAV = os.path.join(VID, 'RiskCockpit-track.wav')
 OUT = os.path.join(VID, 'RiskCockpit-overview.mp4')
@@ -93,7 +93,7 @@ def shot(name, section, caption, crop=None):
         raise SystemExit(
             u"⛔ capture manquante : %s\n"
             u"   La séance de prise de vue n'a pas été faite, ou le fichier porte un autre nom.\n"
-            u"   Voir market_screens/SHOTLIST.md. On ne fabrique PAS une vidéo avec des trous." % name)
+            u"   Voir market/screens/SHOTLIST.md. On ne fabrique PAS une vidéo avec des trous." % name)
     im = Image.new('RGB', (W, H), BG)
     s = Image.open(path).convert('RGB')
     if crop:

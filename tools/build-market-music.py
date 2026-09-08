@@ -22,7 +22,7 @@ import wave
 import numpy as np
 
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                   "market_video", "RiskCockpit-track.wav")
+                   "market", "video", "RiskCockpit-track.wav")
 SR = 44100
 DUR = 47.7
 BPM = 96.0

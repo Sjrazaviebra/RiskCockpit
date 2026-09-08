@@ -2,7 +2,7 @@
 """
 prep_screens.py — met les captures d'ecran aux specifications du MQL5 Market.
 
-USAGE : deposer les captures brutes (PNG/JPG) dans market_screens/, puis :
+USAGE : deposer les captures brutes (PNG/JPG) dans market/screens/, puis :
             python prep_screens.py
 
 CE QU'IL FAIT, SUR PLACE :
@@ -28,7 +28,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 
 from PIL import Image
 
-DOSSIER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "market_screens")
+DOSSIER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "market", "screens")
 COTE_MIN = 720          # regle Market : au moins 720 px sur un cote
 MAX_L, MAX_H = 1920, 1080
 POIDS_MAX = 2 * 1024 * 1024
@@ -70,12 +70,12 @@ def traite(chemin: str) -> str:
 def main() -> int:
     if not os.path.isdir(DOSSIER):
         os.makedirs(DOSSIER)
-        print("Dossier cree : market_screens/ — y deposer les captures, puis relancer.")
+        print("Dossier cree : market/screens/ — y deposer les captures, puis relancer.")
         return 0
 
     fichiers = [f for f in sorted(os.listdir(DOSSIER)) if f.lower().endswith(EXT)]
     if not fichiers:
-        print("market_screens/ est vide. Y deposer les captures, puis relancer.")
+        print("market/screens/ est vide. Y deposer les captures, puis relancer.")
         return 0
     if len(fichiers) > 12:
         print("⚠️ %d captures : le Market en accepte 12 au maximum." % len(fichiers))
