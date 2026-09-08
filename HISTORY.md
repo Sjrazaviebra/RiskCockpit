@@ -92,6 +92,62 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.62.74 — le verrou gelait le réglage qui le CAUSE
+
+Trouvé en le vivant. En préparant les captures, j'ai basculé le profil de
+« Personnel » à « Stellar 1-Step 6K ». Sur un profil à 6 000 $, la perte déjà
+réalisée de la journée fait **86 % du plafond journalier** : le verrou
+journalier s'arme — exactement comme prévu. Et à partir de là **la cascade de
+profil est refusée**, donc le réglage ne peut plus être corrigé. **Enfermé dans
+une configuration fausse par une règle que cette configuration venait de
+créer.**
+
+Le verrou est **consultatif** : l'indicateur n'a aucune fonction de trading et
+ne bloque aucun ordre. Geler la cascade n'empêche donc **rien de réel** — le
+trader peut toujours prendre le trade. Ce que ça empêche, c'est que le panneau
+dise la vérité sur le compte. **La déclaration du programme ne doit pas être
+verrouillée par la règle qu'elle définit.** Restent gelés, et c'est voulu : les
+steppers (ils desserrent les réglages de risque *courants*), les add-ons, les
+bascules de configuration, les deux cases de violation, l'auto-verrou, et la
+croix qui retire l'outil.
+
+⭐ **Le gate PLANTAIT au lieu de rendre un verdict.** En versant la vidéo dans le
+dépôt, le contrôle de fuite est tombé sur un `.mp4` absent de sa liste
+d'extensions binaires : il a tenté de le décoder en UTF-8 et s'est arrêté sur
+une exception. **Un gate qui plante ne dit ni oui ni non** — c'est pire qu'un
+gate qui échoue, parce qu'on committe par-dessus sans s'en apercevoir, et c'est
+exactement ce qui s'est passé. La liste d'extensions devient un raccourci ;
+c'est désormais la **décodabilité** qui tranche, et ce qui n'est pas lisible en
+texte est écarté *et compté comme tel*.
+
+### v3.63.75 — ne pas proposer ce qui n'existe pas
+
+Trois demandes de JR, à l'usage, sur la même idée.
+
+- **« S'il n'y a pas de proposition, il ne faut pas de boutons de changement. »**
+  Les cinq lignes de la cascade portaient **toujours** leurs deux flèches, même
+  quand la liste ne contenait qu'une seule valeur : sur FTMO, E8, The5ers,
+  MyFundedFX et Personnel la ligne « Type » n'a qu'un choix, et le type de compte
+  d'un compte personnel est **détecté** (démo ou réel), pas choisi. **Un bouton
+  qui ne change rien apprend à ne plus faire confiance aux boutons.** Les flèches
+  n'apparaissent — et la zone cliquable n'est posée — qu'à partir de deux valeurs.
+- 🔴 **« Un compte perso n'a pas de challenge, pourquoi il y a des
+  propositions ? »** La ligne « Phase » proposait Challenge P1 / P2 / Funded sur
+  un compte personnel, qui n'a aucune des trois. Même défaut, plus discret, sur
+  le **Stellar 1-Step** : il proposait une « Challenge P2 » qui n'existe pas dans
+  un plan en **une** étape. La liste des phases est maintenant **dérivée du
+  plan** — et le pas ne parcourt plus les quatre valeurs de l'énumération.
+- **« La taille des polices est trop petite. »** Toutes les tailles gagnent un
+  point, le grand chiffre en gagne deux, et le panneau s'élargit de 340 à 360 px.
+  Les pas verticaux ne bougent pas : à 96 ppp, 10 pt fait environ 13 px de haut
+  dans un pas de 18 px — la place manquait en largeur, pas en hauteur.
+
+**Vérifié à l'écran** sur le profil Personnel : *Broker* garde ses flèches (six
+enseignes), *Type* et *Type de compte* n'en ont plus, *Phase* affiche un tiret,
+*Taille* garde les siennes.
+
+**Gate : 22 contrôles, 0 en échec. Compilation : 0 erreur, 0 avertissement.**
+
 ### v3.61.73 — trois défauts trouvés par JR à l'usage
 
 - 🔴 **Le défilement s'affichait même quand tout tenait.** *« s'il y a la place,

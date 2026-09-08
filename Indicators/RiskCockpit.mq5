@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.62"
+#property version "3.63"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.62"
+#define RC_VERSION_STR "3.63"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1857,8 +1857,11 @@ void BuildDeckData(RCDeckData &d) {
         d.stepN = ShellStepRows(g_shell.CfgTab(), lab, val);
         for (int i = 0; i < d.stepN && i < 10; ++i) { d.stepLabel[i] = lab[i]; d.stepValue[i] = val[i]; }
         string clab[], cval[];
-        d.casN = ShellCascadeRows(clab, cval);
-        for (int i = 0; i < d.casN && i < 5; ++i) { d.casLabel[i] = clab[i]; d.casValue[i] = cval[i]; }
+        int copt[];
+        d.casN = ShellCascadeRows(clab, cval, copt);
+        for (int i = 0; i < d.casN && i < 5; ++i) {
+            d.casLabel[i] = clab[i]; d.casValue[i] = cval[i]; d.casOpts[i] = copt[i];
+        }
     }
     // --- clocks -------------------------------------------------------------
     d.clockSrv = TimeToString(TimeCurrent(), TIME_MINUTES);
@@ -2448,15 +2451,29 @@ void ShellApplyStep(const int tab, const int row, const int dir) {
 // the plan cascade, editable from the shell : broker -> type -> phase -> size
 // -> account type. Same snapping rules as the modal (a plan can never end up
 // with an illegal size or phase), then a full re-resolve of the profile.
-int ShellCascadeRows(string &lab[], string &val[]) {
-    ArrayResize(lab, 5); ArrayResize(val, 5);
-    lab[0] = Tr("set_broker_sel"); val[0] = VendorName(VendorOfPlan(EffectivePlan()));
-    lab[1] = Tr("set_type");       val[1] = g_catalog.ModelLabel(EffectivePlan());
-    lab[2] = Tr("set_phase");      val[2] = PhaseLabelLocal(g_eff_phase);
+// v3.63 : chaque ligne dit aussi COMBIEN de valeurs elle propose. En dessous de
+// deux, la coquille ne dessine pas de fleches : sur FTMO, E8, The5ers, MFF et
+// Personnel il n y a qu un seul « Type », et le type de compte d un compte
+// personnel est DETECTE (demo ou reel), pas choisi. Un bouton qui ne change
+// rien apprend a ne plus faire confiance aux boutons.
+int ShellCascadeRows(string &lab[], string &val[], int &opt[]) {
+    ArrayResize(lab, 5); ArrayResize(val, 5); ArrayResize(opt, 5);
+    const ENUM_FN_PLAN p = EffectivePlan();
+    ENUM_FN_PLAN plans[]; double sizes[]; int ph[];
+    lab[0] = Tr("set_broker_sel"); val[0] = VendorName(VendorOfPlan(p));
+    opt[0] = 6;                                     // les six enseignes
+    lab[1] = Tr("set_type");       val[1] = g_catalog.ModelLabel(p);
+    opt[1] = PlansForVendor(VendorOfPlan(p), plans);
+    const int nph = PhasesForPlan(p, ph);
+    lab[2] = Tr("set_phase");
+    val[2] = (nph <= 0 ? "-" : PhaseLabelLocal(g_eff_phase));
+    opt[2] = nph;
     lab[3] = Tr("set_size");       val[3] = SizeLabel();
-    lab[4] = Tr("set_acct_type");  val[4] = (EffectivePlan() == FN_PLAN_PERSONAL
+    opt[3] = ValidSizesForPlan(p, sizes);
+    lab[4] = Tr("set_acct_type");  val[4] = (p == FN_PLAN_PERSONAL
                                              ? (g_eff_personal_demo == 1 ? "DEMO" : "REAL")
                                              : (g_eff_acct_type == 1 ? "SWAP-FREE" : "SWAP"));
+    opt[4] = (p == FN_PLAN_PERSONAL ? 1 : 2);       // perso : DETECTE, pas choisi
     return 5;
 }
 void ShellApplyCascade(const int row, const int dir) {
@@ -2483,7 +2500,16 @@ void ShellApplyCascade(const int row, const int dir) {
             SnapPhaseToPlan((ENUM_FN_PLAN)g_active_plan_idx);
         }
     } else if (row == 2) {                            // PHASE
-        g_eff_phase = ((g_eff_phase + dir) % 4 + 4) % 4;
+        // v3.63 : ce pas parcourait les QUATRE phases de l enum, y compris celles
+        // que le plan n a pas - d ou une « Challenge P2 » sur un plan en une
+        // etape, et trois phases sur un compte personnel qui n en a aucune.
+        int ph[];
+        const int np = PhasesForPlan(EffectivePlan(), ph);
+        if (np > 1) {
+            int pi = 0;
+            for (int i = 0; i < np; ++i) if (ph[i] == g_eff_phase) { pi = i; break; }
+            g_eff_phase = ph[((pi + dir) % np + np) % np];
+        }
         SnapPhaseToPlan(EffectivePlan());
         GVSetLogin("RC_phase", (double)g_eff_phase);
     } else if (row == 3) {                            // SIZE : only what the plan allows
@@ -7011,9 +7037,29 @@ void SnapSizeToPlan(const ENUM_FN_PLAN p) {
 // INSTANT phase (3) ; every other plan (esp. FTMO, which has no Instant profile)
 // must fold INSTANT -> FUNDED, else Resolve silently falls back to a default
 // profile and the panel shows the wrong rule-set with no warning.
+// v3.63 : the phases a plan ACTUALLY has. The cascade used to offer the four
+// of them to every plan : a PERSONAL account was asked to pick between
+// "Challenge P1", "Challenge P2" and "Funded" - it has none of the three - and
+// a ONE-step plan offered a "Challenge P2" that does not exist in it. Proposing
+// a choice that has no meaning is not a small cosmetic defect : it makes the
+// reader doubt every other value on the same screen.
+// 0 = Challenge P1, 1 = Challenge P2, 2 = Funded, 3 = Instant.
+int PhasesForPlan(const ENUM_FN_PLAN p, int &out[]) {
+    if (p == FN_PLAN_PERSONAL)        { ArrayResize(out, 0); return 0; }
+    if (p == FN_PLAN_STELLAR_INSTANT) { ArrayResize(out, 1); out[0] = 3; return 1; }
+    if (p == FN_PLAN_STELLAR_1STEP)   { ArrayResize(out, 2); out[0] = 0; out[1] = 2; return 2; }
+    ArrayResize(out, 3); out[0] = 0; out[1] = 1; out[2] = 2; return 3;
+}
 void SnapPhaseToPlan(const ENUM_FN_PLAN p) {
-    if (p == FN_PLAN_STELLAR_INSTANT)  g_eff_phase = 3; // INSTANT (single-phase)
-    else if (g_eff_phase == 3)         g_eff_phase = 2; // INSTANT -> FUNDED
+    int ph[];
+    const int n = PhasesForPlan(p, ph);
+    if (n <= 0) {
+        g_eff_phase = 2;                     // perso : neutre, aucune regle de challenge
+    } else {
+        bool ok = false;
+        for (int i = 0; i < n; ++i) if (ph[i] == g_eff_phase) { ok = true; break; }
+        if (!ok) g_eff_phase = ph[n - 1];    // la phase courante n existe pas ici
+    }
     GVSetLogin("RC_phase", (double)g_eff_phase); // v2.13 C : per-login
 }
 // V1.28 : size label, with the Personal "Auto" sentinel (g_eff_size <= 0).

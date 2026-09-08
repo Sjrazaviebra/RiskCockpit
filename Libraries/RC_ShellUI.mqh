@@ -175,6 +175,10 @@ struct RCDeckData {
    string stepLabel[10], stepValue[10];
    int    casN;                         // plan cascade rows (broker/type/phase/size/type)
    string casLabel[5], casValue[5];
+   // v3.63 : combien de valeurs cette ligne propose VRAIMENT. En dessous de
+   // deux, les fleches ne sont pas dessinees : un bouton qui ne change rien
+   // apprend a ne plus faire confiance aux boutons.
+   int    casOpts[5];
    // --- v3.04 : add-ons, violation flags, self-lock, cycle date ----------
    int    addonN;                       // add-ons VALID for this plan (0..7)
    string addonName[7];
@@ -317,7 +321,7 @@ struct RCZone { int x, y, w, h, id; };
 #define RCS_NAV_W      980      // v3.27 : room for ROOM / LOT / NEWS
 #define RCS_NAV_MINW   330      // floor = the MANDATORY controls (logo+sym+tf+pal+D/L+X)
 #define RCS_NAV_H       34
-#define RCS_SIDE_W     340
+#define RCS_SIDE_W     360
 #define RCS_SIDE_SECH  480
 #define RCS_SIDE_TALLH 620      // sections with controls (settings / account)
 #define RCS_SIDE_FULLH 740
@@ -331,13 +335,18 @@ struct RCZone { int x, y, w, h, id; };
 #define RCS_FLT_QUICK   28      // quick-access strip (room / lot / news)
 
 //--- font scale (POINTS) ----------------------------------------------------
-#define RCS_F_TITLE 10
-#define RCS_F_BODY   9
-#define RCS_F_LABEL  8
-#define RCS_F_SMALL  7
-#define RCS_F_NUM    9
-#define RCS_F_BIG   16
-#define RCS_F_BTN   11
+// v3.63 : JR, a l usage : « la taille des polices est trop petite ». Chaque
+// taille gagne un point, le grand chiffre en gagne deux. Les PAS verticaux ne
+// bougent pas : a 96 ppp, 10 pt fait environ 13 px de haut dans un pas de 18 px,
+// la place etait deja la. C est la largeur qui manquait, pas la hauteur - le
+// panneau passe donc de 340 a 360 px.
+#define RCS_F_TITLE 11
+#define RCS_F_BODY  10
+#define RCS_F_LABEL  9
+#define RCS_F_SMALL  8
+#define RCS_F_NUM   10
+#define RCS_F_BIG   18
+#define RCS_F_BTN   12
 
 //+------------------------------------------------------------------+
 //| RCShellUI                                                        |
@@ -1385,18 +1394,25 @@ private:
       return y + 24;
    }
    //--- < value > : one step of the plan cascade ----------------------------
-   int Cycler(int y, const string k, const string v, const int row) {
+   //--- v3.63 : `opts` = le nombre de valeurs que cette ligne propose. En
+   //--- dessous de deux il n y a rien a choisir : ni fleche dessinee, ni zone
+   //--- cliquable posee. La valeur, elle, reste affichee - elle informe.
+   int Cycler(int y, const string k, const string v, const int row, const int opts) {
       m_side.Text(18, y + 3, k, A(m_t.text), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       const int bw = 20, nx = RCS_SIDE_W - 18 - bw, px = 150;
-      m_side.CapsuleStroke(px, y, bw, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.08));
-      m_side.Text(px + bw / 2, y + 3, "<", A(m_t.text), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
-      ZAdd(m_sideX + px, m_sideY + y, bw, 20, RZ_CAS_PREV0 + row);
+      const bool pick = (opts > 1);
+      if(pick) {
+         m_side.CapsuleStroke(px, y, bw, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.08));
+         m_side.Text(px + bw / 2, y + 3, "<", A(m_t.text), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+         ZAdd(m_sideX + px, m_sideY + y, bw, 20, RZ_CAS_PREV0 + row);
+         m_side.CapsuleStroke(nx, y, bw, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.08));
+         m_side.Text(nx + bw / 2, y + 3, ">", A(m_t.text), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+         ZAdd(m_sideX + nx, m_sideY + y, bw, 20, RZ_CAS_NEXT0 + row);
+      }
       string vv = v;
-      if(StringLen(vv) > 14) vv = StringSubstr(vv, 0, 13) + "..";
-      m_side.Text((px + bw + nx) / 2, y + 3, vv, A(m_t.accent), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
-      m_side.CapsuleStroke(nx, y, bw, 20, Mix(m_t.surface, m_t.dim, 0.40), Mix(m_t.surface, clrBlack, 0.08));
-      m_side.Text(nx + bw / 2, y + 3, ">", A(m_t.text), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
-      ZAdd(m_sideX + nx, m_sideY + y, bw, 20, RZ_CAS_NEXT0 + row);
+      if(StringLen(vv) > 16) vv = StringSubstr(vv, 0, 15) + "..";
+      m_side.Text((px + bw + nx) / 2, y + 3, vv,
+                  A(pick ? m_t.accent : m_t.dim), RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       return y + 24;
    }
 
@@ -1421,7 +1437,7 @@ private:
       // sits at the TOP of the section and drives a full re-resolve on click.
       SecHead(L(RCL_CPT_PROFILE, "PROFILE"), y);
       for(int i = 0; i < m_d.casN && i < 5; i++)
-         y = Cycler(y, m_d.casLabel[i], m_d.casValue[i], i);
+         y = Cycler(y, m_d.casLabel[i], m_d.casValue[i], i, m_d.casOpts[i]);
       y += 6;
       SecHead(L(RCL_SEC_CPT, "ACCOUNT"), y);
       y = KV(y, L(RCL_CPT_SPLIT, "Split"), IntegerToString(m_d.splitPct) + "%", m_t.text, RZ_TIP_CPT);
@@ -2216,6 +2232,7 @@ public:
       m_d.selfLockH = 4; m_d.cycY = 0; m_d.cycM = 0; m_d.cycD = 0;
       for(int ai = 0; ai < 7; ai++) { m_d.addonName[ai] = ""; m_d.addonOn[ai] = false; }
       m_d.stepN = 0; m_d.casN = 0;
+      for(int co = 0; co < 5; co++) m_d.casOpts[co] = 0;
       for(int si = 0; si < 10; si++) { m_d.stepLabel[si] = ""; m_d.stepValue[si] = ""; }
       for(int ci = 0; ci < 5; ci++)  { m_d.casLabel[ci] = "";  m_d.casValue[ci] = ""; }
       m_menuOpen = false; m_menuMode = 0; m_menuX = 0; m_menuY = 0; m_menuH = 40; m_menuN = 0;
