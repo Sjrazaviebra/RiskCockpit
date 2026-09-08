@@ -151,6 +151,40 @@ première ligne et le bouton CLOSE à droite de la seconde — à 14 px d'écart
 et les lignes gagnent leur interligne. Aucune couleur, aucun texte, aucun
 comportement ne change : c'est de la place, rien d'autre.
 
+### v3.69.81 — quatre demandes de JR : « qu'est-ce qui mérite d'être là »
+
+- **Le type de compte redevient une constatation.** JR tranche : *« on peut
+  détecter le type de compte, c'est pour ça qu'on n'avait pas d'option, remets-le
+  à sa place »*. C'est sa décision de produit et elle se tient : **le terminal
+  SAIT** si le compte est démo ou réel, et une valeur que la machine connaît n'a
+  pas à être proposée au doigt. Retour à la v3.63. Sur un plan prop, SWAP /
+  SWAP-FREE reste un choix — là, personne ne peut le deviner.
+- 🔴 **Le bouton BE avait disparu.** La v2 avait un bouton qui affichait la ligne
+  de point mort du panier ; la v3 l'avait rangé dans une bascule des réglages, à
+  trois clics de là. **Le mécanisme n'a jamais bougé** — `g_be_visible`,
+  `DrawBreakevenLines`, la persistance : c'est l'**accès** qui avait disparu. Il
+  revient où il sert, sur la table des positions, à côté des lignes qu'il annote.
+- **La barre du haut portait deux fois la même chose.** « Marge » et « Lot » sont
+  déjà les deux premières cellules du rail, à **un** clic, avec leur détail
+  complet. En haut elles prenaient la place des seuls chiffres qu'on ne peut
+  **pas** aller chercher sans ouvrir un panneau : le **solde** et le **P/L** —
+  ce que le pied du menu de la v2 affichait. Un clic sur SOLDE ouvre le compte,
+  un clic sur P/L ouvre les positions.
+- **La bande de la table flottante ne servait à rien là.** Trois cellules qui
+  répétaient le rail, posées au-dessus de la liste des positions. À la place,
+  trois **actions** qui concernent les positions ouvertes : le **point mort** du
+  panier, et deux repères de sortie à **0,1 %** et **1 %** du prix. Les repères
+  portent une échéance — **vingt secondes, puis ils s'effacent seuls** : un
+  repère qu'il faut penser à nettoyer finit par rester, et un trait qui traîne
+  ment sur un prix.
+
+**Vérifié à l'écran** : `SOLDE $10.1K` et `P/L` dans la barre, `PM / TP 0.1% /
+TP 1%` dans la table, et deux traits à l'accent du thème de part et d'autre du
+prix après un clic sur TP 0.1%.
+
+**Gate : 22 contrôles, 0 en échec. Contrôles positifs : 20/20. Compilation :
+0 erreur, 0 avertissement.**
+
 ### v3.68.80 — le type de compte redevient un choix, et la vidéo passe en H.264
 
 **JR : « ajoute aussi compte réel en option en plus de démo sur les comptes

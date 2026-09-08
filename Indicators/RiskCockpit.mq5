@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.68"
+#property version "3.69"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.68"
+#define RC_VERSION_STR "3.69"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1153,6 +1153,7 @@ void OnDeinit(const int reason) {
     // Clean SL / TP / NEWS / BE objects we may have drawn on ANY open chart.
     long cid = ChartFirst();
     while (cid >= 0) {
+        ObjectsDeleteAll(cid, "RC_TPG_");
         ObjectsDeleteAll(cid, "RC_SL_");
         ObjectsDeleteAll(cid, "RC_TP_");
         ObjectsDeleteAll(cid, "RC_NEWS_");
@@ -2081,6 +2082,9 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_SCROLL,        Tr("shl_scroll"));
     g_shell.SetLabel(RCL_NEWS_HIGHW,    Tr("shl_newshighw"));
     g_shell.SetLabel(RCL_NEWS_MEDW,     Tr("shl_newsmedw"));
+    g_shell.SetLabel(RCL_NAV_BAL,       Tr("shl_navbal"));
+    g_shell.SetLabel(RCL_NAV_PL,        Tr("shl_navpl"));
+    g_shell.SetLabel(RCL_FLT_BE,        Tr("shl_fltbe"));
     g_shell.SetLabel(RCL_CHECKFN,       Tr("shl_checkfn"));
     g_shell.SetLabel(RCL_SLG_ON,        Tr("shl_slgon"));
     g_shell.SetLabel(RCL_TILT_ON,       Tr("shl_tilton"));
@@ -2473,13 +2477,12 @@ int ShellCascadeRows(string &lab[], string &val[], int &opt[]) {
     lab[4] = Tr("set_acct_type");  val[4] = (p == FN_PLAN_PERSONAL
                                              ? (g_eff_personal_demo == 1 ? "DEMO" : "REAL")
                                              : (g_eff_acct_type == 1 ? "SWAP-FREE" : "SWAP"));
-    // v3.68 : j avais mis 1 ici en ecrivant que le type de compte personnel est
-    // « detecte, pas choisi ». A moitie vrai : il est detecte a l attache, mais la
-    // bascule existe depuis la v1.29 - ShellApplyCascade inverse le drapeau et le
-    // persiste par login - et la valeur ne sert QU AU LIBELLE, aucune regle n en
-    // depend. La detection est une valeur PAR DEFAUT, pas une contrainte : le
-    // choix existait, je l avais rendu inatteignable. Deux valeurs, deux fleches.
-    opt[4] = 2;                                     // DEMO / REAL, sur tous les plans
+    // v3.69 : JR tranche - « on peut detecter le type de compte, c est pour ca
+    // qu on n avait pas d option ». C est sa decision de produit, et elle se tient :
+    // le terminal SAIT si le compte est demo ou reel, et une valeur que la machine
+    // connait n a pas a etre proposee au doigt. Sur un plan prop, SWAP / SWAP-FREE
+    // reste un choix - la, personne ne peut le deviner.
+    opt[4] = (p == FN_PLAN_PERSONAL ? 1 : 2);
     return 5;
 }
 void ShellApplyCascade(const int row, const int dir) {
@@ -2670,6 +2673,10 @@ void ShellRefresh(void) {
         if (g_shell.PendCasTake(row, dir))  ShellApplyCascade(row, dir);
         if (g_shell.PendCycTake(row, dir))  ShellApplyCycle(row, dir);
         ShellApplyAddon(g_shell.PendAddonTake());
+        const int tpg = g_shell.PendTpTake();      // v3.69 : les deux reperes de sortie
+        if (tpg == 1) DrawTpGuides(0.001);
+        else if (tpg == 2) DrawTpGuides(0.01);
+        if (g_tpg_until > 0 && TimeCurrent() > g_tpg_until) ClearTpGuides();
         if (g_shell.PendSelfLockTake())     ShellArmSelfLock();
         if (g_shell.PendUnlockTake())       ShellReleaseSelfLock();
         if (g_shell.PendFitTake()) {
@@ -2807,6 +2814,37 @@ void FireDisciplineAlerts(const RCDeckData &d) {
 //| LOT 6 : persist UI prefs (language + BE toggle) via MT5            |
 //| GlobalVariable so they survive re-attach / chart change / VPS.    |
 //+------------------------------------------------------------------+
+// v3.69 : deux reperes horizontaux a X % du prix courant, au-dessus et en
+// dessous. JR : « c est juste pour me rappeler les lignes, et qu elles
+// disparaissent apres quelques secondes ». Ils portent donc une echeance : vingt
+// secondes, puis ils s effacent seuls. Un repere qu il faut penser a nettoyer
+// finit par rester sur le graphique, et un trait qui traine ment sur un prix.
+datetime g_tpg_until = 0;
+void ClearTpGuides(void) { ObjectsDeleteAll(0, "RC_TPG_"); g_tpg_until = 0; }
+void DrawTpGuides(const double pct) {
+    ClearTpGuides();
+    const double px = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    if (px <= 0.0) return;
+    const double dn = px * (1.0 - pct), up = px * (1.0 + pct);
+    const string lbl = DoubleToString(pct * 100.0, (pct < 0.005 ? 1 : 0)) + "%";
+    for (int i = 0; i < 2; ++i) {
+        const string id = "RC_TPG_" + IntegerToString(i);
+        const double pr = (i == 0 ? up : dn);
+        ObjectCreate(0, id, OBJ_HLINE, 0, 0, pr);
+        ObjectSetDouble (0, id, OBJPROP_PRICE, pr);
+        ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.accent);
+        ObjectSetInteger(0, id, OBJPROP_STYLE, STYLE_DOT);
+        ObjectSetInteger(0, id, OBJPROP_WIDTH, 1);
+        ObjectSetInteger(0, id, OBJPROP_BACK, true);
+        ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
+        ObjectSetString (0, id, OBJPROP_TEXT, "TP " + lbl);
+        ObjectSetString (0, id, OBJPROP_TOOLTIP, "TP " + lbl + "  " +
+                         DoubleToString(pr, (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS)));
+    }
+    g_tpg_until = TimeCurrent() + 20;
+    ChartRedraw(0);
+}
 void PersistLang(void) { GlobalVariableSet("RC_lang",        (double)g_lang); }
 void PersistBE(void)   { GlobalVariableSet("RC_be_visible",  g_be_visible ? 1.0 : 0.0); }
 
@@ -6129,6 +6167,9 @@ void InitI18n(void) {
         "rule",
         "règle",
         "regla");
+    AddTr("shl_navbal",  "BAL", "SOLDE", "SALDO");
+    AddTr("shl_navpl",   "P/L", "P/L",   "P/L");
+    AddTr("shl_fltbe",   "BE",  "PM",    "PE");
     AddTr("shl_newshighw",
         "high",
         "fort",
@@ -6401,12 +6442,12 @@ void InitI18n(void) {
     // v3.66 : trois zones inserees avant la croix ; la serie SUIT l enum, et le
     // gate compare le nombre de cles a la taille de la plage - c est ce controle
     // qui a rattrape la meme insertion en v3.27.
-    AddTr("tipn_9", "Room|Left before the CLOSEST loss limit, daily or overall : (cap % - used %) x the programme size.",
-                    "Marge|Ce qui reste avant la limite de perte la PLUS PROCHE, journalière ou totale : (% du plafond - % consommé) x la taille du programme.",
-                    "Margen|Lo que queda antes del límite de pérdida MÁS CERCANO, diario o total : (% del límite - % consumido) x el tamaño del programa.");
-    AddTr("tipn_10", "Advised lot|Size for your risk per trade, your stop distance and the room left.",
-                     "Lot conseillé|Taille pour ton risque par trade, ta distance de stop et la marge restante.",
-                     "Lote aconsejado|Tamaño para tu riesgo por operación, tu distancia de stop y el margen restante.");
+    AddTr("tipn_9", "Balance|Account balance. Click : the account section.",
+                    "Solde|Solde du compte. Clic : la section compte.",
+                    "Saldo|Saldo de la cuenta. Clic : la sección cuenta.");
+    AddTr("tipn_10", "P/L|Open profit and loss on this account. Click : the positions.",
+                     "P/L|Profit et perte ouverts sur ce compte. Clic : les positions.",
+                     "P/L|Beneficio y pérdida abiertos en esta cuenta. Clic : las posiciones.");
     AddTr("tipn_11", "News|Minutes to the next event your programme puts a rule on.",
                      "News|Minutes avant le prochain événement sur lequel ton programme pose une règle.",
                      "Noticias|Minutos hasta el próximo evento sobre el que tu programa pone una regla.");
@@ -6522,15 +6563,15 @@ void InitI18n(void) {
         "Closing|Disabled : an indicator cannot send orders. Closing lives in the EA version.",
         "Fermeture|Désactivé : un indicateur ne passe pas d'ordre. La fermeture est dans la version EA.",
         "Cierre|Desactivado : un indicador no envía órdenes. El cierre está en la versión EA.");
-    AddTr("tipq_0",     "Room|Dollars before the closest limit, daily or overall. Click : the limits.",
-                        "Marge|Dollars avant la limite la plus proche, journalière ou totale. Clic : les limites.",
-                        "Margen|Dólares antes del límite más cercano, diario o total. Clic : los límites.");
-    AddTr("tipq_1",     "Lot|Advised size for the current risk. Click : the advisor.",
-                        "Lot|Taille conseillée pour le risque en cours. Clic : le conseiller.",
-                        "Lote|Tamaño aconsejado para el riesgo actual. Clic : el asesor.");
-    AddTr("tipq_2",     "News|Minutes to the next binding event. Click : the news.",
-                        "News|Minutes avant le prochain événement contraignant. Clic : les news.",
-                        "News|Minutos hasta el próximo evento vinculante. Clic : las noticias.");
+    AddTr("tipq_0",     "Break-even|Draws the basket break-even line. Click again to remove it.",
+                        "Point mort|Trace la ligne de point mort du panier. Reclique pour l'enlever.",
+                        "Punto de equilibrio|Traza la línea de equilibrio de la cesta. Vuelve a hacer clic para quitarla.");
+    AddTr("tipq_1",     "TP 0.1%|Two guide lines at 0.1% of price, above and below. They fade after 20 s.",
+                        "TP 0,1%|Deux repères à 0,1 % du prix, au-dessus et en dessous. Ils s'effacent après 20 s.",
+                        "TP 0,1%|Dos guías al 0,1 % del precio, arriba y abajo. Se borran tras 20 s.");
+    AddTr("tipq_2",     "TP 1%|Two guide lines at 1% of price, above and below. They fade after 20 s.",
+                        "TP 1%|Deux repères à 1 % du prix, au-dessus et en dessous. Ils s'effacent après 20 s.",
+                        "TP 1%|Dos guías al 1 % del precio, arriba y abajo. Se borran tras 20 s.");
     AddTr("tip_cpt",    "Profile|The plan EVERY limit is derived from.",
                         "Profil|Le plan dont TOUTES les limites sont déduites.",
                         "Perfil|El plan del que salen TODOS los límites.");
