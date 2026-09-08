@@ -151,6 +151,31 @@ première ligne et le bouton CLOSE à droite de la seconde — à 14 px d'écart
 et les lignes gagnent leur interligne. Aucune couleur, aucun texte, aucun
 comportement ne change : c'est de la place, rien d'autre.
 
+### v3.68.80 — le type de compte redevient un choix, et la vidéo passe en H.264
+
+**JR : « ajoute aussi compte réel en option en plus de démo sur les comptes
+perso ».** Il a raison, et c'est **ma v3.63 qui avait tort sur cette ligne.**
+J'avais retiré les flèches en écrivant que le type de compte personnel est
+« détecté, pas choisi ». C'est **à moitié vrai** : il est détecté à l'attache
+depuis `ACCOUNT_TRADE_MODE`, mais le code porte depuis la v1.29 une bascule
+complète — `ShellApplyCascade` inverse le drapeau et le persiste par login — et
+la valeur **ne sert qu'au libellé**, aucune règle n'en dépend. La détection est
+donc une **valeur par défaut**, pas une contrainte : le choix existait, je
+l'avais simplement rendu inatteignable. La règle de la v3.63 tient toujours —
+pas de flèches quand il n'y a rien à choisir ; ici il y a deux valeurs et une
+bascule qui marche.
+
+📺 **Et la vidéo est refaite dans une vraie chaîne.** L'ancienne écrivait un
+intermédiaire **MPEG-4 à ~3 Mb/s** avec OpenCV puis recollait le son : **deux
+encodages**, dont un dans un codec des années 2000, sur des captures d'interface
+pleines de texte fin. Les images vont maintenant directement dans ffmpeg **par
+un tube, en RAW** — un seul encodage, en **H.264 à 12 Mb/s**, le format que
+YouTube réencode le mieux. Mesuré : `h264 Main, 11908 kb/s + AAC 192 kb/s`
+contre `mpeg4, 3078 kb/s + AAC 128 kb/s`. Le script essaie les encodeurs
+matériels dans l'ordre (NVIDIA, Intel, AMD), puis MediaFoundation, puis le repli.
+
+**Gate : 22 contrôles, 0 en échec. Compilation : 0 erreur, 0 avertissement.**
+
 ### v3.67.79 — un compte personnel n'a pas de taille à choisir : il a des dépôts
 
 JR : *« le compte réel de perso n'a pas de size prédéfini donc c'est auto, en gros

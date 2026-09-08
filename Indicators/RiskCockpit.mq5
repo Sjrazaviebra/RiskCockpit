@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.67"
+#property version "3.68"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.67"
+#define RC_VERSION_STR "3.68"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -2473,7 +2473,13 @@ int ShellCascadeRows(string &lab[], string &val[], int &opt[]) {
     lab[4] = Tr("set_acct_type");  val[4] = (p == FN_PLAN_PERSONAL
                                              ? (g_eff_personal_demo == 1 ? "DEMO" : "REAL")
                                              : (g_eff_acct_type == 1 ? "SWAP-FREE" : "SWAP"));
-    opt[4] = (p == FN_PLAN_PERSONAL ? 1 : 2);       // perso : DETECTE, pas choisi
+    // v3.68 : j avais mis 1 ici en ecrivant que le type de compte personnel est
+    // « detecte, pas choisi ». A moitie vrai : il est detecte a l attache, mais la
+    // bascule existe depuis la v1.29 - ShellApplyCascade inverse le drapeau et le
+    // persiste par login - et la valeur ne sert QU AU LIBELLE, aucune regle n en
+    // depend. La detection est une valeur PAR DEFAUT, pas une contrainte : le
+    // choix existait, je l avais rendu inatteignable. Deux valeurs, deux fleches.
+    opt[4] = 2;                                     // DEMO / REAL, sur tous les plans
     return 5;
 }
 void ShellApplyCascade(const int row, const int dir) {
