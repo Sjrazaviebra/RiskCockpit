@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.78"
+#property version "3.79"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.78"
+#define RC_VERSION_STR "3.79"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -3229,15 +3229,14 @@ double Live_DailyDdPct(void) {
 // positions, position par position et en total : l afficher une deuxieme fois en
 // haut n ajoutait rien et melangeait deux natures - ce qui est ACQUIS et ce qui
 // bouge encore. La barre du haut porte donc le P&L FERME de la journee.
-// v3.77 : et la journee est celle du SERVEUR. Les deux chiffres que JR a compares
-// se decomposaient d eux-memes - -100,51 affiche = -69,87 de realise (le total de
-// MT5) plus -30,64 de flottant : la borne etait deja la bonne, c est le flottant
-// qui faisait l ecart. Minuit serveur est aussi la borne de l historique de MT5,
-// donc les deux se comparent, et celle de la perte journaliere, donc les deux
-// journees du panneau repartent du meme instant. Aucun decalage n est ecrit
-// quelque part : TimeCurrent() porte deja l heure du serveur.
+// v3.79 : et la journee est celle de JR - son minuit, dans son pays, l heure de
+// FERMETURE decidant a quelle journee un trade appartient. J avais ecrit cela en
+// v3.75 puis je l ai retire en v3.77 sur sa phrase « minuit du serveur », alors que
+// l ecart qu il montrait ce jour-la ne venait pas de la borne mais du flottant que
+// j ajoutais encore : j ai change la bonne piece pour la mauvaise raison. La borne
+// locale revient, le flottant reste dehors.
 double Live_DayPnl(void) {
-    return CachedRealisedToday();
+    return CachedRealisedTodayLocal();
 }
 
 double Live_OverallDdPct(void) {
@@ -4743,9 +4742,35 @@ double SumFloatingPnL(void) {
 //| cause - panel kept updating but OBJECT_CLICK starved). Floating   |
 //| P&L is NOT cached (SumFloatingPnL is cheap, recomputed live).     |
 //+------------------------------------------------------------------+
-// v3.77 : la journee locale de la v3.75 est retiree - une seule minuit, celle du
-// SERVEUR, partagee par le P/L du haut, l historique de MT5 et le compteur de
-// perte journaliere.
+// v3.79 : minuit CHEZ JR, exprime en heure SERVEUR - la seule que l historique des
+// deals comprend. On ne suppose aucun decalage : on compte les secondes ecoulees
+// depuis minuit LOCAL et on les retire de l heure serveur courante. Changement
+// d heure, serveur qui bouge, voyage : rien a mettre a jour.
+datetime LocalDayStartServer(void) {
+    MqlDateTime lt;
+    TimeToStruct(TimeLocal(), lt);
+    return TimeCurrent() - (datetime)(lt.hour * 3600 + lt.min * 60 + lt.sec);
+}
+
+// Ce qui a ete FERME depuis ce minuit-la. JR : « si je ferme une position [apres
+// minuit], le P/L sera compte pour demain » - donc c est l heure de FERMETURE qui
+// range un trade dans une journee, et HistorySelect() date justement le deal de
+// sortie a sa fermeture. Meme etranglement de 2 s que la version serveur : un
+// balayage complet de l historique a chaque tick de 500 ms a deja gele ce panneau.
+double g_realised_local_cache = 0.0;
+datetime g_realised_local_scan = 0;
+double CachedRealisedTodayLocal(void) {
+    if (g_realised_local_scan == 0 || TimeCurrent() - g_realised_local_scan >= 2) {
+        g_realised_local_cache = SumClosedDealsPnL(LocalDayStartServer(), TimeCurrent());
+        g_realised_local_scan  = TimeCurrent();
+    }
+    return g_realised_local_cache;
+}
+
+// ⛔ Celle-ci reste sur la journee du SERVEUR : elle alimente le compteur de PERTE
+// JOURNALIERE, qui n est pas un chiffre d agenda mais la regle que la prop firm
+// applique - et elle la calcule chez elle. Les deux journees peuvent differer
+// quelques heures par nuit : c est le prix pour que chacune dise vrai de son cote.
 double CachedRealisedToday(void) {
     if (g_realised_today_scan == 0 || TimeCurrent() - g_realised_today_scan >= 2) {
         MqlDateTime mdt;
