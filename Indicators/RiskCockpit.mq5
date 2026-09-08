@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.60"
+#property version "3.61"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.60"
+#define RC_VERSION_STR "3.61"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1675,7 +1675,7 @@ void BuildDeckData(RCDeckData &d) {
     // every surface with it. A value that costs nothing must never sit behind a
     // cache : it buys no time and creates a way to be wrong.
     d.newsApplies  = g_profile.news_rule_applies;   // v3.37 : say N/A, don't invent
-    d.newsSrcDown  = (!g_ff_active && g_cal_down);  // v3.49 : say it could not read
+    d.newsSrcDown  = (!NewsUseFF() && g_cal_down);  // v3.49 : say it could not read
     static datetime s_newsScan = 0;
     static RCDeckData s_newsCache;
     if (TimeCurrent() - s_newsScan < 15 && s_newsScan > 0) {
@@ -1694,7 +1694,7 @@ void BuildDeckData(RCDeckData &d) {
     } else {
     s_newsScan = TimeCurrent();
     const datetime nevt = Live_NextNewsEvt();              // RULE class (FF restricted / MT5 HIGH)
-    d.newsFF     = g_ff_active;
+    d.newsFF     = NewsUseFF();   // v3.61 : la table FN, seulement sur un plan FN
     d.newsActive = Live_InNewsWindow();
     d.newsHasEvt = (nevt > 0);
     d.newsHigh   = d.newsHasEvt;                           // the rule class is the red one
@@ -1729,7 +1729,7 @@ void BuildDeckData(RCDeckData &d) {
         datetime ct[64]; string cc[64]; bool cr[64];
         int nc = 0;
         const datetime now_s = TimeCurrent(), end_s = now_s + 24 * 60 * 60;
-        if (g_ff_active) {
+        if (NewsUseFF()) {
             const int srv_off = (int)(TimeCurrent() - TimeGMT());
             for (int i = 0; i < ArraySize(g_ff_events) && nc < 64; ++i) {
                 const datetime ts = g_ff_events[i].t_utc + srv_off;
@@ -2076,6 +2076,8 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_RULE40,        Tr("shl_rule40"));
     g_shell.SetLabel(RCL_TILT_IN,       Tr("shl_tiltin"));
     g_shell.SetLabel(RCL_SCROLL,        Tr("shl_scroll"));
+    g_shell.SetLabel(RCL_NEWS_HIGHW,    Tr("shl_newshighw"));
+    g_shell.SetLabel(RCL_NEWS_MEDW,     Tr("shl_newsmedw"));
     g_shell.SetLabel(RCL_CHECKFN,       Tr("shl_checkfn"));
     g_shell.SetLabel(RCL_SLG_ON,        Tr("shl_slgon"));
     g_shell.SetLabel(RCL_TILT_ON,       Tr("shl_tilton"));
@@ -3438,7 +3440,7 @@ bool Live_InNewsWindow(void) {
         return false;
     if (g_profile.news_window_minutes <= 0)
         return false;
-    if (g_ff_active)              // v2.03 : FF feed = primary source (FN-aligned) ;
+    if (NewsUseFF())             // v2.03 : FF feed = primary source (FN-aligned) ;
         return FFInNewsWindow();  // the MT5 calendar below stays the fallback
 
     const int win_sec = g_profile.news_window_minutes * 60;
@@ -3486,7 +3488,7 @@ bool Live_InNewsWindow(void) {
 datetime Live_NextNewsEvt(void) {
     if (!g_profile.news_rule_applies)
         return 0;
-    if (g_ff_active)            // v2.03 : FF feed = primary source. restricted = FF High
+    if (NewsUseFF())            // v2.03 : FF feed = primary source. restricted = FF High
         return FFNextEvt(true); // OR FN override -> the RULE ; MT5 calendar = fallback.
     const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
     const datetime now = TimeCurrent();
@@ -3527,7 +3529,7 @@ datetime Live_NextNewsEvt(void) {
 datetime Live_NextMedNewsEvt(void) {
     if (!g_profile.news_rule_applies || !g_eff_news_med)
         return 0;
-    if (g_ff_active)             // v2.03 : FF non-restricted (Medium hors override) =
+    if (NewsUseFF())             // v2.03 : FF non-restricted (Medium hors override) =
         return FFNextEvt(false); // the amber vigilance class ; MT5 = fallback.
     const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
     const datetime now = TimeCurrent();
@@ -4994,7 +4996,7 @@ void RefreshNewsZonesForChart(const long chart_id) {
     // --- build the unified list ---
     NewsDispItem disp[];
     int nd = 0;
-    if (g_ff_active) {
+    if (NewsUseFF()) {
         const int srv_off = (int)(TimeCurrent() - TimeGMT()); // FF times = UTC ; chart axis = SERVER time
         for (int i = 0; i < ArraySize(g_ff_events); ++i) {
             const datetime ts = g_ff_events[i].t_utc + srv_off;
@@ -6077,6 +6079,14 @@ void InitI18n(void) {
         "rule",
         "règle",
         "regla");
+    AddTr("shl_newshighw",
+        "high",
+        "fort",
+        "alto");
+    AddTr("shl_newsmedw",
+        "medium",
+        "moyen",
+        "medio");
     AddTr("shl_scroll",
         "scroll",
         "défilement",
@@ -6881,6 +6891,14 @@ void PersistViolationFlags(void) {
 // A [-] value [+] stepper. id_base+"_dn" / id_base+"_up" are the click targets.
 // Context-aware helpers : which option groups are relevant for the plan/broker.
 bool PlanIsPersonal(void)  { return EffectivePlan() == FN_PLAN_PERSONAL; }
+bool NewsUseFF(void)       { return (g_ff_active && PlanIsFundedNext()); }
+// v3.61 : le flux ForexFactory porte la table des evenements RESTREINTS de
+// FUNDEDNEXT. Il pilotait la regle et l affichage quel que soit le plan choisi,
+// donc un compte FTMO, E8, The5ers ou personnel se voyait appliquer la
+// classification d une AUTRE firme - avec la couleur, le compte a rebours et la
+// part de profit qui vont avec. La source FN ne sert que sur un plan FN ;
+// partout ailleurs, c est le calendrier MetaTrader qui fait foi.
+bool NewsUseFF(void);
 bool PlanIsFundedNext(void) {
     const ENUM_FN_PLAN p = EffectivePlan();
     return (p == FN_PLAN_STELLAR_1STEP || p == FN_PLAN_STELLAR_2STEP ||

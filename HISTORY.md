@@ -92,6 +92,38 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.61.73 — trois défauts trouvés par JR à l'usage
+
+- 🔴 **Le défilement s'affichait même quand tout tenait.** *« s'il y a la place,
+  pour quoi je dois avoir le défilement ? »* — il a raison, et le calcul était
+  faux : je comparais la hauteur du contenu à `H − 26`, la réserve de
+  l'indicateur. Or **quand la section tient, la surface est dimensionnée au
+  contenu** : `H` vaut exactement le contenu, donc `contenu > H − 26` est **vrai
+  par construction**. Les deux chevrons et la barre « défilement 0 % »
+  s'affichaient sur un panneau qui n'avait rien à faire défiler — un contrôle
+  qui ne sert à rien apprend au lecteur à ignorer les contrôles. On compare à la
+  hauteur réelle, et la réserve ne s'ajoute que lorsqu'il y a vraiment
+  débordement. **Vérifié à l'écran** : section DISCIPLINE, en-tête sans chevrons,
+  pas de barre ; section AIDE sur un petit graphique, chevrons présents.
+- 🔴 **La liste des news disparaissait sur un profil sans règle news.** La v3.37
+  avait raison de ne pas inventer une règle qui n'existe pas — mais elle sortait
+  de la fonction **avant** la liste « À VENIR ». Un événement économique ne cesse
+  pas d'exister parce que le programme ne le sanctionne pas : le trader perdait
+  le **calendrier** en même temps que la **règle**. Les deux sont maintenant
+  séparés — la règle dépend du profil, le calendrier non — et la colonne de
+  droite dit le niveau d'impact quand aucune règle ne s'applique.
+- 🔴 **La classification FundedNext s'appliquait à tous les profils.** Le flux
+  ForexFactory porte la table des événements **restreints de FundedNext**. Il
+  pilotait la règle et l'affichage **quel que soit le plan choisi** : un compte
+  FTMO, E8, The5ers ou personnel se voyait appliquer la classification d'une
+  autre firme — avec sa couleur, son compte à rebours et sa part de profit. La
+  source FN ne sert désormais de source de règle **que sur un plan FundedNext** ;
+  partout ailleurs, c'est le calendrier MetaTrader. **Vérifié à l'écran** : sur
+  le profil Personnel, la section AIDE affiche « Source : MT5 » et la liste porte
+  « high » / « medium » au lieu d'une part de profit.
+
+**Gate : 22 contrôles, 0 en échec. Compilation : 0 erreur, 0 avertissement.**
+
 ### v3.60.72 — préparation de la mise en ligne Market
 
 **L'en-tête du fichier décrivait un autre logiciel.** Les vingt premières lignes

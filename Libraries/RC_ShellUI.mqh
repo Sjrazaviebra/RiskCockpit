@@ -304,7 +304,8 @@ enum ERCLabel {
    RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
    RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
    RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE, RCL_HELP_MANUAL,
-   RCL_NEWS_SRCDOWN, RCL_BAND_WKNDNOW, RCL_TILT_IN, RCL_SCROLL
+   RCL_NEWS_SRCDOWN, RCL_BAND_WKNDNOW, RCL_TILT_IN, RCL_SCROLL,
+   RCL_NEWS_HIGHW, RCL_NEWS_MEDW
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -1143,7 +1144,11 @@ private:
          m_side.Text(18, y, L(RCL_NEWS_NORULE, "No news rule on this profile."),
                      A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
          ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_NEWS_RULE);
-         return y + 22;
+         // v3.61 : on SORTAIT ici. Le profil sans regle news perdait aussi la
+         // LISTE - or un evenement economique ne cesse pas d exister parce que le
+         // programme ne le sanctionne pas. La regle depend du profil, le
+         // calendrier non. La liste reste, sans etiquette de regle.
+         return NewsUpcoming(y + 22, false);
       }
       m_side.Text(18, y, L(RCL_NEWS_SRC, "Source"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
       m_side.Text(RCS_SIDE_W - 18, y, (m_d.newsFF ? "ForexFactory [FF]" : L(RCL_SRC_MT, "MT5 calendar [MT]")),
@@ -1177,7 +1182,12 @@ private:
              (m_d.newsPnl >= 0.0 ? "+" : "") + DoubleToString(m_d.newsPnl, 2) + " $  " +
              L(RCL_ELIG, "elig") + " " + (m_d.newsEligible >= 0.0 ? "+" : "") + DoubleToString(m_d.newsEligible, 2),
              m_t.text, RZ_TIP_NEWSTR);
-      y += 4;
+      return NewsUpcoming(y + 4, true);
+   }
+   //--- v3.61 : la liste des prochains evenements, extraite pour qu elle serve
+   //--- AUSSI aux profils sans regle news. `ruled` dit si la colonne de droite
+   //--- porte la part de profit du programme ou le simple niveau d impact.
+   int NewsUpcoming(int y, const bool ruled) {
       SecHead(L(RCL_NEWS_NEXT, "UPCOMING"), y);
       if(m_d.newsN <= 0) {
          m_side.Text(18, y, L(RCL_NEWS_NONE24, "Nothing in the next 24 h."), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
@@ -1193,11 +1203,14 @@ private:
          // de la fenetre. Le trader lisait « regle 40% » sur la surface faite
          // pour decider s il prend le trade, et croyait garder 40 % de son gain.
          // Le sens de l erreur MINIMISAIT la penalite.
-         m_side.Text(RCS_SIDE_W - 18, y,
-                     (m_d.newsRestr[i]
-                      ? DoubleToString(m_d.newsSharePct, 0) + "% " + L(RCL_RULE40, "rule")
-                      : L(RCL_CHECKFN, "check FN")),
-                     A(nc), RCS_F_SMALL, "Segoe UI", TA_RIGHT | TA_TOP);
+         // sans regle applicable, la colonne de droite dit le NIVEAU d impact -
+         // c est ce que le calendrier sait, et rien de plus.
+         const string tag = (!ruled
+                             ? (m_d.newsRestr[i] ? L(RCL_NEWS_HIGHW, "high") : L(RCL_NEWS_MEDW, "medium"))
+                             : (m_d.newsRestr[i]
+                                ? DoubleToString(m_d.newsSharePct, 0) + "% " + L(RCL_RULE40, "rule")
+                                : L(RCL_CHECKFN, "check FN")));
+         m_side.Text(RCS_SIDE_W - 18, y, tag, A(nc), RCS_F_SMALL, "Segoe UI", TA_RIGHT | TA_TOP);
          y += 17;
       }
       ZAdd(m_sideX + 18, m_sideY + y - 17 * m_d.newsN, RCS_SIDE_W - 36, 17 * m_d.newsN, RZ_TIP_NEWS_LIST);
@@ -1710,8 +1723,13 @@ private:
          // l oscillation d une image sur deux de la v3.28.
          const int want = y + m_scrollY + 14;
          if(idx >= 0 && want != m_secH[idx]) { m_secH[idx] = want; m_relayout = true; }
-         // 26 px reserves en bas pour l indicateur, sinon il masque la fin.
-         m_scrollMax = (want > H - 26 ? want - (H - 26) : 0);
+         // v3.61 : cette borne se comparait a `H - 26`, la reserve de
+         // l indicateur. Or quand la section TIENT, la surface est dimensionnee
+         // au contenu : H vaut exactement `want`, et `want > H - 26` est VRAI par
+         // construction. Les chevrons et la barre de defilement s affichaient sur
+         // un panneau qui n avait rien a faire defiler. On compare a la hauteur
+         // REELLE ; la reserve ne s ajoute que s il y a vraiment debordement.
+         m_scrollMax = (want > H ? want - H + 26 : 0);
          if(m_scrollY > m_scrollMax) m_scrollY = m_scrollMax;
          if(m_scrollY < 0)           m_scrollY = 0;
          ZClipTop(zn0, m_sideY + 44);              // rien de clicable sous l en-tete
