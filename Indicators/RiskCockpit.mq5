@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.73"
+#property version "3.74"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.73"
+#define RC_VERSION_STR "3.74"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -3997,7 +3997,11 @@ void RefreshSlLinesForChart(const long chart_id) {
     // calcule, ecrit, et invisible : vu a l ecran sur la v3.72. Huit bougies,
     // plafonnees a deux heures, tombent dans la marge libre a droite de la
     // derniere bougie - la ou l oeil va deja pour lire le prix.
-    const datetime anchor_time = TimeCurrent() + (datetime)MathMin(8 * period_seconds, 2 * 3600);
+    // v3.74 : huit bougies restaient trop loin - sur un M15 le plafond de deux
+    // heures tombe pile sur huit bougies, et le texte, ancre a GAUCHE, part de la
+    // vers le bord droit : « TP reco 0.10%  +4.41 EUR  BUY 0... ». Quatre bougies :
+    // il commence juste apres la derniere et finit dans la marge.
+    const datetime anchor_time = TimeCurrent() + (datetime)MathMin(4 * period_seconds, 1 * 3600);
 
     int drawn = 0;
     for (int i = 0; i < n; ++i) {
@@ -4057,6 +4061,7 @@ void RefreshSlLinesForChart(const long chart_id) {
                 const string status_suffix = (user_over_budget ? "  " + Tr("over") : "");
 
                 const string line_id = "RC_SL_LINE_" + IntegerToString((int)ticket);
+                const string sl_money = "  -" + DoubleToString(proposed_dist * money_per_price, 2) + ccy;
                 ObjectCreate(chart_id, line_id, OBJ_HLINE, 0, 0, sl_price);
                 ObjectSetDouble(chart_id, line_id, OBJPROP_PRICE, sl_price);
                 ObjectSetInteger(chart_id, line_id, OBJPROP_COLOR, final_line_clr);
@@ -4065,7 +4070,11 @@ void RefreshSlLinesForChart(const long chart_id) {
                 ObjectSetInteger(chart_id, line_id, OBJPROP_BACK, true);
                 ObjectSetInteger(chart_id, line_id, OBJPROP_SELECTABLE, false);
                 ObjectSetInteger(chart_id, line_id, OBJPROP_HIDDEN, true);
-                const string sl_money = "  -" + DoubleToString(proposed_dist * money_per_price, 2) + ccy;
+                ObjectSetString(chart_id, line_id, OBJPROP_TOOLTIP,
+                                Tr("sl_rec") + " " + DoubleToString(budget_pct, 2) + "%" +
+                                    sl_money + "  " + sym + " " + type_str + " " +
+                                    DoubleToString(vol, 2) + "  #" +
+                                    IntegerToString((int)ticket) + status_suffix);
                 ObjectSetString(chart_id, line_id, OBJPROP_TEXT,
                                 Tr("sl_rec") + " " + DoubleToString(budget_pct, 2) +
                                     "%" + sl_money + " - " + sym + " " + type_str + " #" +
@@ -4081,11 +4090,13 @@ void RefreshSlLinesForChart(const long chart_id) {
                 // d avertissement etait traduit : la seule ligne d alerte posee sur
                 // le graphique s affichait mi-anglaise mi-francaise. La traduction
                 // existait deja - elle etait ecrite la ou personne ne la lit.
+                // v3.74 : le sens, le volume et le ticket sont deja dans l infobulle
+                // du trait ; sur six positions ils faisaient six lignes de bavardage
+                // en travers du graphique. Il reste ce qui decide : le pourcentage et
+                // le montant.
                 ObjectSetString(chart_id, txt_id, OBJPROP_TEXT,
                                 Tr("sl_rec") + " " + DoubleToString(budget_pct, 2) + "%" +
-                                    sl_money + "  " + type_str + " " +
-                                    DoubleToString(vol, 2) + "  #" +
-                                    IntegerToString((int)ticket) + status_suffix);
+                                    sl_money + status_suffix);
                 ObjectSetInteger(chart_id, txt_id, OBJPROP_COLOR, final_line_clr);
                 ObjectSetInteger(chart_id, txt_id, OBJPROP_FONTSIZE, 8);
                 ObjectSetString(chart_id, txt_id, OBJPROP_FONT, "Consolas");
@@ -4122,6 +4133,10 @@ void RefreshSlLinesForChart(const long chart_id) {
             ObjectSetInteger(chart_id, tp_line_id, OBJPROP_BACK, true);
             ObjectSetInteger(chart_id, tp_line_id, OBJPROP_SELECTABLE, false);
             ObjectSetInteger(chart_id, tp_line_id, OBJPROP_HIDDEN, true);
+            ObjectSetString(chart_id, tp_line_id, OBJPROP_TOOLTIP,
+                            Tr("tp_rec") + " " + DoubleToString(g_eff_tp_pct, 2) + "%" +
+                                tp_money + "  " + sym + " " + type_str + " " +
+                                DoubleToString(vol, 2) + "  #" + IntegerToString((int)ticket));
             ObjectSetString(chart_id, tp_line_id, OBJPROP_TEXT,
                             Tr("tp_rec") + " " + DoubleToString(g_eff_tp_pct, 2) +
                                 "%" + tp_money + " - " + sym + " " + type_str + " #" +
@@ -4133,9 +4148,7 @@ void RefreshSlLinesForChart(const long chart_id) {
             ObjectSetDouble(chart_id, tp_txt_id, OBJPROP_PRICE, tp_price);
             ObjectSetString(chart_id, tp_txt_id, OBJPROP_TEXT,
                             Tr("tp_rec") + " " + DoubleToString(g_eff_tp_pct, 2) + "%" +
-                                tp_money + "  " + type_str + " " +
-                                DoubleToString(vol, 2) + "  #" +
-                                IntegerToString((int)ticket));
+                                tp_money);
             ObjectSetInteger(chart_id, tp_txt_id, OBJPROP_COLOR, tp_clr);
             ObjectSetInteger(chart_id, tp_txt_id, OBJPROP_FONTSIZE, 8);
             ObjectSetString(chart_id, tp_txt_id, OBJPROP_FONT, "Consolas");
