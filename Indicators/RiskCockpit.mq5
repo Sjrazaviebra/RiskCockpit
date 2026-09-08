@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.76"
+#property version "3.77"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.76"
+#define RC_VERSION_STR "3.77"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -2699,7 +2699,6 @@ void ShellRefresh(void) {
         const int tpg = g_shell.PendTpTake();
         if (tpg == 1)      { g_show_tp = !g_show_tp; PersistShowTp(); RefreshSlLines(); }
         else if (tpg == 2) { g_show_sl = !g_show_sl; PersistShowSl(); RefreshSlLines(); }
-        RefreshTpMarks();
         if (g_shell.PendSelfLockTake())     ShellArmSelfLock();
         if (g_shell.PendUnlockTake())       ShellReleaseSelfLock();
         if (g_shell.PendFitTake()) {
@@ -2837,52 +2836,11 @@ void FireDisciplineAlerts(const RCDeckData &d) {
 //| LOT 6 : persist UI prefs (language + BE toggle) via MT5            |
 //| GlobalVariable so they survive re-attach / chart change / VPS.    |
 //+------------------------------------------------------------------+
-// v3.70 : la v3.69 posait ici deux traits pleine largeur a X % du prix courant.
-// Ils ne decrivaient AUCUNE position - ni entree, ni risque, ni montant - alors
-// que le panneau porte deja un repere par position (RefreshSlLinesForChart),
-// avec son ticket, son sens et son volume. Ce qui reste ici est autre chose, et
-// JR l a demande pour ce que c est : « une petite barre jaune autour du prix,
-// pour montrer que si j ouvre une position ici, mon TP sera ou ». Donc deux
-// SEGMENTS courts, poses sur le prix courant et non sur une entree, a la
-// distance du TP. Ils ne s effacent pas seuls : ils ne mentent pas en
-// vieillissant, ils suivent le prix. On les DEPLACE au lieu de les recreer -
-// un objet recree a chaque tick clignote et repasse au-dessus du reste.
+// v3.77 : les deux segments jaunes poses autour du prix courant sont retires - JR
+// : « enleve les lignes jaunes ». Il reste ce nettoyage, appele a l initialisation :
+// une version precedente en a pose sur les graphiques ouverts, et du code qu on
+// supprime n efface pas ce qu il a dessine.
 void ClearTpMarks(void) { ObjectsDeleteAll(0, "RC_TPM_"); }
-void RefreshTpMarks(void) {
-    // v3.72 : elles n ont plus de bouton. JR : « les marques sont toujours la et
-    // on n a pas besoin de bouton ».
-    // v3.75 : et elles suivent la meme regle que les positions - la distance de
-    // stop PREVUE pour un nouveau trade (le « SL % (conseil lot) ») divisee par le
-    // meme nombre. Avec les valeurs par defaut - 1 % du prix, divise par 10 - cela
-    // retombe exactement sur les 0,1 % d avant : une seule regle, deux usages.
-    const double px = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    if (px <= 0.0 || g_eff_tp_div <= 0.0) { ClearTpMarks(); return; }
-    const double d   = (px * g_eff_sl_pct / 100.0) / g_eff_tp_div;
-    const int    per = PeriodSeconds((ENUM_TIMEFRAMES)Period());
-    const datetime t1 = TimeCurrent() + (datetime)(2 * per);
-    const datetime t2 = TimeCurrent() + (datetime)(9 * per);
-    const int dg = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-    for (int i = 0; i < 2; ++i) {
-        const string id = "RC_TPM_" + IntegerToString(i);
-        const double pr = (i == 0 ? px + d : px - d);
-        if (ObjectFind(0, id) < 0) {
-            ObjectCreate(0, id, OBJ_TREND, 0, t1, pr, t2, pr);
-            ObjectSetInteger(0, id, OBJPROP_COLOR, clrGold);
-            ObjectSetInteger(0, id, OBJPROP_STYLE, STYLE_DASH);
-            ObjectSetInteger(0, id, OBJPROP_WIDTH, 1);
-            ObjectSetInteger(0, id, OBJPROP_RAY_RIGHT, false);
-            ObjectSetInteger(0, id, OBJPROP_RAY_LEFT, false);
-            ObjectSetInteger(0, id, OBJPROP_BACK, true);
-            ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
-            ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
-        }
-        ObjectMove(0, id, 0, t1, pr);
-        ObjectMove(0, id, 1, t2, pr);
-        ObjectSetString(0, id, OBJPROP_TOOLTIP,
-                        Tr("tpm_tip") + "  SL/" + IntegerToString((int)g_eff_tp_div) +
-                        "  " + DoubleToString(pr, dg));
-    }
-}
 void PersistShowTp(void) { GlobalVariableSet("RC_show_tp", g_show_tp ? 1.0 : 0.0); }
 void PersistShowSl(void) { GlobalVariableSet("RC_show_sl", g_show_sl ? 1.0 : 0.0); }
 void PersistLang(void) { GlobalVariableSet("RC_lang",        (double)g_lang); }
@@ -3268,11 +3226,16 @@ double Live_DailyDdPct(void) {
 // v3.75 : le flottant sort de ce chiffre. JR le lit deja sur le tableau des
 // positions, position par position et en total : l afficher une deuxieme fois en
 // haut n ajoutait rien et melangeait deux natures - ce qui est ACQUIS et ce qui
-// bouge encore. La barre du haut porte donc le P&L FERME de la journee, et la
-// journee est celle de JR : minuit chez lui, pas chez le courtier. Contenu
-// inchange : profit + swap + commission, a l heure de FERMETURE du deal.
+// bouge encore. La barre du haut porte donc le P&L FERME de la journee.
+// v3.77 : et la journee est celle du SERVEUR. Les deux chiffres que JR a compares
+// se decomposaient d eux-memes - -100,51 affiche = -69,87 de realise (le total de
+// MT5) plus -30,64 de flottant : la borne etait deja la bonne, c est le flottant
+// qui faisait l ecart. Minuit serveur est aussi la borne de l historique de MT5,
+// donc les deux se comparent, et celle de la perte journaliere, donc les deux
+// journees du panneau repartent du meme instant. Aucun decalage n est ecrit
+// quelque part : TimeCurrent() porte deja l heure du serveur.
 double Live_DayPnl(void) {
-    return CachedRealisedTodayLocal();
+    return CachedRealisedToday();
 }
 
 double Live_OverallDdPct(void) {
@@ -4781,32 +4744,9 @@ double SumFloatingPnL(void) {
 //| cause - panel kept updating but OBJECT_CLICK starved). Floating   |
 //| P&L is NOT cached (SumFloatingPnL is cheap, recomputed live).     |
 //+------------------------------------------------------------------+
-// v3.75 : minuit CHEZ JR, exprime en heure SERVEUR - la seule que l historique
-// des deals comprend. On ne suppose aucun decalage : on compte les secondes
-// ecoulees depuis minuit local et on les retire de l heure serveur courante. Un
-// changement d heure, un serveur qui bouge, un voyage : rien a mettre a jour.
-datetime LocalDayStartServer(void) {
-    MqlDateTime lt;
-    TimeToStruct(TimeLocal(), lt);
-    return TimeCurrent() - (datetime)(lt.hour * 3600 + lt.min * 60 + lt.sec);
-}
-
-// Le P&L REALISE depuis minuit chez JR : ce qui a ete FERME aujourd hui, a son
-// heure. Meme etranglement de 2 s que la version serveur - un balayage complet
-// de l historique a chaque tick de 500 ms a deja gele ce panneau une fois.
-double g_realised_local_cache = 0.0;
-datetime g_realised_local_scan = 0;
-double CachedRealisedTodayLocal(void) {
-    if (g_realised_local_scan == 0 || TimeCurrent() - g_realised_local_scan >= 2) {
-        g_realised_local_cache = SumClosedDealsPnL(LocalDayStartServer(), TimeCurrent());
-        g_realised_local_scan  = TimeCurrent();
-    }
-    return g_realised_local_cache;
-}
-
-// ⛔ Celle-ci reste sur la journee SERVEUR : elle alimente le compteur de PERTE
-// JOURNALIERE, qui est une regle de prop firm et pas un chiffre d agenda. Les
-// deux peuvent differer pendant quelques heures chaque nuit, et c est voulu.
+// v3.77 : la journee locale de la v3.75 est retiree - une seule minuit, celle du
+// SERVEUR, partagee par le P/L du haut, l historique de MT5 et le compteur de
+// perte journaliere.
 double CachedRealisedToday(void) {
     if (g_realised_today_scan == 0 || TimeCurrent() - g_realised_today_scan >= 2) {
         MqlDateTime mdt;
@@ -4976,6 +4916,14 @@ double Live_NextTradeBudgetPct(void) {
     if (g_profile.initial_balance <= 0.0)
         return 0.0;
     const double cap = EffectiveRiskCap();          // 3% normal, 1% if violation (B7)
+    // v3.77 : sans programme prop, EffectiveRiskCap() vaut ZERO - donc ce budget
+    // valait zero, le lot mathematique valait zero, et l ecran retombait sur le
+    // minimum du courtier : 0,01 quel que soit le compte. C est la TROISIEME
+    // fonction que ce meme zero eteint sur un profil personnel, apres les traits de
+    // SL et le budget qui les place. Sans plafond cumule a partager, le budget d un
+    // trade est simplement le risque par trade - 1 % du solde par defaut, reglable.
+    if (cap <= 0.0)
+        return g_eff_max_risk_pt;
     const int    N   = MathMax(1, g_max_parallel);
     // B9 (calib 2026-05-20) : cap/N capped by the per-trade strategy ceiling.
     const double dd_per_trade = MathMin(cap / N, g_eff_max_risk_pt);
@@ -6717,9 +6665,6 @@ void InitI18n(void) {
     AddTr("tipq_2",     "Stops|Shows the stop your risk budget allows on each position, and what it costs.",
                         "Stops|Montre le stop que votre budget de risque autorise sur chaque position, et ce qu'il coûte.",
                         "Stops|Muestra el stop que su presupuesto de riesgo permite en cada posición, y lo que cuesta.");
-    AddTr("tpm_tip",    "Target if entered here (planned stop / N)",
-                        "Cible si entrée ici (stop prévu / N)",
-                        "Objetivo si entra aquí (stop previsto / N)");
     AddTr("tip_cpt",    "Profile|The plan EVERY limit is derived from.",
                         "Profil|Le plan dont TOUTES les limites sont déduites.",
                         "Perfil|El plan del que salen TODOS los límites.");
@@ -7375,6 +7320,7 @@ void ApplySettingsChange(void) {
     // bleed-through, they're off-panel). Only RefreshPanel (the panel rows) stays
     // gated on !g_settings_open (drawing rows over the open modal = bleed-through).
     RefreshNewsZones();                     // news bars + level toggles : instant
+    ClearTpMarks();                         // v3.77 : les reperes jaunes d avant
     RefreshSlLines();                       // SL/TP recommendation lines
     if (g_be_visible) DrawBreakevenLines(); // basket BE line
     ApplyComfortScale(false);               // comfort padding (self-guards on g_eff_comfort)
