@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.69"
+#property version "3.70"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.69"
+#define RC_VERSION_STR "3.70"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -555,6 +555,10 @@ string g_i18n_es[];
 // SELECTABLE so the user can drag them by hand (the companion EA V2 executes
 // the actual move-to-BE on the broker).
 bool g_be_visible = false;
+// v3.70 : les deux segments jaunes poses de part et d autre du prix courant,
+// a la distance du TP. Ils repondent a « si j entre ici, ma cible est ou »,
+// donc ils suivent le PRIX et non une position. Allumes par defaut.
+bool g_tp_marks = true;
 // M1c : debug breadcrumbs filled by MarginPerLot (path = ocm/ocm_retry/mi/calcmode/fail).
 string g_maxlot_path = "none";
 string g_maxlot_dbg2 = ""; // FIX 2 : fallback diagnostics (mccy/fx/tv/ts/cs) for the debug line
@@ -733,6 +737,7 @@ double Live_PerTradeMarginPct(void);
 double Live_CumulativeRiskPct(void);
 double Live_LockedRiskPct(void);   // FIX (LOT 2) : sum of risks at INITIAL SLs (FN-locked)
 double Live_DailyDdPct(void);
+double Live_DayPnl(void);   // v3.70 : P&L du JOUR, realise + flottant
 double Live_OverallDdPct(void);
 double Live_ProfitTargetPct(void);
 double Live_QuickStrikeRatioPct(void);
@@ -1072,6 +1077,9 @@ int OnInit(void) {
     g_be_visible = false;
     if (GlobalVariableCheck("RC_be_visible"))
         g_be_visible = (GlobalVariableGet("RC_be_visible") != 0.0);
+    g_tp_marks = true;                       // v3.70 : visibles tant qu on ne les eteint pas
+    if (GlobalVariableCheck("RC_tp_marks"))
+        g_tp_marks = (GlobalVariableGet("RC_tp_marks") != 0.0);
     InitI18n();
 
     DestroyAllObjects();
@@ -1153,7 +1161,7 @@ void OnDeinit(const int reason) {
     // Clean SL / TP / NEWS / BE objects we may have drawn on ANY open chart.
     long cid = ChartFirst();
     while (cid >= 0) {
-        ObjectsDeleteAll(cid, "RC_TPG_");
+        ObjectsDeleteAll(cid, "RC_TPM_");
         ObjectsDeleteAll(cid, "RC_SL_");
         ObjectsDeleteAll(cid, "RC_TP_");
         ObjectsDeleteAll(cid, "RC_NEWS_");
@@ -1520,6 +1528,7 @@ void BuildDeckData(RCDeckData &d) {
     }
     // --- positions (cell POS + section rows) -----------------------------
     d.posCount = PositionsTotal();
+    d.dayPnl   = Live_DayPnl();   // v3.70 : la barre du haut porte la JOURNEE
     d.posPnl   = 0.0;
     d.posNoSl  = false;
     d.posN     = 0;
@@ -1844,6 +1853,7 @@ void BuildDeckData(RCDeckData &d) {
     d.violMargin = g_margin_violation_active;
     d.violRisk   = g_risk_violation_active;
     d.beLines    = g_be_visible;
+    d.tpMarks    = g_tp_marks;
     d.selfLockH  = g_eff_selflock_h;
     {
         double ymd = g_eff_cycle_ymd;
@@ -2673,10 +2683,14 @@ void ShellRefresh(void) {
         if (g_shell.PendCasTake(row, dir))  ShellApplyCascade(row, dir);
         if (g_shell.PendCycTake(row, dir))  ShellApplyCycle(row, dir);
         ShellApplyAddon(g_shell.PendAddonTake());
-        const int tpg = g_shell.PendTpTake();      // v3.69 : les deux reperes de sortie
-        if (tpg == 1) DrawTpGuides(0.001);
-        else if (tpg == 2) DrawTpGuides(0.01);
-        if (g_tpg_until > 0 && TimeCurrent() > g_tpg_until) ClearTpGuides();
+        // v3.70 : le premier bouton REVERIFIE chaque position ouverte - son SL
+        // conseille et sa cible - le second allume ou eteint la barre jaune
+        // posee sur le prix. Sans position, le premier ne dessine rien : c est
+        // la reponse juste, il n y a pas de sortie a placer.
+        const int tpg = g_shell.PendTpTake();
+        if (tpg == 1) RefreshSlLines();
+        else if (tpg == 2) { g_tp_marks = !g_tp_marks; PersistTpMarks(); }
+        RefreshTpMarks();
         if (g_shell.PendSelfLockTake())     ShellArmSelfLock();
         if (g_shell.PendUnlockTake())       ShellReleaseSelfLock();
         if (g_shell.PendFitTake()) {
@@ -2814,37 +2828,48 @@ void FireDisciplineAlerts(const RCDeckData &d) {
 //| LOT 6 : persist UI prefs (language + BE toggle) via MT5            |
 //| GlobalVariable so they survive re-attach / chart change / VPS.    |
 //+------------------------------------------------------------------+
-// v3.69 : deux reperes horizontaux a X % du prix courant, au-dessus et en
-// dessous. JR : « c est juste pour me rappeler les lignes, et qu elles
-// disparaissent apres quelques secondes ». Ils portent donc une echeance : vingt
-// secondes, puis ils s effacent seuls. Un repere qu il faut penser a nettoyer
-// finit par rester sur le graphique, et un trait qui traine ment sur un prix.
-datetime g_tpg_until = 0;
-void ClearTpGuides(void) { ObjectsDeleteAll(0, "RC_TPG_"); g_tpg_until = 0; }
-void DrawTpGuides(const double pct) {
-    ClearTpGuides();
+// v3.70 : la v3.69 posait ici deux traits pleine largeur a X % du prix courant.
+// Ils ne decrivaient AUCUNE position - ni entree, ni risque, ni montant - alors
+// que le panneau porte deja un repere par position (RefreshSlLinesForChart),
+// avec son ticket, son sens et son volume. Ce qui reste ici est autre chose, et
+// JR l a demande pour ce que c est : « une petite barre jaune autour du prix,
+// pour montrer que si j ouvre une position ici, mon TP sera ou ». Donc deux
+// SEGMENTS courts, poses sur le prix courant et non sur une entree, a la
+// distance du TP. Ils ne s effacent pas seuls : ils ne mentent pas en
+// vieillissant, ils suivent le prix. On les DEPLACE au lieu de les recreer -
+// un objet recree a chaque tick clignote et repasse au-dessus du reste.
+void ClearTpMarks(void) { ObjectsDeleteAll(0, "RC_TPM_"); }
+void RefreshTpMarks(void) {
+    if (!g_tp_marks) { ClearTpMarks(); return; }
     const double px = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    if (px <= 0.0) return;
-    const double dn = px * (1.0 - pct), up = px * (1.0 + pct);
-    const string lbl = DoubleToString(pct * 100.0, (pct < 0.005 ? 1 : 0)) + "%";
+    if (px <= 0.0) { ClearTpMarks(); return; }
+    const double d   = px * g_eff_tp_pct / 100.0;
+    const int    per = PeriodSeconds((ENUM_TIMEFRAMES)Period());
+    const datetime t1 = TimeCurrent() + (datetime)(2 * per);
+    const datetime t2 = TimeCurrent() + (datetime)(9 * per);
+    const int dg = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
     for (int i = 0; i < 2; ++i) {
-        const string id = "RC_TPG_" + IntegerToString(i);
-        const double pr = (i == 0 ? up : dn);
-        ObjectCreate(0, id, OBJ_HLINE, 0, 0, pr);
-        ObjectSetDouble (0, id, OBJPROP_PRICE, pr);
-        ObjectSetInteger(0, id, OBJPROP_COLOR, g_theme.accent);
-        ObjectSetInteger(0, id, OBJPROP_STYLE, STYLE_DOT);
-        ObjectSetInteger(0, id, OBJPROP_WIDTH, 1);
-        ObjectSetInteger(0, id, OBJPROP_BACK, true);
-        ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
-        ObjectSetString (0, id, OBJPROP_TEXT, "TP " + lbl);
-        ObjectSetString (0, id, OBJPROP_TOOLTIP, "TP " + lbl + "  " +
-                         DoubleToString(pr, (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS)));
+        const string id = "RC_TPM_" + IntegerToString(i);
+        const double pr = (i == 0 ? px + d : px - d);
+        if (ObjectFind(0, id) < 0) {
+            ObjectCreate(0, id, OBJ_TREND, 0, t1, pr, t2, pr);
+            ObjectSetInteger(0, id, OBJPROP_COLOR, clrGold);
+            ObjectSetInteger(0, id, OBJPROP_STYLE, STYLE_DASH);
+            ObjectSetInteger(0, id, OBJPROP_WIDTH, 1);
+            ObjectSetInteger(0, id, OBJPROP_RAY_RIGHT, false);
+            ObjectSetInteger(0, id, OBJPROP_RAY_LEFT, false);
+            ObjectSetInteger(0, id, OBJPROP_BACK, true);
+            ObjectSetInteger(0, id, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, id, OBJPROP_HIDDEN, true);
+        }
+        ObjectMove(0, id, 0, t1, pr);
+        ObjectMove(0, id, 1, t2, pr);
+        ObjectSetString(0, id, OBJPROP_TOOLTIP,
+                        Tr("tpm_tip") + "  " + DoubleToString(g_eff_tp_pct, 2) + "%  " +
+                        DoubleToString(pr, dg));
     }
-    g_tpg_until = TimeCurrent() + 20;
-    ChartRedraw(0);
 }
+void PersistTpMarks(void) { GlobalVariableSet("RC_tp_marks", g_tp_marks ? 1.0 : 0.0); }
 void PersistLang(void) { GlobalVariableSet("RC_lang",        (double)g_lang); }
 void PersistBE(void)   { GlobalVariableSet("RC_be_visible",  g_be_visible ? 1.0 : 0.0); }
 
@@ -3216,6 +3241,18 @@ double Live_DailyDdPct(void) {
     if (dd <= 0.0)
         return 0.0;
     return 100.0 * dd / g_profile.initial_balance;
+}
+
+// v3.70 : le P&L du JOUR - realise plus flottant - a partir du MEME solde de
+// debut de journee que le compteur de perte journaliere ci-dessus. Deux
+// chiffres qui pretendent mesurer la journee et qui ne tombent pas d accord
+// font douter des deux : il n y en a donc qu une definition. Les mouvements de
+// balance du jour - depot, retrait - sont retires : un retrait n est pas une
+// perte.
+double Live_DayPnl(void) {
+    const double bal_day_start = AccountInfoDouble(ACCOUNT_BALANCE)
+                                 - CachedRealisedToday() - CachedBalanceOpsToday();
+    return AccountInfoDouble(ACCOUNT_EQUITY) - bal_day_start;
 }
 
 double Live_OverallDdPct(void) {
@@ -3907,10 +3944,17 @@ void RefreshSlLinesForChart(const long chart_id) {
     // when N changes (panel +/-) or a position opens/closes (OnTradeTransaction).
     // So : 1 trade -> b=1% -> wide SL ; 2 trades -> b=0.5% -> SL twice as tight.
     const int N = MathMax(1, g_max_parallel);
-    const double budget_pct = MathMin(EffectiveRiskCap() / N, g_eff_max_risk_pt);
+    // v3.70 : ce budget sortait de EffectiveRiskCap(), qui vaut ZERO sans
+    // programme prop - donc sur un profil PERSONNEL budget_money valait 0 et la
+    // fonction s arretait ici : aucun repere de SL ni de TP n etait dessine, sur
+    // aucune position. Le seul reglage qui tienne la main du trader disparaissait
+    // exactement la ou aucune regle exterieure ne le tient. Sans plafond de
+    // programme, le budget est le risque par trade : InpMaxRiskPerTradePct, 1 %
+    // du solde par defaut - reglable dans les parametres comme dans le panneau.
+    const double cap = EffectiveRiskCap();
+    const double budget_pct = (cap > 0.0 ? MathMin(cap / N, g_eff_max_risk_pt)
+                                         : g_eff_max_risk_pt);
     const double budget_money = g_profile.initial_balance * budget_pct / 100.0;
-    // Personal / no-prop profile : EffectiveRiskCap()=0 -> budget_money=0 ->
-    // SL would degenerate to entry and every real SL flagged "OVER" red. Skip.
     if (budget_money <= 0.0)
         return;
 
@@ -6168,7 +6212,7 @@ void InitI18n(void) {
         "règle",
         "regla");
     AddTr("shl_navbal",  "BAL", "SOLDE", "SALDO");
-    AddTr("shl_navpl",   "P/L", "P/L",   "P/L");
+    AddTr("shl_navpl",   "P/L DAY", "P/L JOUR", "P/L DÍA");
     AddTr("shl_fltbe",   "BE",  "PM",    "PE");
     AddTr("shl_newshighw",
         "high",
@@ -6566,12 +6610,15 @@ void InitI18n(void) {
     AddTr("tipq_0",     "Break-even|Draws the basket break-even line. Click again to remove it.",
                         "Point mort|Trace la ligne de point mort du panier. Reclique pour l'enlever.",
                         "Punto de equilibrio|Traza la línea de equilibrio de la cesta. Vuelve a hacer clic para quitarla.");
-    AddTr("tipq_1",     "TP 0.1%|Two guide lines at 0.1% of price, above and below. They fade after 20 s.",
-                        "TP 0,1%|Deux repères à 0,1 % du prix, au-dessus et en dessous. Ils s'effacent après 20 s.",
-                        "TP 0,1%|Dos guías al 0,1 % del precio, arriba y abajo. Se borran tras 20 s.");
-    AddTr("tipq_2",     "TP 1%|Two guide lines at 1% of price, above and below. They fade after 20 s.",
-                        "TP 1%|Deux repères à 1 % du prix, au-dessus et en dessous. Ils s'effacent après 20 s.",
-                        "TP 1%|Dos guías al 1 % del precio, arriba y abajo. Se borran tras 20 s.");
+    AddTr("tipq_1",     "TP / SL|Re-checks every open position : advised stop and target. Flat, nothing drawn.",
+                        "TP / SL|Revérifie chaque position ouverte : stop conseillé et cible. Sans position, rien n'est tracé.",
+                        "TP / SL|Revisa cada posición abierta : stop aconsejado y objetivo. Sin posición, no se traza nada.");
+    AddTr("tipq_2",     "Price marks|Two yellow marks at the TP distance around the live price.",
+                        "Repères de prix|Deux marques jaunes à la distance du TP autour du prix.",
+                        "Marcas de precio|Dos marcas amarillas a la distancia del TP alrededor del precio.");
+    AddTr("tpm_tip",    "Target if entered here",
+                        "Cible si entrée ici",
+                        "Objetivo si entra aquí");
     AddTr("tip_cpt",    "Profile|The plan EVERY limit is derived from.",
                         "Profil|Le plan dont TOUTES les limites sont déduites.",
                         "Perfil|El plan del que salen TODOS los límites.");

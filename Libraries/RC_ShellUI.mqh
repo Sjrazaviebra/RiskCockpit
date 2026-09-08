@@ -89,6 +89,10 @@ struct RCDeckData {
    // positions (cell POS)
    int    posCount, posWorst;   // posWorst : 0 ok, 1 watch, 2 breach, 3 n/a
    double posPnl;
+   // v3.70 : le P&L du JOUR - realise + flottant. La barre du haut portait le
+   // P&L flottant, que le tableau flottant detaille deja position par position.
+   double dayPnl;
+   bool   tpMarks;              // les marques jaunes posees sur le prix courant
    bool   posNoSl;              // at least one open position without a stop
    // lot advisor (cell LOT)
    double sugLot;
@@ -715,22 +719,21 @@ private:
                          m_t.text, RZ_NAV_ROOMC);
          }
          if(midW >= 340) {
-            const color pc2 = (m_d.posCount <= 0 ? m_t.dim
-                               : (m_d.posPnl >= 0.0 ? m_t.ok : m_t.red));
-            cx = NavChip(cx, L(RCL_NAV_PL, "P/L"),
-                         (m_d.posCount <= 0 ? "--"
-                          : (m_d.posPnl >= 0.0 ? "+" : "") + DoubleToString(m_d.posPnl, 2)),
+            // v3.70 : c etait le P&L FLOTTANT - le meme chiffre que le tableau
+            // flottant donne deja, position par position. Ici c est la JOURNEE
+            // qui compte : realise plus flottant, le chiffre auquel se compare la
+            // perte journaliere. Il existe meme a plat, donc plus de "--".
+            const color pc2 = (m_d.dayPnl > 0.0 ? m_t.ok
+                               : (m_d.dayPnl < 0.0 ? m_t.red : m_t.dim));
+            cx = NavChip(cx, L(RCL_NAV_PL, "P/L DAY"),
+                         (m_d.dayPnl >= 0.0 ? "+" : "") + DoubleToString(m_d.dayPnl, 2),
                          pc2, RZ_NAV_LOTC);
          }
-         if(midW >= 430) {
-            const color nc2 = (!m_d.newsHasEvt ? m_t.dim
-                               : (m_d.newsActive ? m_t.red
-                                  : (m_d.newsMins <= 60 ? m_t.warn : m_t.text)));
-            cx = NavChip(cx, L(RCL_NAV_NEWS, "NEWS"),
-                         (m_d.newsHasEvt ? IntegerToString(m_d.newsMins) + "m" : "--"),
-                         nc2, RZ_NAV_NEWSC);
-         }
-         if(midW >= 560) {
+         // v3.70 : la cellule NEWS repetait la cellule NEWS du rail, a un clic de
+         // la et avec tout son detail - la liste, la source, la fenetre. Elle est
+         // retiree ; les vitals prennent la place plus tot. La zone survit dans
+         // l enum et dans le dispatcher : la retirer decalerait la serie des ids.
+         if(midW >= 460) {
             string vit = "$" + DoubleToString(m_d.equity, 2) + "  " +
                          IntegerToString(m_d.posCount) + " pos";
             m_nav.Text(cx + 6, 11, vit, A(m_t.dim), RCS_F_NUM, "Consolas", TA_LEFT | TA_TOP);
@@ -1834,7 +1837,7 @@ private:
          case RZ_NAV_MODE:   t = "Mode";         d = "Dark / light.";                                  return true;
          case RZ_NAV_FIT:    t = "Fit";          d = "Re-centre the chart with free room above and below."; return true;
          case RZ_NAV_ROOMC:  t = "Balance";     d = "Account balance. Click : the account.";       return true;
-         case RZ_NAV_LOTC:   t = "P/L";         d = "Open profit and loss. Click : the positions."; return true;
+         case RZ_NAV_LOTC:   t = "P/L day";     d = "Today's profit and loss, floating included. Click : the positions."; return true;
          case RZ_NAV_NEWSC:  t = "News";        d = "Minutes to the next rule-bound event.";       return true;
          case RZ_NAV_CLOCK:  t = "Clock";      d = "Broker server time.";                         return true;
          case RZ_NAV_KILL:   t = "Remove";      d = "Removes RiskCockpit from this chart.";              return true;
@@ -2047,20 +2050,26 @@ private:
          // et deux reperes de sortie a 0,1 % et 1 % du prix. Les reperes s effacent
          // seuls : c est un rappel, pas un dessin a nettoyer.
          const int qy = RCS_FLT_HEAD + 4, cw = (W - 16) / 3, bh = RCS_FLT_QUICK - 10;
-         const bool beon = m_d.beLines;
+         const bool beon = m_d.beLines, tpmon = m_d.tpMarks;
          m_float.CapsuleStroke(8, qy, cw - 4, bh,
                                Mix(m_t.surface, beon ? m_t.accent : m_t.dim, 0.45),
                                Mix(m_t.surface, beon ? m_t.accent : clrBlack, beon ? 0.18 : 0.10));
          m_float.Text(8 + (cw - 4) / 2, qy + 4, L(RCL_FLT_BE, "BE"),
                       A(beon ? m_t.accent : m_t.dim), RCS_F_LABEL, "Segoe UI",
                       TA_CENTER | TA_TOP, FW_BOLD);
+         // v3.70 : « TP 0,1 % » et « TP 1 % » tracaient deux traits autour du prix
+         // qui ne decrivaient aucune position. Le premier bouton revoit maintenant
+         // CHAQUE position - stop conseille et cible - le second allume les
+         // marques jaunes posees sur le prix courant.
          m_float.CapsuleStroke(8 + cw, qy, cw - 4, bh, Mix(m_t.surface, m_t.dim, 0.45),
                                Mix(m_t.surface, clrBlack, 0.10));
-         m_float.Text(8 + cw + (cw - 4) / 2, qy + 4, "TP 0.1%", A(m_t.text),
+         m_float.Text(8 + cw + (cw - 4) / 2, qy + 4, "TP / SL", A(m_t.text),
                       RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
-         m_float.CapsuleStroke(8 + 2 * cw, qy, cw - 4, bh, Mix(m_t.surface, m_t.dim, 0.45),
-                               Mix(m_t.surface, clrBlack, 0.10));
-         m_float.Text(8 + 2 * cw + (cw - 4) / 2, qy + 4, "TP 1%", A(m_t.text),
+         m_float.CapsuleStroke(8 + 2 * cw, qy, cw - 4, bh,
+                               Mix(m_t.surface, tpmon ? m_t.warn : m_t.dim, 0.45),
+                               Mix(m_t.surface, tpmon ? m_t.warn : clrBlack, tpmon ? 0.18 : 0.10));
+         m_float.Text(8 + 2 * cw + (cw - 4) / 2, qy + 4, "MARKS",
+                      A(tpmon ? m_t.warn : m_t.text),
                       RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
          m_float.Hairline(8, RCS_FLT_HEAD + RCS_FLT_QUICK - 3, W - 8, LineC());
          ZAdd(m_fltX + 8, m_fltY + qy, cw - 4, bh, RZ_FLT_QLIM);
@@ -2250,6 +2259,7 @@ public:
       m_pendUnlock = false;
       m_maxEditOn = false; m_maxEditX = 0; m_maxEditY = 0;
       m_d.addonN = 0; m_d.violMargin = false; m_d.violRisk = false; m_d.beLines = false;
+      m_d.dayPnl = 0.0; m_d.tpMarks = false;
       m_d.selfLockH = 4; m_d.cycY = 0; m_d.cycM = 0; m_d.cycD = 0;
       for(int ai = 0; ai < 7; ai++) { m_d.addonName[ai] = ""; m_d.addonOn[ai] = false; }
       m_d.stepN = 0; m_d.casN = 0;
