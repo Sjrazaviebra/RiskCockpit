@@ -106,7 +106,7 @@ fonction de trading n'y existe.
 
 **Les pièces de la fiche Market, préparées et vérifiées :**
 
-- `MARKET-DESCRIPTION.md` — la description en EN / FR / ES, écrite contre les
+- `market/MARKET-DESCRIPTION.md` — la description en EN / FR / ES, écrite contre les
   règles officielles Part IV : aucune garantie ni promesse de bénéfice, aucun
   superlatif, aucun backtest, aucun lien externe.
 - **Les icônes 200 / 140 / 60** — et la ligne **« v1.30 » effacée du logo**. Le
@@ -114,7 +114,7 @@ fonction de trading n'y existe.
   dans l'image : c'est ce qu'un acheteur voit **avant** de lire quoi que ce soit,
   et ça dit « abandonné ». Rien n'oblige à graver une version sur une icône — il
   faudrait la redessiner à chaque mise à jour, c'est-à-dire recréer le problème.
-- `market_screens/SHOTLIST.md` — les onze prises, l'état de l'interface à
+- `market/screens/SHOTLIST.md` — les onze prises, l'état de l'interface à
   préparer pour chacune, et la règle qui ne se vérifie qu'à l'œil : **l'interface
   doit être en anglais**, et RiskCockpit retient la langue par compte.
 - `tools/prep_screens.py` — met les captures aux spécifications (≥ 720 px sur un
@@ -127,11 +127,11 @@ fonction de trading n'y existe.
 - `tools/build-market-video.py` — le montage, sur la palette **échantillonnée sur
   le produit** et non choisie. Il **refuse de tourner s'il manque une capture** :
   on ne fabrique pas une vidéo avec des trous.
-- `RELEASE-3.60.md` — la séquence de mise en ligne, ce qui est prêt, et ce qui
+- `market/RELEASE-3.60.md` — la séquence de mise en ligne, ce qui est prêt, et ce qui
   ne l'est pas.
 
 ⭐ **Le gate a attrapé une fuite dans MON propre outillage** : j'avais écrit en
-dur un chemin `C:\Users\<nom>\AppData\Local\...` dans le script de montage —
+dur un chemin absolu portant le nom d'utilisateur Windows dans le script de montage —
 exactement ce que le contrôle « fuite de données perso » existe pour trouver, et
 il l'a trouvé sur mon code. Le chemin est désormais construit à l'exécution
 depuis les variables d'environnement : le fichier ne porte plus aucun nom

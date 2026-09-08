@@ -15,9 +15,9 @@ prêts. Il manque les captures — et elles sont le seul point qui demande de pi
 | Self-test des maths (dans MT5) | **37/37** | script `RC_SelfTest` |
 | `#property` copyright / link / version / description / icon | présents | en-tête de `RiskCockpit.mq5` |
 | Format de version `major.minor` | `3.60` | exigé par le Market |
-| Description EN / FR / ES | écrite, Part IV | `MARKET-DESCRIPTION.md` |
+| Description EN / FR / ES | écrite, Part IV | `market/MARKET-DESCRIPTION.md` |
 | Icônes 200 / 140 / 60 | générées | `RiskCockpit_logo_{200,140,60}.png` |
-| Piste audio de la vidéo | **47,7 s, sans trou** (creux à 81 % de la moyenne) | `market_video/RiskCockpit-track.wav` |
+| Piste audio de la vidéo | **47,7 s, sans trou** (creux à 81 % de la moyenne) | `market/video/RiskCockpit-track.wav` |
 | Script de montage vidéo | écrit, refuse de tourner s'il manque une capture | `tools/build-market-video.py` |
 
 ## 2. Ce qui bloque, et pourquoi
@@ -31,7 +31,7 @@ uniquement par un clic. Sur un compte démo, StrategyDeck démarre **armé**.
 
 ⇒ **Avant la séance de captures, une action de JR : désarmer StrategyDeck** (un clic sur son bouton
 ARMER), ou détacher son graphique. Un clic mal placé devient alors un refus affiché à l'écran au
-lieu d'un ordre envoyé. Après ça, la séance suit `market_screens/SHOTLIST.md` : onze prises,
+lieu d'un ordre envoyé. Après ça, la séance suit `market/screens/SHOTLIST.md` : onze prises,
 langue basculée sur EN au début et remise en FR à la fin.
 
 ### La vidéo YouTube
@@ -52,9 +52,9 @@ le collage du lien dans la fiche restent à JR.
 5. **JR** : téléverser la vidéo sur YouTube en **Non répertoriée**, récupérer le lien.
 6. **JR** : sur mql5.com, produit **180509** → *Modifier* :
    - version → `3.60`
-   - description EN / FR / ES → coller depuis `MARKET-DESCRIPTION.md`
-   - icône → `RiskCockpit_logo_200.png` (et 140 / 60 si le formulaire les demande séparément)
-   - captures → vider les anciennes, verser `market_screens/*.png`
+   - description EN / FR / ES → coller depuis `market/MARKET-DESCRIPTION.md`
+   - icône → `brand/RiskCockpit_logo_200.png` (et 140 / 60 si le formulaire les demande séparément)
+   - captures → vider les anciennes, verser `market/screens/*.png`
    - vidéo → coller le lien YouTube
    - téléverser la **source** `RiskCockpit.mq5` + les `Libraries/*.mqh` + `Services/RCNewsFeeder.mq5`
      (le Market compile lui-même ; l'`.ex5` du dépôt n'est pas ce qui est publié)

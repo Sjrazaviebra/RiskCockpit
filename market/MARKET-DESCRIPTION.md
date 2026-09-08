@@ -261,6 +261,6 @@ hagas con ellas es tu decisión.
 | Version | `3.59` (format `major.minor`) |
 | Catégorie | Indicateurs |
 | Prix | Gratuit (inchangé) |
-| Icône | `RiskCockpit_logo_200.png` / `_140` / `_60` |
-| Captures | `market_screens/` — 12 max, texte en **ANGLAIS**, 720 px min sur un côté, 1920×1080 max, ≤ 2 Mo |
+| Icône | `brand/RiskCockpit_logo_200.png` / `_140` / `_60` |
+| Captures | `market/screens/` — 12 max, texte en **ANGLAIS**, 720 px min sur un côté, 1920×1080 max, ≤ 2 Mo |
 | Vidéo | lien YouTube **non répertoriée**, un lien par langue |

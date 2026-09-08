@@ -4,7 +4,7 @@
 
 > **It is an advisor, not an autotrader.** RiskCockpit never opens, closes, or modifies a trade. Every decision stays in your hands — it only measures, warns, and displays.
 
-<p align="center"><img src="logo.png" alt="RiskCockpit logo" width="180"></p>
+<p align="center"><img src="brand/logo.png" alt="RiskCockpit logo" width="180"></p>
 
 ## Features
 
@@ -79,6 +79,23 @@ The compiled `RiskCockpit.ex5` in `Indicators/` matches the version in
 ## Availability
 
 Published **free** on the MQL5 Market. More at **[javadrazavi.fr](https://javadrazavi.fr)**.
+
+## Repository layout
+
+```
+Indicators/   the source, the compiled .ex5, and the two embedded resources
+              (.ico and the logo .bmp) — MetaEditor needs them side by side
+Libraries/    the shell, the pure math, the challenge catalogue, the canvas kit
+Scripts/      RC_SelfTest — the math self-test, run inside MetaTrader
+Services/     RCNewsFeeder — the calendar fetcher (an indicator cannot do it)
+tools/        the static gate, its self-test, and the Market asset builders
+brand/        the logo, at every size the Market asks for
+market/       the store listing: description, release checklist, screens, video
+```
+
+The build tree inside MetaTrader holds **only** the five files the compiler
+needs. Everything else — documentation, brand assets, listing text — lives
+here. It used to be the other way round, and the two copies drifted.
 
 ## Checks
 
