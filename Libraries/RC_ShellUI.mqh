@@ -1837,7 +1837,7 @@ private:
          case RZ_NAV_MODE:   t = "Mode";         d = "Dark / light.";                                  return true;
          case RZ_NAV_FIT:    t = "Fit";          d = "Re-centre the chart with free room above and below."; return true;
          case RZ_NAV_ROOMC:  t = "Balance";     d = "Account balance. Click : the account.";       return true;
-         case RZ_NAV_LOTC:   t = "P/L day";     d = "Today's profit and loss, floating included. Click : the positions."; return true;
+         case RZ_NAV_LOTC:   t = "P/L day";     d = "Closed today, your local day. The floating P/L is in the positions table."; return true;
          case RZ_NAV_NEWSC:  t = "News";        d = "Minutes to the next rule-bound event.";       return true;
          case RZ_NAV_CLOCK:  t = "Clock";      d = "Broker server time.";                         return true;
          case RZ_NAV_KILL:   t = "Remove";      d = "Removes RiskCockpit from this chart.";              return true;

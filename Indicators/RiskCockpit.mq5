@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.74"
+#property version "3.76"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.74"
+#define RC_VERSION_STR "3.76"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -147,7 +147,7 @@ input group "3 - STRATEGY (your trading plan)"
 #endif
 input int    InpMaxParallelPositions = 5;    // Max parallel positions you plan to open (count)
 input double InpSlPricePct           = 1.0;  // SL distance (% of price ; V1 locked 1.0 = safest)
-input double InpTpPricePct           = 0.1;  // TP distance (% of price ; scalping default)
+input int    InpTpRiskDivisor        = 10;   // TP = the position's risk divided by this (10 = seek a tenth of what you risk)
 input double InpMaxMarginPerTradePct = 25.0; // Max margin per single trade (% ; FN rec 20-30)
 input double InpMaxRiskPerTradePct   = 1.0;  // Max risk per single trade (% ; ceiling = min(cap/N, this))
 input bool   InpEnablePyramidSafe    = false;// Safe pyramiding advisor (decreasing-lot + unified stop)
@@ -624,7 +624,7 @@ void InitEffectiveSettings(void) {
     g_eff_acct_type     = (int)InpAccountType;
     g_eff_phase         = (int)InpPhase;
     g_eff_sl_pct        = InpSlPricePct;
-    g_eff_tp_pct        = InpTpPricePct;
+    g_eff_tp_div        = (double)MathMax(1, InpTpRiskDivisor);
     g_eff_max_margin_pt = InpMaxMarginPerTradePct;
     g_eff_max_risk_pt   = InpMaxRiskPerTradePct;
     g_eff_show_news     = InpShowNews;
@@ -655,7 +655,7 @@ void InitEffectiveSettings(void) {
     if (GVGetLogin("RC_acct_type", gvv)) { g_eff_acct_type = (int)gvv; GVSetLogin("RC_acct_type", gvv); }
     if (GVGetLogin("RC_phase", gvv))     { g_eff_phase     = (int)gvv; GVSetLogin("RC_phase", gvv); }
     if (GlobalVariableCheck("RC_sl_pct"))     g_eff_sl_pct        = GlobalVariableGet("RC_sl_pct");
-    if (GlobalVariableCheck("RC_tp_pct"))     g_eff_tp_pct        = GlobalVariableGet("RC_tp_pct");
+    if (GlobalVariableCheck("RC_tp_div"))     g_eff_tp_div        = GlobalVariableGet("RC_tp_div");
     if (GlobalVariableCheck("RC_mm_pt"))      g_eff_max_margin_pt = GlobalVariableGet("RC_mm_pt");
     if (GlobalVariableCheck("RC_mr_pt"))      g_eff_max_risk_pt   = GlobalVariableGet("RC_mr_pt");
     // RC_show_news was written by the v2 modal, which no longer exists : reading
@@ -866,7 +866,10 @@ double g_eff_size          = 25000.0; // ENUM_FN_ACCT_SIZE value (USD)
 int    g_eff_acct_type     = 0;       // ENUM_FN_ACCOUNT_TYPE
 int    g_eff_phase         = 2;       // ENUM_FN_PHASE (FN_PHASE_FUNDED)
 double g_eff_sl_pct        = 1.0;
-double g_eff_tp_pct        = 0.1;
+// v3.75 : la cible n est plus un pourcentage du PRIX - qui ne dit rien de ce que
+// le trader a mis en jeu - mais une fraction du RISQUE de la position. « TP = SL
+// / 10 » : risquer 100, chercher 10. Reglable, 10 par defaut.
+double g_eff_tp_div        = 10.0;
 double g_eff_max_margin_pt = 25.0;
 double g_eff_max_risk_pt   = 1.0;
 bool   g_eff_show_news     = true;
@@ -2409,7 +2412,7 @@ int ShellStepRows(const int tab, string &lab[], string &val[]) {
     int n = 0;
     if (tab == 0) {          // RISK
         lab[n] = Tr("set_sl");   val[n] = DoubleToString(g_eff_sl_pct, 2) + " %";        n++;
-        lab[n] = Tr("set_tp");   val[n] = DoubleToString(g_eff_tp_pct, 2) + " %";        n++;
+        lab[n] = Tr("set_tp");   val[n] = "SL / " + IntegerToString((int)g_eff_tp_div);   n++;
         lab[n] = Tr("set_maxmargin");val[n] = DoubleToString(g_eff_max_margin_pt, 1) + " %"; n++;
         lab[n] = Tr("set_maxrisk"); val[n] = DoubleToString(g_eff_max_risk_pt, 2) + " %";   n++;
         lab[n] = Tr("set_maxparallel");val[n] = IntegerToString(g_max_parallel);              n++;
@@ -2434,8 +2437,8 @@ void ShellApplyStep(const int tab, const int row, const int dir) {
     if (tab == 0) {
         if (row == 0) { g_eff_sl_pct = MathMax(0.1, MathMin(10.0, MathRound((g_eff_sl_pct + d * 0.1) * 100.0) / 100.0));
                         GlobalVariableSet("RC_sl_pct", g_eff_sl_pct); }
-        else if (row == 1) { g_eff_tp_pct = MathMax(0.1, MathMin(50.0, MathRound((g_eff_tp_pct + d * 0.1) * 100.0) / 100.0));
-                        GlobalVariableSet("RC_tp_pct", g_eff_tp_pct); }
+        else if (row == 1) { g_eff_tp_div = MathMax(1.0, MathMin(100.0, g_eff_tp_div + d));
+                        GlobalVariableSet("RC_tp_div", g_eff_tp_div); }
         else if (row == 2) { g_eff_max_margin_pt = MathMax(1.0, MathMin(100.0, g_eff_max_margin_pt + d));
                         GlobalVariableSet("RC_mm_pt", g_eff_max_margin_pt); }
         else if (row == 3) { g_eff_max_risk_pt = MathMax(0.1, MathMin(10.0, MathRound((g_eff_max_risk_pt + d * 0.1) * 100.0) / 100.0));
@@ -2847,11 +2850,14 @@ void FireDisciplineAlerts(const RCDeckData &d) {
 void ClearTpMarks(void) { ObjectsDeleteAll(0, "RC_TPM_"); }
 void RefreshTpMarks(void) {
     // v3.72 : elles n ont plus de bouton. JR : « les marques sont toujours la et
-    // on n a pas besoin de bouton ». Le seul reglage qui compte est la distance,
-    // et elle vit dans les parametres - 0,1 % du prix par defaut.
+    // on n a pas besoin de bouton ».
+    // v3.75 : et elles suivent la meme regle que les positions - la distance de
+    // stop PREVUE pour un nouveau trade (le « SL % (conseil lot) ») divisee par le
+    // meme nombre. Avec les valeurs par defaut - 1 % du prix, divise par 10 - cela
+    // retombe exactement sur les 0,1 % d avant : une seule regle, deux usages.
     const double px = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    if (px <= 0.0) { ClearTpMarks(); return; }
-    const double d   = px * g_eff_tp_pct / 100.0;
+    if (px <= 0.0 || g_eff_tp_div <= 0.0) { ClearTpMarks(); return; }
+    const double d   = (px * g_eff_sl_pct / 100.0) / g_eff_tp_div;
     const int    per = PeriodSeconds((ENUM_TIMEFRAMES)Period());
     const datetime t1 = TimeCurrent() + (datetime)(2 * per);
     const datetime t2 = TimeCurrent() + (datetime)(9 * per);
@@ -2873,8 +2879,8 @@ void RefreshTpMarks(void) {
         ObjectMove(0, id, 0, t1, pr);
         ObjectMove(0, id, 1, t2, pr);
         ObjectSetString(0, id, OBJPROP_TOOLTIP,
-                        Tr("tpm_tip") + "  " + DoubleToString(g_eff_tp_pct, 2) + "%  " +
-                        DoubleToString(pr, dg));
+                        Tr("tpm_tip") + "  SL/" + IntegerToString((int)g_eff_tp_div) +
+                        "  " + DoubleToString(pr, dg));
     }
 }
 void PersistShowTp(void) { GlobalVariableSet("RC_show_tp", g_show_tp ? 1.0 : 0.0); }
@@ -3259,14 +3265,14 @@ double Live_DailyDdPct(void) {
     return 100.0 * dd / g_profile.initial_balance;
 }
 
-// v3.72 : ma v3.70 passait par « equity - solde de debut de journee ». Developpe,
-// ce detour vaut realise + flottant PLUS LES MOUVEMENTS DE COMPTE : un depot de
-// 500 se lisait comme 500 de benefice du jour. Le chiffre se dit en trois mots -
-// ce que j ai ferme aujourd hui, plus ce que je porte - alors il se calcule en
-// trois mots. Meme borne de journee que le compteur de perte journaliere (heure
-// SERVEUR), et meme contenu que lui : profit + swap + commission.
+// v3.75 : le flottant sort de ce chiffre. JR le lit deja sur le tableau des
+// positions, position par position et en total : l afficher une deuxieme fois en
+// haut n ajoutait rien et melangeait deux natures - ce qui est ACQUIS et ce qui
+// bouge encore. La barre du haut porte donc le P&L FERME de la journee, et la
+// journee est celle de JR : minuit chez lui, pas chez le courtier. Contenu
+// inchange : profit + swap + commission, a l heure de FERMETURE du deal.
 double Live_DayPnl(void) {
-    return CachedRealisedToday() + SumFloatingPnL();
+    return CachedRealisedTodayLocal();
 }
 
 double Live_OverallDdPct(void) {
@@ -3918,7 +3924,9 @@ void SnapshotPositionList(void) {
 //| Lines for positions on other symbols are skipped (a future       |
 //| multi-chart pane will surface them).                             |
 //+------------------------------------------------------------------+
-// TP scalping distance is now exposed as `InpTpPricePct` in the inputs.
+// v3.75 : the target is no longer a share of the PRICE but a fraction of what the
+// position actually risks - `InpTpRiskDivisor` in the inputs, editable in the
+// panel too. Risk 100, seek 10.
 
 void RefreshSlLines(void) {
     // Enumerate every open chart in the terminal and refresh recommendation
@@ -4030,6 +4038,10 @@ void RefreshSlLinesForChart(const long chart_id) {
         // l argent, etait a refaire de tete pour chaque position.
         const string ccy = " " + AccountInfoString(ACCOUNT_CURRENCY);
         const double money_per_price = (tick_value / tick_size) * vol;
+        // v3.75 : la distance de risque REELLE de cette position - celle du stop
+        // pose s il y en a un, sinon celle que le budget autorise. C est elle que
+        // la cible divise : un plafond theorique ne decrit pas ce qui est en jeu.
+        double risk_dist = 0.0;
 
         // --- Recommended SL ---
         const double money_per_tick = tick_value * vol;
@@ -4047,6 +4059,8 @@ void RefreshSlLinesForChart(const long chart_id) {
             const bool sl_locks_profit = has_user_sl &&
                 (type == POSITION_TYPE_BUY ? (existing_sl >= entry) : (existing_sl <= entry));
             const bool user_over_budget = (has_user_sl && !sl_locks_profit && user_dist > proposed_dist);
+            risk_dist = ((has_user_sl && !sl_locks_profit && user_dist > 0.0)
+                         ? user_dist : proposed_dist);
             // v3.72 : la recommandation n etait tracee QUE si la position n avait
             // pas de stop, ou un stop trop large. Or le bouton SL sert a verifier
             // que tout va bien : sans reference affichee il n y a rien a comparer,
@@ -4114,11 +4128,15 @@ void RefreshSlLinesForChart(const long chart_id) {
             // its row amber, computed from the risk itself.
         }
 
-        // --- La cible : X % du PRIX d entree, et ce que ce X % rapporte ---
+        // --- La cible : une fraction du RISQUE de la position ---
+        // v3.75 : c etait X % du PRIX d entree - une distance qui ne dit rien de
+        // ce que le trader a mis en jeu : les memes 0,1 % valent 4,40 EUR sur de
+        // l or a 0,01 lot et 100 EUR sur un indice a 100 000. La cible se mesure
+        // sur le risque : risquer 100, chercher 10.
         // v3.72 : tracee des que la famille est allumee, meme si un TP est deja
         // pose - c est la reference a laquelle le comparer.
-        if (g_show_tp) {
-            const double tp_distance_price = entry * g_eff_tp_pct / 100.0;
+        if (g_show_tp && risk_dist > 0.0 && g_eff_tp_div > 0.0) {
+            const double tp_distance_price = risk_dist / g_eff_tp_div;
             const string tp_money = "  +" +
                 DoubleToString(tp_distance_price * money_per_price, 2) + ccy;
             const double tp_price =
@@ -4133,22 +4151,21 @@ void RefreshSlLinesForChart(const long chart_id) {
             ObjectSetInteger(chart_id, tp_line_id, OBJPROP_BACK, true);
             ObjectSetInteger(chart_id, tp_line_id, OBJPROP_SELECTABLE, false);
             ObjectSetInteger(chart_id, tp_line_id, OBJPROP_HIDDEN, true);
+            const string tp_tag = " SL/" + IntegerToString((int)g_eff_tp_div);
             ObjectSetString(chart_id, tp_line_id, OBJPROP_TOOLTIP,
-                            Tr("tp_rec") + " " + DoubleToString(g_eff_tp_pct, 2) + "%" +
-                                tp_money + "  " + sym + " " + type_str + " " +
-                                DoubleToString(vol, 2) + "  #" + IntegerToString((int)ticket));
-            ObjectSetString(chart_id, tp_line_id, OBJPROP_TEXT,
-                            Tr("tp_rec") + " " + DoubleToString(g_eff_tp_pct, 2) +
-                                "%" + tp_money + " - " + sym + " " + type_str + " #" +
+                            Tr("tp_rec") + tp_tag + tp_money + "  " + sym + " " +
+                                type_str + " " + DoubleToString(vol, 2) + "  #" +
                                 IntegerToString((int)ticket));
+            ObjectSetString(chart_id, tp_line_id, OBJPROP_TEXT,
+                            Tr("tp_rec") + tp_tag + tp_money + " - " + sym + " " +
+                                type_str + " #" + IntegerToString((int)ticket));
 
             const string tp_txt_id = "RC_TP_TXT_" + IntegerToString((int)ticket);
             ObjectCreate(chart_id, tp_txt_id, OBJ_TEXT, 0, anchor_time, tp_price);
             ObjectSetInteger(chart_id, tp_txt_id, OBJPROP_TIME, anchor_time);
             ObjectSetDouble(chart_id, tp_txt_id, OBJPROP_PRICE, tp_price);
             ObjectSetString(chart_id, tp_txt_id, OBJPROP_TEXT,
-                            Tr("tp_rec") + " " + DoubleToString(g_eff_tp_pct, 2) + "%" +
-                                tp_money);
+                            Tr("tp_rec") + tp_tag + tp_money);
             ObjectSetInteger(chart_id, tp_txt_id, OBJPROP_COLOR, tp_clr);
             ObjectSetInteger(chart_id, tp_txt_id, OBJPROP_FONTSIZE, 8);
             ObjectSetString(chart_id, tp_txt_id, OBJPROP_FONT, "Consolas");
@@ -4764,6 +4781,32 @@ double SumFloatingPnL(void) {
 //| cause - panel kept updating but OBJECT_CLICK starved). Floating   |
 //| P&L is NOT cached (SumFloatingPnL is cheap, recomputed live).     |
 //+------------------------------------------------------------------+
+// v3.75 : minuit CHEZ JR, exprime en heure SERVEUR - la seule que l historique
+// des deals comprend. On ne suppose aucun decalage : on compte les secondes
+// ecoulees depuis minuit local et on les retire de l heure serveur courante. Un
+// changement d heure, un serveur qui bouge, un voyage : rien a mettre a jour.
+datetime LocalDayStartServer(void) {
+    MqlDateTime lt;
+    TimeToStruct(TimeLocal(), lt);
+    return TimeCurrent() - (datetime)(lt.hour * 3600 + lt.min * 60 + lt.sec);
+}
+
+// Le P&L REALISE depuis minuit chez JR : ce qui a ete FERME aujourd hui, a son
+// heure. Meme etranglement de 2 s que la version serveur - un balayage complet
+// de l historique a chaque tick de 500 ms a deja gele ce panneau une fois.
+double g_realised_local_cache = 0.0;
+datetime g_realised_local_scan = 0;
+double CachedRealisedTodayLocal(void) {
+    if (g_realised_local_scan == 0 || TimeCurrent() - g_realised_local_scan >= 2) {
+        g_realised_local_cache = SumClosedDealsPnL(LocalDayStartServer(), TimeCurrent());
+        g_realised_local_scan  = TimeCurrent();
+    }
+    return g_realised_local_cache;
+}
+
+// ⛔ Celle-ci reste sur la journee SERVEUR : elle alimente le compteur de PERTE
+// JOURNALIERE, qui est une regle de prop firm et pas un chiffre d agenda. Les
+// deux peuvent differer pendant quelques heures chaque nuit, et c est voulu.
 double CachedRealisedToday(void) {
     if (g_realised_today_scan == 0 || TimeCurrent() - g_realised_today_scan >= 2) {
         MqlDateTime mdt;
@@ -5550,7 +5593,7 @@ void InitI18n(void) {
     AddTr("set_acct_type", "Account type :",       "Type de compte :",       "Tipo de cuenta :");
     AddTr("set_maxparallel", "Max parallel :",        "Trades max :",          "Trades max :");
     AddTr("set_sl",          "SL % (lot advisor) :",  "SL % (conseil lot) :",  "SL % (consejo lote) :");
-    AddTr("set_tp",          "TP distance % :",       "Distance TP % :",       "Distancia TP % :");
+    AddTr("set_tp",          "TP = SL divided by :",  "TP = SL divisé par :",  "TP = SL dividido por :");
     AddTr("set_maxmargin",   "Max margin/trade % :",  "Marge max/trade % :",   "Margen máx/op % :");
     AddTr("set_maxrisk",     "Risk/trade % (SL) :",   "Risque/trade % (SL) :", "Riesgo/op % (SL) :");
     // v1.4 : hover tooltips - explain each key param (unit + what it does).
@@ -6668,15 +6711,15 @@ void InitI18n(void) {
     AddTr("tipq_0",     "Break-even|Draws the basket break-even line. Click again to remove it.",
                         "Point mort|Trace la ligne de point mort du panier. Reclique pour l'enlever.",
                         "Punto de equilibrio|Traza la línea de equilibrio de la cesta. Vuelve a hacer clic para quitarla.");
-    AddTr("tipq_1",     "Targets|Shows each position's target : X% of its entry price, and what that pays.",
-                        "Cibles|Montre la cible de chaque position : X% de son prix d'entrée, et ce que ça rapporte.",
-                        "Objetivos|Muestra el objetivo de cada posición : X% de su precio de entrada, y lo que paga.");
+    AddTr("tipq_1",     "Targets|Each position's target : its risk divided by N, and what that pays.",
+                        "Cibles|La cible de chaque position : son risque divisé par N, et ce que ça rapporte.",
+                        "Objetivos|El objetivo de cada posición : su riesgo dividido por N, y lo que paga.");
     AddTr("tipq_2",     "Stops|Shows the stop your risk budget allows on each position, and what it costs.",
                         "Stops|Montre le stop que votre budget de risque autorise sur chaque position, et ce qu'il coûte.",
                         "Stops|Muestra el stop que su presupuesto de riesgo permite en cada posición, y lo que cuesta.");
-    AddTr("tpm_tip",    "Target if entered here",
-                        "Cible si entrée ici",
-                        "Objetivo si entra aquí");
+    AddTr("tpm_tip",    "Target if entered here (planned stop / N)",
+                        "Cible si entrée ici (stop prévu / N)",
+                        "Objetivo si entra aquí (stop previsto / N)");
     AddTr("tip_cpt",    "Profile|The plan EVERY limit is derived from.",
                         "Profil|Le plan dont TOUTES les limites sont déduites.",
                         "Perfil|El plan del que salen TODOS los límites.");
