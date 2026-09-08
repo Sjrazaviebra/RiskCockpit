@@ -104,6 +104,7 @@ struct RCDeckData {
    // news (cell NEWS)
    bool   newsHasEvt, newsHigh, newsActive, newsFF;
    bool   newsApplies;      // v3.37 : this profile HAS a news rule at all
+   bool   newsSrcDown;      // v3.49 : the calendar could not be read AT ALL
    int    newsMins;
    // discipline (cell DISC)
    bool   discLocked, discTilt, slGuard;
@@ -246,11 +247,17 @@ enum ERCZone {
 // v3.36 : 184 ids for 192 slots is how the v3.07 defect comes back - ids were
 // being silently dropped then, and eight slots of headroom is not headroom.
 #define RCS_L_MAX 256      // MUST stay above the last ERCLabel id
-#define RCS_TIP_MAX 192     // tooltip slots, indexed by zone id - MUST stay above the last ERCZone id
+// v3.51 : 170 zones pour 192 fentes, c est la meme marge fine qui a produit le
+// defaut de la v3.07 et, la veille, la saturation du manuel. 256.
+#define RCS_TIP_MAX 256     // tooltip slots, indexed by zone id - MUST stay above the last ERCZone id
 // v3.44 : the HELP section is the manual. One fold-out per surface and per
 // section, each listing its elements with what they mean.
-#define RCS_HELP_TOPICS 10
+// v3.50 : 10 sujets pour 10 fentes = SATURE. Le prochain serait jete avec un
+// Print que personne ne lit, comme les 95 libelles dans 64 fentes de la v3.07.
+#define RCS_HELP_TOPICS 16
 #define RCS_HELP_ROWS   14
+// autant de fentes de clic qu il peut y avoir de zones dessinees dans UNE image
+#define RCS_Z_MAX       256
 enum ERCLabel {
    RCL_SEC_LIM = 0, RCL_SEC_POS, RCL_SEC_LOT, RCL_SEC_NEWS, RCL_SEC_DISC,
    RCL_SEC_CPT, RCL_SEC_CFG, RCL_SEC_HELP,
@@ -290,7 +297,8 @@ enum ERCLabel {
    RCL_NAV_ROOM, RCL_NAV_LOT, RCL_NAV_NEWS, RCL_NAV_FIT,
    RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
    RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
-   RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE, RCL_HELP_MANUAL
+   RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE, RCL_HELP_MANUAL,
+   RCL_NEWS_SRCDOWN
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -368,7 +376,10 @@ private:
    bool       m_relayout;        // a measurement moved : re-create the surfaces
    int        m_dragOffX, m_dragOffY;
    int        m_sideX, m_sideY, m_sideH;
-   RCZone     m_z[96];
+   // v3.50 : 96 etait le TROISIEME plafond silencieux, et le seul sans
+   // avertissement. 256 est au-dessus du nombre total d ids de zones, donc
+   // aucune image ne peut deborder - et si cela arrivait, ZAdd le DIT.
+   RCZone     m_z[RCS_Z_MAX];
    int        m_zn;
    bool       m_pendKill;        // host consumes : remove the indicator
    int        m_pendCfg;         // host consumes : a config toggle was clicked (RZ_CFG_* id, 0 = none)
@@ -431,7 +442,18 @@ private:
    }
    void ZReset(void) { m_zn = 0; }
    void ZAdd(const int x, const int y, const int w, const int h, const int id) {
-      if(m_zn >= 96) return;
+      if(m_zn >= RCS_Z_MAX) {
+         // SetLabel et SetTip impriment quand ils refusent un id ; celui-ci
+         // rendait la main en silence. Une zone jetee est un controle qui ne
+         // repond plus au clic - sans erreur, sans trace, sans rien.
+         static bool s_zfull = false;
+         if(!s_zfull) {
+            s_zfull = true;
+            Print("RiskCockpit: click-zone table full at ", RCS_Z_MAX,
+                  " - raise RCS_Z_MAX, the controls beyond it do not answer");
+         }
+         return;
+      }
       m_z[m_zn].x = x; m_z[m_zn].y = y; m_z[m_zn].w = w; m_z[m_zn].h = h; m_z[m_zn].id = id; m_zn++;
    }
 
@@ -1063,8 +1085,13 @@ private:
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_NEWS_SRC);
       y += 18;
       m_side.Text(18, y, L(RCL_NEWS_STATE, "State"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
-      string st = L(RCL_INACTIVE, "inactive");
-      color  sc = m_t.dim;
+      // v3.49 : a calendar that could not be READ is not a calendar that says
+      // "nothing". The MT5 source was the only one without a failure state -
+      // the file bridge has had one since v3.26 - so a silent calendar rendered
+      // exactly like a quiet week.
+      string st = (m_d.newsSrcDown ? L(RCL_NEWS_SRCDOWN, "SOURCE UNREADABLE")
+                                   : L(RCL_INACTIVE, "inactive"));
+      color  sc = (m_d.newsSrcDown ? m_t.warn : m_t.dim);
       if(m_d.newsActive)      { st = L(RCL_NEWS_ACT_EL, "ACTIVE - eligible profit ") + DoubleToString(m_d.newsSharePct, 0) + "%"; sc = m_t.red; }
       else if(m_d.newsHasEvt) { st = L(RCL_IN_MIN, "in ") + IntegerToString(m_d.newsMins) + " min"; sc = (m_d.newsHigh ? m_t.red : m_t.warn); }
       m_side.Text(RCS_SIDE_W - 18, y, st, A(sc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);

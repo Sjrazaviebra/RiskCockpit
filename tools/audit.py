@@ -142,6 +142,45 @@ def run(root):
     report("plafond des libelles", len(lids) <= lmax, "%d ids / %d slots" % (len(lids), lmax))
     report("plafond des infobulles", len(zids) <= tmax, "%d zones / %d slots" % (len(zids), tmax))
 
+    # 4b. les DEUX autres plafonds silencieux, jamais mesures jusqu ici.
+    #     Le manuel est SATURE (10 sujets pour 10 fentes) : le prochain serait
+    #     jete avec un Print que personne ne lit. Et ZAdd jette au-dela de 96
+    #     zones sans un mot - c est le defaut de la v3.07, en plus discret.
+    hm = re.search(r"#define RCS_HELP_TOPICS (\d+)", shell)
+    hr = re.search(r"#define RCS_HELP_ROWS\s+(\d+)", shell)
+    # le motif lisait la DECLARATION ; la v3.50 y a mis une constante nommee et
+    # le controle a rendu "introuvable" - honnete, mais pas un verdict.
+    zm = re.search(r"#define RCS_Z_MAX\s+(\d+)", shell)
+    if hm and hr:
+        tmax_h = int(hm.group(1))
+        rmax_h = int(hr.group(1))
+        used_t = len(set(re.findall(r"SetHelpTopic\((\d+),", host)))
+        rows = [(int(a), int(b)) for a, b in re.findall(r"SetHelpRow\((\d+),\s*(\d+),", host)]
+        used_r = max([b for _, b in rows], default=-1) + 1
+        ok_h = (used_t < tmax_h and used_r < rmax_h)
+        report("plafond du manuel", ok_h,
+               "%d/%d sujets, %d/%d lignes%s" % (used_t, tmax_h, used_r, rmax_h,
+                                                 "" if ok_h else "  - SATURE, releve le plafond"))
+    else:
+        report("plafond du manuel", None, "plafonds du manuel introuvables")
+    if zm:
+        zcap = int(zm.group(1))
+        report("plafond des zones cliquables", len(zids) < zcap,
+               "%d zones declarees / %d fentes a l ecran" % (len(zids), zcap))
+    else:
+        report("plafond des zones cliquables", None, "tableau de zones introuvable")
+
+    # 4c. le defaut n1 de la v3.17 : la section AIDE affichait une version que
+    #     le binaire n avait pas, donc un test portait sur le mauvais binaire.
+    #     Rien ne reliait les deux chaines. Maintenant si.
+    vp = re.search(r'#property version "([\d.]+)"', host)
+    vd = re.search(r'#define RC_VERSION_STR "([\d.]+)"', host)
+    if vp and vd:
+        report("version affichee = version compilee", vp.group(1) == vd.group(1),
+               "#property %s / RC_VERSION_STR %s" % (vp.group(1), vd.group(1)))
+    else:
+        report("version affichee = version compilee", None, "une des deux chaines manque")
+
     # comment-free views : a commented-out SetLabel used to count as pushed
     # (the gate's own blind spot, found by tools/gate_selftest.py). The leak
     # scan below deliberately KEEPS comments - a leak in a comment is a leak.
@@ -171,10 +210,21 @@ def run(root):
            "%d cles definies%s" % (len(defined),
                                    "" if not missing else " | introuvables : " + " ".join(sorted(missing))))
 
-    # 7. every AddTr carries three non-empty languages
-    empty = [m.group(1) for m in re.finditer(
-        r'AddTr\("(\w+)",\s*"((?:[^"\\]|\\.)*)",\s*"((?:[^"\\]|\\.)*)",\s*"((?:[^"\\]|\\.)*)"\s*\)', hcode)
-        if not (m.group(2) and m.group(3) and m.group(4))]
+    # 7. every AddTr carries three non-empty languages.
+    #    Le motif n analyse que les entrees a quatre litteraux : celles qu il ne
+    #    sait pas lire n etaient ni comptees ni verifiees, et le controle rendait
+    #    OK en annoncant un nombre qui se lit comme une couverture complete -
+    #    la meme faute que le scan binaire d avant la v3.41. On compare donc les
+    #    entrees ANALYSEES aux entrees PRESENTES.
+    parsed = list(re.finditer(
+        r'AddTr\("(\w+)",\s*"((?:[^"\\]|\\.)*)",\s*"((?:[^"\\]|\\.)*)",\s*"((?:[^"\\]|\\.)*)"\s*\)', hcode))
+    # un APPEL commence par un litteral ; sans le guillemet on compte aussi la
+    # DEFINITION de la fonction, qui n est pas une entree de traduction.
+    total_addtr = len(re.findall(r'\bAddTr\s*\(\s*"', hcode))
+    empty = [m.group(1) for m in parsed
+             if not (m.group(2) and m.group(3) and m.group(4))]
+    if len(parsed) != total_addtr:
+        empty.append("%d entrees NON ANALYSEES sur %d" % (total_addtr - len(parsed), total_addtr))
     report("3 langues par entree", not empty, "%d entrees%s" % (
         len(defined), "" if not empty else " | vides : " + " ".join(empty)))
 
@@ -218,7 +268,9 @@ def run(root):
     # One or TWO backslashes : source code escapes them, markdown and comments
     # do not. The old pattern demanded two and therefore matched nothing.
     # A USER path leaks ; C:\Program Files is standard build documentation.
-    pats = [("chemin local", r"[A-Za-z]:\\{1,2}(?:Users|_Home)"),
+    # un chemin local s ecrit avec des antislashs OU des barres obliques : le
+    # motif n en voyait qu une forme, et le meme chemin passait en clair.
+    pats = [("chemin local", r"[A-Za-z]:[\\/]{1,2}(?:Users|_Home)"),
             ("dossier terminal", r"Terminal\\{1,2}[0-9A-F]{32}"),
             ("token telegram", r"\d{8,10}:[A-Za-z0-9_-]{30,}"),
             ("email perso", r"(?i)[\w.+-]+@(?:gmail|yahoo|hotmail|outlook)\.[a-z]{2,}"),
@@ -236,7 +288,8 @@ def run(root):
         "20260509",    # a YYYYMMDD date, RC_Math + its self-test
         "100000000",   # a round guard value, not an identifier
     }
-    NUM_RX = re.compile(r"(?<![\d.])\d{8,10}(?![\d.])")
+    # 7 a 10 chiffres : un login MT5 de 7 chiffres passait sous le motif 8-10.
+    NUM_RX = re.compile(r"(?<![\d.])\d{7,10}(?![\d.])")
 
     def num_leaks(text, where):
         # an id quoted as a documentation SOURCE is not a leak : the only shape
@@ -245,20 +298,30 @@ def run(root):
         for m in NUM_RX.finditer(text):
             if m.group(0) in NUM_OK:
                 continue
-            if "articles/" in text[max(0, m.start() - 40):m.start()]:
+            # cette exemption etait une regle de PROXIMITE de 40 caracteres :
+            # elle blanchissait un vrai login des qu une URL d article trainait
+            # n importe ou avant lui. Les chiffres doivent SUIVRE "articles/".
+            if text[max(0, m.start() - 9):m.start()] == "articles/":
                 continue
             out.append("%s:login MT5 (%s)" % (where, m.group(0)))
         return out
     leaks = []
     # every text file, not a hand-picked list : the leak that got through was in
     # HISTORY.md - the changelog that described its own removal.
-    scanned = []
+    # Une liste blanche d EXTENSIONS laissait dehors tout fichier qui n en a
+    # pas - LICENSE en tete - pendant que le rapport annoncait un nombre de
+    # fichiers scannes, ce qui se lit comme une couverture complete. On lit
+    # maintenant TOUT ce qui se decode en texte, et on DIT ce qui a ete ecarte.
+    BINAIRE = ('.ex5', '.ex4', '.png', '.ico', '.bmp', '.jpg', '.gif', '.zip', '.wav')
+    scanned, ecartes = [], []
     for base, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d != '.git']
         for f in files:
-            if not f.lower().endswith(('.mq5', '.mqh', '.md', '.txt', '.py', '.json')):
+            rel = os.path.relpath(os.path.join(base, f), root)
+            if f.lower().endswith(BINAIRE):
+                ecartes.append(rel)
                 continue
-            scanned.append(os.path.relpath(os.path.join(base, f), root))
+            scanned.append(rel)
     for rel in scanned:
         txt = read(root, rel)
         if txt is None:
@@ -272,8 +335,8 @@ def run(root):
     # THE SOURCES carry the verdict : they are plain text, every byte is readable,
     # a leak in them cannot hide.
     report("fuite de donnees perso (sources)", not leaks,
-           ("%d fichiers scannes" % len(scanned)) if not leaks
-           else " | ".join(sorted(set(leaks))))
+           ("%d fichiers texte lus, %d binaires ecartes" % (len(scanned), len(ecartes)))
+           if not leaks else " | ".join(sorted(set(leaks))))
 
     # THE BINARY is a separate, weaker check, and it must say so. Its positive
     # control looks for the #property link string - and #property strings sit
@@ -329,9 +392,19 @@ def run(root):
         p = os.path.join(root, rel)
         return os.path.getmtime(p) if os.path.exists(p) else 0
     if ex5 is not None:
-        stale = [r for r in (IND, SHELL) if mtime(r) > mtime(EX5) + 1]
+        # ce controle ne comparait que DEUX des sources compilees : le catalogue
+        # des regles prop, les maths pures et le canevas pouvaient etre plus
+        # recents que le binaire sans que rien ne le dise. Toutes, maintenant.
+        srcs = [IND]
+        libdir = os.path.join(root, 'Libraries')
+        if os.path.isdir(libdir):
+            for f in sorted(os.listdir(libdir)):
+                if f.lower().endswith('.mqh'):
+                    srcs.append(os.path.join('Libraries', f))
+        stale = [r for r in srcs if mtime(r) > mtime(EX5) + 1]
         report("binaire a jour", not stale,
-               "" if not stale else "plus recents que le .ex5 : " + " ".join(stale))
+               ("%d sources comparees" % len(srcs)) if not stale
+               else "plus recents que le .ex5 : " + " ".join(stale))
 
 
 if __name__ == "__main__":

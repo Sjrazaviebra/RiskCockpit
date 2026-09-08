@@ -86,6 +86,110 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.50.62 / v3.51.63 — le GATE : six trous, deux plafonds silencieux, et un verdict plus large que la mesure
+
+Deuxieme lot de la 3e revue. Cette fois la cible est **mon propre instrument**.
+
+**Six trous dans `audit.py`, tous verifies par lecture avant correction :**
+
+1. **L'exemption `articles/` etait une regle de PROXIMITE de 40 caracteres.** Elle
+   blanchissait un vrai numero de compte des qu'une URL d'article FundedNext
+   trainait n'importe ou dans les 40 caracteres precedents. Les chiffres doivent
+   desormais SUIVRE `articles/` immediatement.
+2. **Le scan de fuite etait une liste blanche d'EXTENSIONS.** Tout fichier sans
+   extension — `LICENSE` en tete — n'etait jamais lu, pendant que le rapport
+   annoncait « 12 fichiers scannes », ce qui se lit comme une couverture
+   complete. Il lit maintenant **tout ce qui se decode en texte** (14 fichiers)
+   et **DIT** combien de binaires il a ecartes.
+3. **« binaire a jour » ne comparait que DEUX des six sources compilees.** Le
+   catalogue des regles prop, les maths pures et le canevas pouvaient etre plus
+   recents que le `.ex5` sans un mot. **Six sources comparees.**
+4. **Le motif « login MT5 » ne voyait que 8 a 10 chiffres** : un login de 7
+   chiffres passait. Et **« chemin local » exigeait des antislashs** : le meme
+   chemin ecrit avec des barres obliques passait en clair.
+5. 🔴 **Deux plafonds silencieux sur quatre n'etaient pas mesures.**
+   `RCS_HELP_TOPICS` etait **SATURE a 10/10** : le prochain sujet d'aide aurait
+   ete jete avec un `Print` que personne ne lit — le defaut de la v3.07, en plus
+   discret. Et **`ZAdd` jetait SANS UN MOT** au-dela de 96 zones, seul des trois
+   plafonds a ne pas avertir : une zone jetee est **un controle qui ne repond
+   plus au clic**, sans erreur et sans trace. Manuel a 16, zones a **256** — au
+   dessus du nombre total d'ids, donc aucune image ne peut plus deborder — et
+   `ZAdd` le dit s'il devait quand meme refuser. Infobulles a 256 aussi : 170/192
+   etait la meme marge fine.
+6. 🔴 **AUCUN controle ne reliait `RC_VERSION_STR` a `#property version`.** C'est
+   le defaut n°1 de la v3.17 : la section AIDE affichait une version que le
+   binaire n'avait pas, donc un test portait sur un binaire qu'on croyait etre
+   l'autre. Il est desormais impossible de les separer sans que le gate le dise.
+
+**Et le self-test rendait un verdict sur 17 controles en n'en exercant que 9.**
+Un controle qu'on n'a jamais fait echouer expres est une decoration. Le harnais
+ne pouvait muter que le `.mq5` ; chaque cas porte maintenant **son** fichier
+cible. **15 injections, 15 detectees**, et le harnais **imprime ce qu'il ne
+couvre pas, avec la raison** — un self-test qui tait sa couverture ment de la
+meme facon qu'un controle qui ne peut pas echouer.
+
+⭐ **Le harnais renforce a trouve un trou de plus, tout seul** : le controle
+« 3 langues par entree » ne verifiait que les entrees que son motif savait lire,
+et se taisait sur les autres — **un verdict plus large que la mesure**, la meme
+faute que le scan binaire d'avant la v3.41. Il compare desormais les entrees
+ANALYSEES aux entrees PRESENTES. ⚠️ Et il a immediatement signale un faux
+positif — la **definition** de `AddTr` comptee comme un appel — corrige dans la
+foulee : c'est exactement ce qu'un controle neuf doit produire une fois, puis
+plus jamais.
+
+**Gate : 17 controles, 0 en echec. Self-test : 15/15, plus 2 non-couvertures
+declarees.**
+
+### v3.49.61 — premier lot de la 3e revue (180 agents, 73 constats confirmes)
+
+Troisieme revue adversariale, demandee par JR : **14 dimensions** (securite,
+surete du risque, regles FN, entrees non fiables, beaute, ergonomie, qualite du
+code, robustesse MQL5, i18n, coherence des surfaces, etat et persistance, le gate
+lui-meme, doc contre code, alertes), **au plus 6 constats chacune**, chacun
+attaque par **deux angles independants** — un qui reproduit le chemin
+d'execution ligne par ligne, un qui cherche a le refuter.
+**180 agents, 22,3 M tokens, 83 constats bruts, 73 confirmes a l'unanimite.**
+⚠️ Chaque constat est **reverifie a la main ici** avant d'etre touche : un
+rapport d'agent est une donnee, pas un ordre.
+
+🔴 **CRITIQUE — le drapeau « 2e strike RISQUE » par login etait ECRASE par la
+variable globale lue juste apres.** Les deux drapeaux jumeaux n'etaient pas lus
+dans le meme ordre : la marge lisait global PUIS par-login (le par-login gagne,
+c'est correct) ; le risque lisait par-login PUIS global — **le global gagnait**,
+et la lecture par login etait morte. Consequence : un trader qui decoche la case
+sur un compte propre **efface la restriction de TOUS ses autres comptes**.
+`EffectiveRiskCap()` rend alors 3 % au lieu de 1 %, et ce plafond alimente le
+compteur LIMITES, le statut de chaque position, les lignes SL du graphique et
+surtout **le budget du CONSEILLER DE LOT** : trois fois trop de risque conseille
+sur un compte deja sous restriction, ou la prochaine violation est terminale.
+Et le global n'etait pas la graine gelee que son propre commentaire decrit :
+`PersistViolationFlags` le reecrivait a chaque clic, donc **le dernier compte
+touche dictait la valeur de tous les autres** via le repli legacy. Les deux
+lignes globales sont supprimees (`GVGetLogin` retombe deja sur la cle non
+suffixee, aucune migration perdue) et la persistance n'ecrit plus que le par-login.
+
+🔴 **Une bascule d'AFFICHAGE eteignait une REGLE.** `g_eff_news_high` est offerte
+dans l'onglet AFFICHAGE comme un filtre — « quels niveaux d'impact tu veux voir
+comptes » — et elle gardait les **quatre chemins de la REGLE** :
+`Live_InNewsWindow`, `Live_NextNewsEvt`, `FFInNewsWindow`, `FFNextEvt`. La
+decocher n'enlevait pas des marqueurs : elle **eteignait la regle des 40 %**, et
+le panneau annoncait « aucune news » pendant un NFP. Un reglage d'affichage ne
+doit JAMAIS pouvoir desactiver une regle. Elle ne filtre plus que ce qui est
+DESSINE.
+
+🔴 **Le chiffre que la firme NOTE ne pilotait rien.** La v3.35 a mis le risque
+VERROUILLE a l'ecran — le risque au stop pose A L'OUVERTURE, celui que
+FundedNext score — et l'a laisse **hors de l'agregat** : ni le score, ni la jauge
+du rail, ni le verdict, ni l'alarme ne le voyaient. Le panneau pouvait afficher
+3,1 % de risque verrouille **en restant vert**. Il entre dans l'agregat, avec le
+seuil de la regle de risque.
+
+**Un calendrier MUET etait rendu comme « aucune news ».** `CalendarValueHistory`
+qui echoue faisait rendre `false` a la fenetre et `0` au prochain evenement : le
+panneau affichait « Rien dans les 24 h » avec la meme serenite que s'il avait
+verifie. La source MT5 etait **la seule sans detection de panne** — le pont
+ForexFactory en a une depuis la v3.26. Elle dit maintenant « SOURCE ILLISIBLE ».
+
 ### v3.47.59 / v3.48.60 — deux chemins morts retires, et la news qui se contredisait
 
 **v3.47 — du code mort dans un depot PUBLIC.**

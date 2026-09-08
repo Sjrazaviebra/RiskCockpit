@@ -17,6 +17,8 @@ import io, os, re, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IND = os.path.join("Indicators", "RiskCockpit.mq5")
+SHELL = os.path.join("Libraries", "RC_ShellUI.mqh")
+MATH = os.path.join("Libraries", "RC_Math.mqh")
 
 
 def mut_bom(b):    return b'\xef\xbb\xbf' + b                      # double BOM
@@ -42,6 +44,48 @@ def mut_ver(b):    return re.sub(rb'#property version "[\d.]+"',
                                  b'#property version "9.99"', b, count=1)  # source ahead of the binary
 
 
+def mut_lmax(b):
+    # 187 ids de libelles : un plafond de 32 en jetterait la plupart, chacun
+    # avec un Print - et le libelle non pousse retomberait sur son defaut FR.
+    return b.replace(b'#define RCS_L_MAX 256', b'#define RCS_L_MAX 32', 1)
+
+
+def mut_tipmax(b):
+    return b.replace(b'#define RCS_TIP_MAX 256', b'#define RCS_TIP_MAX 32', 1)
+
+
+def mut_lang(b):
+    # une entree i18n a deux langues au lieu de trois : l espagnol disparait
+    # sans bruit et l utilisateur ES lit de l anglais.
+    return b.replace(b'AddTr("shl_navroom", "ROOM", "MARGE", "MARGEN");',
+                     b'AddTr("shl_navroom", "ROOM", "MARGE", "");', 1)
+
+
+def mut_helpcap(b):
+    # le manuel a 10 sujets : un plafond de 4 les jetterait, avec un Print que
+    # personne ne lit. C est le defaut de la v3.07, en plus discret.
+    return b.replace(b'#define RCS_HELP_TOPICS 16', b'#define RCS_HELP_TOPICS 4', 1)
+
+
+def mut_zcap(b):
+    # ZAdd jette au-dela du plafond : une zone jetee est un controle qui ne
+    # repond plus au clic, sans erreur et sans trace.
+    return b.replace(b'#define RCS_Z_MAX       256', b'#define RCS_Z_MAX       32', 1)
+
+
+def mut_verstr(b):
+    # le defaut n1 de la v3.17 : la version AFFICHEE et la version COMPILEE se
+    # separent, et un test porte alors sur un binaire qu on croit etre l autre.
+    return re.sub(rb'#define RC_VERSION_STR "[\d.]+"',
+                  b'#define RC_VERSION_STR "0.01"', b, count=1)
+
+
+def mut_touchlib(b):
+    # une source incluse plus recente que le .ex5 : le binaire livre ne contient
+    # pas ce qu on vient d ecrire. Un commentaire suffit - c est la DATE qui compte.
+    return b + b'\r\n// gate_selftest : source plus recente que le binaire\r\n'
+
+
 def mut_snapshot(b):
     # Drop ONE field from the cached snapshot's write-back. The field still
     # exists, the code still compiles, and its value is simply wrong on every
@@ -50,26 +94,46 @@ def mut_snapshot(b):
     return b.replace(b's_newsCache.newsWinMin = d.newsWinMin;', b'', 1)
 
 
+# (libelle attendu, fichier a muter, mutation)
 CASES = [
-    ("BOM unique", mut_bom),
-    ("reglages actifs", mut_input),
-    ("fuite de donnees perso", mut_leak),
-    ("libelles traduits", mut_label),
-    ("cles i18n resolues", mut_key),
-    ("accolades equilibrees", mut_brace),
-    ("version du binaire", mut_ver),
-    ("fuite de donnees perso", mut_path),   # the pattern that had rotted
-    ("instantane news complet", mut_snapshot),
+    ("BOM unique", IND, mut_bom),
+    ("reglages actifs", IND, mut_input),
+    ("fuite de donnees perso", IND, mut_leak),
+    ("libelles traduits", IND, mut_label),
+    ("cles i18n resolues", IND, mut_key),
+    ("accolades equilibrees", IND, mut_brace),
+    ("version du binaire", IND, mut_ver),
+    ("fuite de donnees perso", IND, mut_path),   # the pattern that had rotted
+    ("instantane news complet", IND, mut_snapshot),
+    ("plafond du manuel", SHELL, mut_helpcap),
+    ("plafond des zones cliquables", SHELL, mut_zcap),
+    ("version affichee = version compilee", IND, mut_verstr),
+    ("binaire a jour", MATH, mut_touchlib),
+    ("plafond des libelles", SHELL, mut_lmax),
+    ("plafond des infobulles", SHELL, mut_tipmax),
+    ("3 langues par entree", IND, mut_lang),
 ]
+
+# Ce que le harnais NE couvre pas, et pourquoi. Un self-test qui tait sa
+# couverture ment de la meme facon qu un controle qui ne peut pas echouer.
+NON_COUVERTS = {
+    "zones cliquables gerees":
+        "toute zone dessinee est deja traitee ; injecter un id orphelin demanderait "
+        "d en inventer un, ce qui testerait l injection et pas le controle",
+    "fuite dans le binaire (en-tete seul)":
+        "il faudrait recompiler avec une fuite dans une chaine du corps - or le "
+        "corps est compresse, donc le controle ne pourrait pas la voir : c est "
+        "exactement ce que son libelle annonce",
+}
 
 
 def main():
     allgood = True
-    for label, mutate in CASES:
+    for label, target, mutate in CASES:
         tmp = tempfile.mkdtemp(prefix="rcgate_")
         dst = os.path.join(tmp, "repo")
         shutil.copytree(ROOT, dst, ignore=shutil.ignore_patterns('.git'))
-        p = os.path.join(dst, IND)
+        p = os.path.join(dst, target)
         before = io.open(p, 'rb').read()
         after = mutate(before)
         if after == before:
@@ -86,6 +150,10 @@ def main():
                                     (hit[0][:76] if hit else "(ligne absente)")))
         allgood &= caught
         shutil.rmtree(tmp, ignore_errors=True)
+    couverts = sorted(set(c[0] for c in CASES))
+    print("\ncontroles exerces : %d" % len(couverts))
+    for k, why in sorted(NON_COUVERTS.items()):
+        print("  NON COUVERT  %-38s %s" % (k, why))
     print("\nle gate attrape chaque defaut injecte :", allgood)
     return 0 if allgood else 1
 
