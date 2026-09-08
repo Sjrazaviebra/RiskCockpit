@@ -9,3 +9,7 @@ desktop.ini
 # à porter dix mégaoctets qu'une commande rejoue.
 market/video/*.wav
 market/video/*.mp4
+
+# Cache de Python : produit par tools/, jamais lu par personne d autre.
+__pycache__/
+*.pyc
