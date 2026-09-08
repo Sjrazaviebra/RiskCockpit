@@ -86,6 +86,41 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.44.56 -> v3.46.58 — la section AIDE devient le MANUEL
+
+JR : « dans la partie aide ajoute pour chaque menu et partie un onglet
+coulissant que tu ouvres et fermes, et ajoute tous les elements avec une
+description, pour aider les gens a utiliser l'app. Et aussi ajoute un guide
+d'utilisation. »
+
+**Dix volets depliables** : un **GUIDE D'UTILISATION** en huit etapes d'abord,
+puis un volet par surface (barre du haut, rail, tableau flottant) et un par
+section (limites, lot, news, discipline, compte, reglages) — **78 elements**,
+chacun avec ce qu'il veut dire, en **EN / FR / ES**.
+
+Les volets sont **EXCLUSIFS** : en ouvrir un referme les autres. Un manuel
+capable de deplier dix sujets a la fois deborderait n'importe quel graphique, et
+la seule chose que ce panneau ne doit plus jamais faire, c'est perdre son bas
+sans le dire.
+
+Le catalogue est pousse par l'**HOTE**, une fois, depuis `ShellPushLabels` :
+meme contrat que les libelles et les infobulles, donc **une seule table de
+traduction** sert tout le produit et un changement de langue repousse tout.
+Chaque ligne est empaquetee `libelle|description`, la convention que `SetTip`
+utilise deja.
+
+**v3.45 — les vrais accents.** Le catalogue v3.44 avait ete ecrit **sans
+accents** pour contourner des ennuis d'echappement dans mon outillage de patch —
+c'est mon probleme, pas celui du lecteur. Un manuel qui dit « Regler ton plan /
+cote / apres » a l'air inacheve. Bloc entier regenere : memes cles, meme ordre,
+anglais inchange, **francais et espagnol accentues** (regle JR du 04/09).
+
+**v3.46 — le manuel ne commence plus une ligne par deux-points.** Le francais
+met une espace AVANT `:` `;` `!` `?`, donc un algorithme qui coupe sur n'importe
+quelle espace ouvre volontiers une ligne par un `:` — vu a l'ecran (« quelque
+chose cloche » / « : marge libre sous le minimum »). Le point de coupe refuse
+desormais une espace suivie d'une ponctuation qui ne peut pas ouvrir une ligne.
+
 ### v3.42.54 / v3.43.55 — le GLITCH news : un champ ajoute a l'instantane et a aucune des deux copies
 
 JR : « il y a un probleme de chargement sur la partie news et ca glitche entre FF

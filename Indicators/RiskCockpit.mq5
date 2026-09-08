@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.43"
+#property version "3.46"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.43"
+#define RC_VERSION_STR "3.46"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -1872,6 +1872,100 @@ void BuildDeckData(RCDeckData &d) {
 // v3 SHELL : push the product's i18n into the shell's label slots. The shell
 // ships FR defaults ; whatever we set here wins, so ONE translation table
 // (AddTr) serves the legacy panel AND the shell.
+// v3.44 : THE MANUAL. Pushed once, like the labels and the tooltips, so one
+// translation table serves the whole product and a language change re-pushes
+// everything. Each row is packed "label|description", the convention the
+// tooltips already use.
+void ShellPushHelp(void) {
+    g_shell.SetHelpTopic(0, Tr("h_t0"));
+    g_shell.SetHelpRow(0, 0, Tr("h0_0"));
+    g_shell.SetHelpRow(0, 1, Tr("h0_1"));
+    g_shell.SetHelpRow(0, 2, Tr("h0_2"));
+    g_shell.SetHelpRow(0, 3, Tr("h0_3"));
+    g_shell.SetHelpRow(0, 4, Tr("h0_4"));
+    g_shell.SetHelpRow(0, 5, Tr("h0_5"));
+    g_shell.SetHelpRow(0, 6, Tr("h0_6"));
+    g_shell.SetHelpRow(0, 7, Tr("h0_7"));
+    g_shell.SetHelpTopic(1, Tr("h_t1"));
+    g_shell.SetHelpRow(1, 0, Tr("h1_0"));
+    g_shell.SetHelpRow(1, 1, Tr("h1_1"));
+    g_shell.SetHelpRow(1, 2, Tr("h1_2"));
+    g_shell.SetHelpRow(1, 3, Tr("h1_3"));
+    g_shell.SetHelpRow(1, 4, Tr("h1_4"));
+    g_shell.SetHelpRow(1, 5, Tr("h1_5"));
+    g_shell.SetHelpRow(1, 6, Tr("h1_6"));
+    g_shell.SetHelpRow(1, 7, Tr("h1_7"));
+    g_shell.SetHelpRow(1, 8, Tr("h1_8"));
+    g_shell.SetHelpRow(1, 9, Tr("h1_9"));
+    g_shell.SetHelpRow(1, 10, Tr("h1_10"));
+    g_shell.SetHelpTopic(2, Tr("h_t2"));
+    g_shell.SetHelpRow(2, 0, Tr("h2_0"));
+    g_shell.SetHelpRow(2, 1, Tr("h2_1"));
+    g_shell.SetHelpRow(2, 2, Tr("h2_2"));
+    g_shell.SetHelpRow(2, 3, Tr("h2_3"));
+    g_shell.SetHelpRow(2, 4, Tr("h2_4"));
+    g_shell.SetHelpRow(2, 5, Tr("h2_5"));
+    g_shell.SetHelpRow(2, 6, Tr("h2_6"));
+    g_shell.SetHelpRow(2, 7, Tr("h2_7"));
+    g_shell.SetHelpRow(2, 8, Tr("h2_8"));
+    g_shell.SetHelpTopic(3, Tr("h_t3"));
+    g_shell.SetHelpRow(3, 0, Tr("h3_0"));
+    g_shell.SetHelpRow(3, 1, Tr("h3_1"));
+    g_shell.SetHelpRow(3, 2, Tr("h3_2"));
+    g_shell.SetHelpRow(3, 3, Tr("h3_3"));
+    g_shell.SetHelpRow(3, 4, Tr("h3_4"));
+    g_shell.SetHelpRow(3, 5, Tr("h3_5"));
+    g_shell.SetHelpTopic(4, Tr("h_t4"));
+    g_shell.SetHelpRow(4, 0, Tr("h4_0"));
+    g_shell.SetHelpRow(4, 1, Tr("h4_1"));
+    g_shell.SetHelpRow(4, 2, Tr("h4_2"));
+    g_shell.SetHelpRow(4, 3, Tr("h4_3"));
+    g_shell.SetHelpRow(4, 4, Tr("h4_4"));
+    g_shell.SetHelpRow(4, 5, Tr("h4_5"));
+    g_shell.SetHelpRow(4, 6, Tr("h4_6"));
+    g_shell.SetHelpRow(4, 7, Tr("h4_7"));
+    g_shell.SetHelpTopic(5, Tr("h_t5"));
+    g_shell.SetHelpRow(5, 0, Tr("h5_0"));
+    g_shell.SetHelpRow(5, 1, Tr("h5_1"));
+    g_shell.SetHelpRow(5, 2, Tr("h5_2"));
+    g_shell.SetHelpRow(5, 3, Tr("h5_3"));
+    g_shell.SetHelpRow(5, 4, Tr("h5_4"));
+    g_shell.SetHelpRow(5, 5, Tr("h5_5"));
+    g_shell.SetHelpRow(5, 6, Tr("h5_6"));
+    g_shell.SetHelpTopic(6, Tr("h_t6"));
+    g_shell.SetHelpRow(6, 0, Tr("h6_0"));
+    g_shell.SetHelpRow(6, 1, Tr("h6_1"));
+    g_shell.SetHelpRow(6, 2, Tr("h6_2"));
+    g_shell.SetHelpRow(6, 3, Tr("h6_3"));
+    g_shell.SetHelpRow(6, 4, Tr("h6_4"));
+    g_shell.SetHelpRow(6, 5, Tr("h6_5"));
+    g_shell.SetHelpTopic(7, Tr("h_t7"));
+    g_shell.SetHelpRow(7, 0, Tr("h7_0"));
+    g_shell.SetHelpRow(7, 1, Tr("h7_1"));
+    g_shell.SetHelpRow(7, 2, Tr("h7_2"));
+    g_shell.SetHelpRow(7, 3, Tr("h7_3"));
+    g_shell.SetHelpRow(7, 4, Tr("h7_4"));
+    g_shell.SetHelpRow(7, 5, Tr("h7_5"));
+    g_shell.SetHelpRow(7, 6, Tr("h7_6"));
+    g_shell.SetHelpTopic(8, Tr("h_t8"));
+    g_shell.SetHelpRow(8, 0, Tr("h8_0"));
+    g_shell.SetHelpRow(8, 1, Tr("h8_1"));
+    g_shell.SetHelpRow(8, 2, Tr("h8_2"));
+    g_shell.SetHelpRow(8, 3, Tr("h8_3"));
+    g_shell.SetHelpRow(8, 4, Tr("h8_4"));
+    g_shell.SetHelpRow(8, 5, Tr("h8_5"));
+    g_shell.SetHelpRow(8, 6, Tr("h8_6"));
+    g_shell.SetHelpTopic(9, Tr("h_t9"));
+    g_shell.SetHelpRow(9, 0, Tr("h9_0"));
+    g_shell.SetHelpRow(9, 1, Tr("h9_1"));
+    g_shell.SetHelpRow(9, 2, Tr("h9_2"));
+    g_shell.SetHelpRow(9, 3, Tr("h9_3"));
+    g_shell.SetHelpRow(9, 4, Tr("h9_4"));
+    g_shell.SetHelpRow(9, 5, Tr("h9_5"));
+    g_shell.SetHelpRow(9, 6, Tr("h9_6"));
+    g_shell.SetHelpRow(9, 7, Tr("h9_7"));
+    g_shell.SetHelpRow(9, 8, Tr("h9_8"));
+}
 void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_SEC_LIM,   Tr("shl_lim"));
     g_shell.SetLabel(RCL_SEC_POS,   Tr("shl_pos"));
@@ -1929,6 +2023,8 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_LOT_MARGSHORT, Tr("shl_lotmargshort"));
     g_shell.SetLabel(RCL_LOT_REDUCE,    Tr("shl_lotreduce"));
     g_shell.SetLabel(RCL_NEWS_NORULE,   Tr("shl_newsnorule"));
+    g_shell.SetLabel(RCL_HELP_MANUAL,   Tr("shl_manual"));
+    ShellPushHelp();                    // v3.44 : the manual follows the language
     g_shell.SetLabel(RCL_SEC_CPTST,  Tr("shl_cptstate"));
     g_shell.SetLabel(RCL_CPT_FIRM,   Tr("shl_cptfirm"));
     g_shell.SetLabel(RCL_CPT_SERVER, Tr("shl_cptserver"));
@@ -5147,6 +5243,10 @@ void InitI18n(void) {
         "Pause après pertes",
         "Pausa tras pérdidas");
     AddTr("shl_losses", "losses", "pertes", "pérdidas");
+    AddTr("shl_manual",
+        "USER GUIDE",
+        "GUIDE D'UTILISATION",
+        "GUIA DE USO");
     AddTr("shl_newsnorule",
         "No news rule on this profile.",
         "Aucune règle news sur ce profil.",
@@ -5179,6 +5279,358 @@ void InitI18n(void) {
         "LOCKED - this control is disabled until the lock ends",
         "VERROUILLÉ - ce contrôle est désactivé jusqu'à la fin du verrou",
         "BLOQUEADO - este control está desactivado hasta el fin del bloqueo");
+    AddTr("h_t0",
+        "USER GUIDE",
+        "GUIDE D'UTILISATION",
+        "GUÍA DE USO");
+    AddTr("h_t1",
+        "TOP BAR",
+        "BARRE DU HAUT",
+        "BARRA SUPERIOR");
+    AddTr("h_t2",
+        "RAIL (right edge)",
+        "RAIL (bord droit)",
+        "RAIL (borde derecho)");
+    AddTr("h_t3",
+        "FLOATING TABLE",
+        "TABLEAU FLOTTANT",
+        "TABLA FLOTANTE");
+    AddTr("h_t4",
+        "LIMITS",
+        "LIMITES",
+        "LÍMITES");
+    AddTr("h_t5",
+        "SUGGESTED LOT",
+        "LOT CONSEILLÉ",
+        "LOTE SUGERIDO");
+    AddTr("h_t6",
+        "NEWS WINDOW",
+        "FENÊTRE NEWS",
+        "VENTANA DE NOTICIAS");
+    AddTr("h_t7",
+        "DISCIPLINE",
+        "DISCIPLINE",
+        "DISCIPLINA");
+    AddTr("h_t8",
+        "ACCOUNT",
+        "COMPTE",
+        "CUENTA");
+    AddTr("h_t9",
+        "SETTINGS",
+        "RÉGLAGES",
+        "AJUSTES");
+    AddTr("h0_0",
+        "1. Attach|RiskCockpit watches the chart it is attached to. It never opens, changes or closes a trade : it measures, warns and displays.",
+        "1. Attacher|RiskCockpit surveille le graphique sur lequel il est attaché. Il n'ouvre, ne modifie et ne ferme AUCUN trade : il mesure, alerte et affiche.",
+        "1. Adjuntar|RiskCockpit vigila el gráfico al que está adjunto. Nunca abre, modifica ni cierra una operación : mide, avisa y muestra.");
+    AddTr("h0_1",
+        "2. Set your plan|Open ACCOUNT and set broker, plan, phase and size. Every limit in the tool is resolved from that : get it right before anything else.",
+        "2. Régler ton plan|Ouvre COMPTE et règle courtier, plan, phase et taille. Toutes les limites de l'outil en découlent : c'est la première chose à faire.",
+        "2. Configura tu plan|Abre CUENTA y ajusta bróker, plan, fase y tamaño. Todos los límites salen de ahí : hazlo antes que nada.");
+    AddTr("h0_2",
+        "3. Read the top bar|Before any click : room to the nearest limit, advised lot, next news. If ROOM is red or LOT shows --, do not take the trade.",
+        "3. Lire la barre du haut|Avant tout clic : marge jusqu'à la limite la plus proche, lot conseillé, prochaine news. Si MARGE est rouge ou LOT affiche --, ne prends pas le trade.",
+        "3. Lee la barra superior|Antes de cualquier clic : margen hasta el límite más cercano, lote sugerido, próxima noticia. Si MARGEN está en rojo o LOTE muestra --, no entres.");
+    AddTr("h0_3",
+        "4. Size the trade|Open LOT and copy the number from the box next to it (select, Ctrl+C), then paste it into your order ticket. The panel never places the order.",
+        "4. Dimensionner le trade|Ouvre LOT et copie le nombre dans la boîte à côté (sélection, Ctrl+C), puis colle-le dans ton ticket d'ordre. Le panneau ne passe jamais l'ordre.",
+        "4. Dimensiona la operación|Abre LOTE y copia el número de la casilla contigua (selecciona, Ctrl+C), luego pégalo en tu ticket. El panel nunca envía la orden.");
+    AddTr("h0_4",
+        "5. Place your stop|FundedNext gives THREE MINUTES. A position without a stop counts its FULL balance as risk : the row turns amber while the grace lasts, red after.",
+        "5. Poser ton stop|FundedNext donne TROIS MINUTES. Une position sans stop compte la balance ENTIÈRE comme risque : la ligne est ambre tant que le sursis dure, rouge après.",
+        "5. Pon tu stop|FundedNext da TRES MINUTOS. Una posición sin stop cuenta el saldo COMPLETO como riesgo : la fila está en ámbar mientras dura el plazo, en rojo después.");
+    AddTr("h0_5",
+        "6. Watch the limits|LIMITS shows each rule against ITS OWN warning threshold, not a single flat one. Amber means slow down, red means the rule is reached.",
+        "6. Surveiller les limites|LIMITES montre chaque règle face à SON PROPRE seuil d'alerte, pas un seuil unique. Ambre = ralentis, rouge = la règle est atteinte.",
+        "6. Vigila los límites|LÍMITES muestra cada regla frente a SU PROPIO umbral, no uno único. Ámbar = frena, rojo = la regla se alcanzó.");
+    AddTr("h0_6",
+        "7. Protect yourself|DISCIPLINE can lock you out : your own self-lock, a hard lock at 80% of the daily cap, or a cooldown after losses in a row.",
+        "7. Te protéger|DISCIPLINE peut te verrouiller : ton auto-verrou, un verrou dur à 80% du plafond journalier, ou une pause après des pertes d'affilée.",
+        "7. Protégete|DISCIPLINA puede bloquearte : tu auto-bloqueo, un bloqueo duro al 80% del tope diario, o una pausa tras pérdidas seguidas.");
+    AddTr("h0_7",
+        "8. Keep the news fresh|Install the RCNewsFeeder service : an indicator cannot fetch the web, so the service writes the calendar to a file the panel reads. Without it, the MT5 calendar takes over.",
+        "8. Garder les news à jour|Installe le service RCNewsFeeder : un indicateur ne peut pas aller sur le web, donc le service écrit le calendrier dans un fichier que le panneau lit. Sans lui, le calendrier MT5 prend le relais.",
+        "8. Mantén las noticias al día|Instala el servicio RCNewsFeeder : un indicador no puede acceder a la web, así que el servicio escribe el calendario en un archivo que el panel lee. Sin él, toma el relevo el calendario MT5.");
+    AddTr("h1_0",
+        "RC|Opens the FULL panel, every section stacked as fold-outs.",
+        "RC|Ouvre le panneau COMPLET, toutes les sections empilées en volets dépliables.",
+        "RC|Abre el panel COMPLETO, todas las secciones apiladas y plegables.");
+    AddTr("h1_1",
+        "Symbol|The chart symbol. Click it to switch symbol from Market Watch.",
+        "Symbole|Le symbole du graphique. Clique pour en changer depuis l'observation du marché.",
+        "Símbolo|El símbolo del gráfico. Haz clic para cambiarlo desde la lista.");
+    AddTr("h1_2",
+        "Timeframe|The chart timeframe. Click it to switch.",
+        "Unité de temps|L'unité de temps du graphique. Clique pour en changer.",
+        "Temporalidad|La temporalidad del gráfico. Haz clic para cambiarla.");
+    AddTr("h1_3",
+        "SAFE / WATCH / BREACH|Account health : the worst rule measured against ITS OWN threshold, plus a 0-100 score.",
+        "SAIN / PRUDENCE / DANGER|Santé du compte : la pire règle face à SON PROPRE seuil, plus un score de 0 à 100.",
+        "SANO / ATENCIÓN / RIESGO|Salud de la cuenta : la peor regla frente a SU umbral, más una puntuación de 0 a 100.");
+    AddTr("h1_4",
+        "ROOM|Money left before the NEAREST ACTIVE limit. N/A when no limit applies to this profile.",
+        "MARGE|Argent restant avant la limite ACTIVE la plus proche. N/A quand aucune limite ne s'applique.",
+        "MARGEN|Dinero que queda antes del límite ACTIVO más cercano. N/A si ninguno aplica.");
+    AddTr("h1_5",
+        "LOT|The advised lot. Amber = capped by the survival margin, red = no room left.",
+        "LOT|Le lot conseillé. Ambre = plafonné par la marge de survie, rouge = plus de marge.",
+        "LOTE|El lote sugerido. Ámbar = limitado por el margen de supervivencia, rojo = sin margen.");
+    AddTr("h1_6",
+        "NEWS|Minutes to the next binding event. -- when there is none.",
+        "NEWS|Minutes avant le prochain événement soumis à la règle. -- s'il n'y en a pas.",
+        "NEWS|Minutos hasta el próximo evento sujeto a la regla. -- si no hay.");
+    AddTr("h1_7",
+        "Equity / pos|Your equity and how many positions are open.",
+        "Équité / pos|Ton équité et le nombre de positions ouvertes.",
+        "Patrimonio / pos|Tu patrimonio y cuántas posiciones hay abiertas.");
+    AddTr("h1_8",
+        "Palette and D / L|The colour theme, and dark or light.",
+        "Palette et D / L|Le thème de couleurs, et sombre ou clair.",
+        "Paleta y D / L|El tema de color, y oscuro o claro.");
+    AddTr("h1_9",
+        "CADR (FIT)|Re-centres the chart with free room above and below the candles, and turns that padding ON.",
+        "CADR|Recadre le graphique avec de l'air en haut et en bas des bougies, et ACTIVE ce cadrage.",
+        "AJUS|Reencuadra el gráfico con aire arriba y abajo de las velas, y ACTIVA ese encuadre.");
+    AddTr("h1_10",
+        "Cross|Removes RiskCockpit from THIS chart only.",
+        "Croix|Retire RiskCockpit de CE graphique uniquement.",
+        "Cruz|Quita RiskCockpit solo de ESTE gráfico.");
+    AddTr("h2_0",
+        "Chevron|Stacks every section into the full panel, and back.",
+        "Chevron|Empile toutes les sections dans le panneau complet, et revient.",
+        "Chevron|Apila todas las secciones en el panel completo, y vuelve.");
+    AddTr("h2_1",
+        "LIM|Vertical gauge of the worst limit. The tick marks the threshold that ACTUALLY applies to it.",
+        "LIM|Jauge verticale de la pire limite. Le repère marque le seuil qui s'applique VRAIMENT.",
+        "LIM|Indicador vertical del peor límite. La marca señala el umbral que REALMENTE aplica.");
+    AddTr("h2_2",
+        "POS|Open positions and the worst row status. Clicking it also brings the floating table back.",
+        "POS|Positions ouvertes et le pire statut de ligne. Le clic ramène aussi le tableau flottant.",
+        "POS|Posiciones abiertas y el peor estado de fila. El clic también devuelve la tabla flotante.");
+    AddTr("h2_3",
+        "LOT|The advised lot at a glance.",
+        "LOT|Le lot conseillé d'un coup d'oeil.",
+        "LOTE|El lote sugerido de un vistazo.");
+    AddTr("h2_4",
+        "NEWS|Next event, with FF or MT for the source. A dash means no news rule on this profile.",
+        "NEWS|Prochain événement, avec FF ou MT pour la source. Un tiret = aucune règle news sur ce profil.",
+        "NEWS|Próximo evento, con FF o MT como fuente. Un guion = sin regla de noticias en este perfil.");
+    AddTr("h2_5",
+        "DISC|Trades today and the discipline state.",
+        "DISC|Trades du jour et l'état de la discipline.",
+        "DISC|Operaciones de hoy y el estado de la disciplina.");
+    AddTr("h2_6",
+        "CPT|Plan tag and account size.",
+        "CPT|Étiquette du plan et taille du compte.",
+        "CPT|Etiqueta del plan y tamaño de la cuenta.");
+    AddTr("h2_7",
+        "CFG|Settings : risk, discipline, advanced, display.",
+        "CFG|Réglages : risque, discipline, avancé, affichage.",
+        "CFG|Ajustes : riesgo, disciplina, avanzado, pantalla.");
+    AddTr("h2_8",
+        "?|This manual.",
+        "?|Ce manuel.",
+        "?|Este manual.");
+    AddTr("h3_0",
+        "Header|Position count and total P&L. Drag the table BY ITS HEADER : the chart does not pan underneath.",
+        "En-tête|Nombre de positions et P&L total. Déplace le tableau PAR SON EN-TÊTE : le graphique ne défile pas dessous.",
+        "Cabecera|Número de posiciones y P&L total. Arrastra la tabla POR SU CABECERA : el gráfico no se desplaza debajo.");
+    AddTr("h3_1",
+        "Quick strip|The same three numbers as the top bar. Click one and its section opens.",
+        "Bandeau rapide|Les trois mêmes nombres que la barre du haut. Un clic ouvre la section correspondante.",
+        "Banda rápida|Los mismos tres números que la barra superior. Un clic abre su sección.");
+    AddTr("h3_2",
+        "A row|Symbol, side, volume, age and P&L. Click it to take the chart to that symbol.",
+        "Une ligne|Symbole, sens, volume, âge et P&L. Le clic amène le graphique sur ce symbole.",
+        "Una fila|Símbolo, sentido, volumen, edad y P&L. El clic lleva el gráfico a ese símbolo.");
+    AddTr("h3_3",
+        "NO SL|No stop on this position. The countdown is the three minutes FundedNext allows.",
+        "SANS SL|Pas de stop sur cette position. Le décompte est le sursis de trois minutes de FundedNext.",
+        "SIN SL|Sin stop en esta posición. La cuenta atrás es el plazo de tres minutos de FundedNext.");
+    AddTr("h3_4",
+        "Hide cross|Hides the table. The POS rail cell brings it back.",
+        "Croix|Masque le tableau. La cellule POS du rail le ramène.",
+        "Cruz|Oculta la tabla. La celda POS del rail la devuelve.");
+    AddTr("h3_5",
+        "Closing a position|Disabled ON PURPOSE : this is a monitoring tool. The EA build is what closes trades.",
+        "Fermer une position|Désactivé VOLONTAIREMENT : c'est un outil de suivi. C'est la version EA qui ferme.",
+        "Cerrar una posición|Desactivado A PROPÓSITO : es una herramienta de seguimiento. La versión EA es la que cierra.");
+    AddTr("h4_0",
+        "Cumulative margin|Margin used by your open positions, against the cap of the plan.",
+        "Marge cumulée|Marge utilisée par tes positions ouvertes, face au plafond du plan.",
+        "Margen acumulado|Margen usado por tus posiciones abiertas, frente al tope del plan.");
+    AddTr("h4_1",
+        "Cumulative open risk|What you would lose at your CURRENT stops.",
+        "Risque ouvert cumulé|Ce que tu perdrais à tes stops ACTUELS.",
+        "Riesgo abierto acumulado|Lo que perderías en tus stops ACTUALES.");
+    AddTr("h4_2",
+        "Locked risk (scored)|What the FIRM scores : the risk at the stop posed AT OPENING. Trailing a stop does not lower it.",
+        "Risque verrouillé (noté)|Ce que la FIRME note : le risque au stop posé À L'OUVERTURE. Suivre le stop ne le baisse pas.",
+        "Riesgo bloqueado (puntuado)|Lo que la FIRMA puntúa : el riesgo al stop puesto AL ABRIR. Mover el stop no lo baja.");
+    AddTr("h4_3",
+        "Daily DD|Today's loss from the start-of-day balance. Deposits and withdrawals are excluded : they are not losses.",
+        "DD journalier|La perte du jour depuis le solde de début de journée. Dépôts et retraits exclus : ce ne sont pas des pertes.",
+        "DD diario|La pérdida del día desde el saldo de apertura. Depósitos y retiros excluidos : no son pérdidas.");
+    AddTr("h4_4",
+        "Overall DD|Total drawdown. On an Instant profile the floor TRAILS the peak and never goes back down.",
+        "DD total|Le drawdown total. Sur un profil Instant, le plancher SUIT le pic et ne redescend jamais.",
+        "DD total|El drawdown total. En un perfil Instant, el suelo SIGUE al pico y nunca baja.");
+    AddTr("h4_5",
+        "Quick Strike|The share of your profit made in very short trades - a rule the firm scores.",
+        "Quick Strike|La part de ton profit faite en trades très courts - une règle notée par la firme.",
+        "Quick Strike|La parte de tu beneficio hecha en operaciones muy cortas - una regla que la firma puntúa.");
+    AddTr("h4_6",
+        "Survival room|Money before the nearest limit, and the 80% of it a SINGLE trade may risk. The last 20% is what lets you survive a bad one.",
+        "Marge de survie|L'argent avant la limite la plus proche, et les 80% qu'UN SEUL trade peut risquer. Les 20% restants sont ce qui te fait survivre.",
+        "Margen de supervivencia|El dinero antes del límite más cercano, y el 80% que UNA sola operación puede arriesgar. El 20% restante es lo que te deja sobrevivir.");
+    AddTr("h4_7",
+        "Floor|The equity level at which the account is LOST. Below it, it is over.",
+        "Plancher|Le niveau d'équité auquel le compte est PERDU. En dessous, c'est fini.",
+        "Suelo|El nivel de patrimonio en el que la cuenta está PERDIDA. Por debajo, se acabó.");
+    AddTr("h5_0",
+        "The big number|The lot to type into your ticket. The box beside it is selectable text : click it, Ctrl+A, Ctrl+C.",
+        "Le grand nombre|Le lot à taper dans ton ticket. La boîte à côté est du texte sélectionnable : clique, Ctrl+A, Ctrl+C.",
+        "El número grande|El lote que debes escribir en tu ticket. La casilla al lado es texto seleccionable : clic, Ctrl+A, Ctrl+C.");
+    AddTr("h5_1",
+        "Trade budget|The money this ONE trade is allowed to lose : the risk cap divided by your planned number of trades.",
+        "Budget du trade|L'argent que CE trade a le droit de perdre : le plafond de risque divisé par le nombre de trades prévus.",
+        "Presupuesto de la operación|El dinero que ESTA operación puede perder : el tope de riesgo dividido por el número de operaciones previstas.");
+    AddTr("h5_2",
+        "Planned trades (N)|How many trades you intend to run at once. Change it in SETTINGS : it makes the advised lot wider or tighter.",
+        "Trades prévus (N)|Combien de trades tu comptes mener en parallèle. Se règle dans RÉGLAGES : ça élargit ou resserre le lot conseillé.",
+        "Operaciones previstas (N)|Cuántas operaciones piensas llevar a la vez. Se ajusta en AJUSTES : ensancha o aprieta el lote sugerido.");
+    AddTr("h5_3",
+        "Free margin|Free margin as a share of the balance.",
+        "Marge libre|La marge libre en part de la balance.",
+        "Margen libre|El margen libre como parte del saldo.");
+    AddTr("h5_4",
+        "Max allowed lot|The biggest lot the caps still allow, and WHICH cap binds : margin, room, or the broker's free margin.",
+        "Lot max autorisé|Le plus gros lot que les plafonds autorisent encore, et QUEL plafond bloque : marge, marge restante, ou marge libre du courtier.",
+        "Lote máximo permitido|El mayor lote que los topes aún permiten, y QUÉ tope manda : margen, margen restante, o margen libre del bróker.");
+    AddTr("h5_5",
+        "Warnings|A line appears when something is wrong : free margin below the broker minimum, or a tradable lot risking MORE than its budget.",
+        "Avertissements|Une ligne apparaît quand quelque chose cloche : marge libre sous le minimum du courtier, ou lot réel risquant PLUS que son budget.",
+        "Avisos|Aparece una línea cuando algo falla : margen libre bajo el mínimo del bróker, o lote real arriesgando MÁS que su presupuesto.");
+    AddTr("h5_6",
+        "Spread and commission|What this symbol costs you just to enter.",
+        "Spread et commission|Ce que ce symbole te coûte rien que pour entrer.",
+        "Spread y comisión|Lo que este símbolo te cuesta solo por entrar.");
+    AddTr("h6_0",
+        "Source|ForexFactory when the companion service is running, the MT5 calendar otherwise. They do not classify events the same way.",
+        "Source|ForexFactory quand le service compagnon tourne, le calendrier MT5 sinon. Ils ne classent pas les événements pareil.",
+        "Fuente|ForexFactory cuando el servicio compañero funciona, el calendario MT5 si no. No clasifican los eventos igual.");
+    AddTr("h6_1",
+        "State|Whether you are INSIDE a news window right now, and which share of the profit would count.",
+        "État|Si tu es DANS une fenêtre news en ce moment, et quelle part du profit compterait.",
+        "Estado|Si estás DENTRO de una ventana de noticias ahora, y qué parte del beneficio contaría.");
+    AddTr("h6_2",
+        "Window|How many minutes before and after the event the rule applies.",
+        "Fenêtre|Combien de minutes avant et après l'événement la règle s'applique.",
+        "Ventana|Cuántos minutos antes y después del evento aplica la regla.");
+    AddTr("h6_3",
+        "News trades|How many trades you took inside a window, their P&L, and what is eligible.",
+        "Trades news|Combien de trades tu as pris dans une fenêtre, leur P&L, et ce qui est éligible.",
+        "Operaciones en noticias|Cuántas operaciones tomaste en una ventana, su P&L, y qué es elegible.");
+    AddTr("h6_4",
+        "UPCOMING|The next binding events over 24 h, with the rule each one carries.",
+        "À VENIR|Les prochains événements soumis à la règle sur 24 h, avec la règle portée par chacun.",
+        "PRÓXIMOS|Los próximos eventos sujetos a la regla en 24 h, con la regla de cada uno.");
+    AddTr("h6_5",
+        "No rule|A profile without a news rule says so, instead of inventing one for the reader.",
+        "Aucune règle|Un profil sans règle news le dit, au lieu d'en inventer une pour le lecteur.",
+        "Sin regla|Un perfil sin regla de noticias lo dice, en vez de inventar una.");
+    AddTr("h7_0",
+        "State|ALL CLEAR, TILT, SL GUARD, or LOCK ACTIVE.",
+        "État|RAS, TILT, GARDE SL, ou VERROU ACTIF.",
+        "Estado|TODO BIEN, TILT, GUARDIA SL, o BLOQUEO ACTIVO.");
+    AddTr("h7_1",
+        "Self-lock (Ulysses)|YOUR pact : two clicks to arm it for the hours you chose, two clicks to release it. A pact you cannot leave is a trap, not discipline.",
+        "Auto-verrou (Ulysse)|TON pacte : deux clics pour l'armer pour les heures choisies, deux clics pour le relâcher. Un pacte dont on ne peut pas sortir est un piège, pas de la discipline.",
+        "Auto-bloqueo (Ulises)|TU pacto : dos clics para armarlo por las horas elegidas, dos para soltarlo. Un pacto del que no puedes salir es una trampa, no disciplina.");
+    AddTr("h7_2",
+        "Daily lock|Automatic at 80% of the daily cap. NOT releasable : it is a rule, not a pact. It ends with the day.",
+        "Verrou journalier|Automatique à 80% du plafond journalier. PAS relâchable : c'est une règle, pas un pacte. Il finit avec la journée.",
+        "Bloqueo diario|Automático al 80% del tope diario. NO se puede soltar : es una regla, no un pacto. Termina con el día.");
+    AddTr("h7_3",
+        "Cooldown after losses|After N losing trades in a row, for M minutes. Both numbers are yours, in SETTINGS.",
+        "Pause après pertes|Après N trades perdants d'affilée, pendant M minutes. Les deux nombres sont les tiens, dans RÉGLAGES.",
+        "Pausa tras pérdidas|Tras N operaciones perdedoras seguidas, durante M minutos. Ambos números son tuyos, en AJUSTES.");
+    AddTr("h7_4",
+        "Tilt|Too many entries inside your window, OR a new position bigger than your last closed loss - revenge sizing.",
+        "Tilt|Trop d'entrées dans ta fenêtre, OU une nouvelle position plus grosse que ta dernière perte fermée - le sizing de revanche.",
+        "Tilt|Demasiadas entradas en tu ventana, O una posición nueva mayor que tu última pérdida cerrada - sizing de revancha.");
+    AddTr("h7_5",
+        "While a lock holds|The controls that would END it or LOOSEN a limit are disabled - including the button that removes the tool from the chart.",
+        "Pendant un verrou|Les contrôles qui METTRAIENT FIN au verrou ou DESSERRERAIENT une limite sont désactivés - y compris le bouton qui retire l'outil du graphique.",
+        "Mientras un bloqueo aguanta|Los controles que lo TERMINARÍAN o AFLOJARÍAN un límite están desactivados - incluido el botón que quita la herramienta del gráfico.");
+    AddTr("h7_6",
+        "Today's activity|Trades today against the hyperactivity cap, and the tilt window.",
+        "Activité du jour|Les trades du jour face au plafond d'hyperactivité, et la fenêtre de tilt.",
+        "Actividad del día|Las operaciones de hoy frente al tope de hiperactividad, y la ventana de tilt.");
+    AddTr("h8_0",
+        "Profile|Broker, plan, phase, size and account type. EVERY limit in the tool is resolved from this cascade.",
+        "Profil|Courtier, plan, phase, taille et type de compte. TOUTES les limites de l'outil découlent de cette cascade.",
+        "Perfil|Bróker, plan, fase, tamaño y tipo de cuenta. TODOS los límites salen de esta cascada.");
+    AddTr("h8_1",
+        "Split|Your share of the profit under this plan.",
+        "Split|Ta part du profit sur ce plan.",
+        "Split|Tu parte del beneficio en este plan.");
+    AddTr("h8_2",
+        "Account|The MT5 login this panel is reading. Settings are saved per login.",
+        "Compte|Le numéro MT5 que ce panneau lit. Les réglages sont enregistrés par compte.",
+        "Cuenta|El login MT5 que este panel lee. Los ajustes se guardan por cuenta.");
+    AddTr("h8_3",
+        "TERMINAL|What the terminal itself says : broker, server, leverage, balance, equity, margin used and free.",
+        "TERMINAL|Ce que dit le terminal lui-même : courtier, serveur, levier, solde, équité, marge utilisée et libre.",
+        "TERMINAL|Lo que dice el propio terminal : bróker, servidor, apalancamiento, saldo, patrimonio, margen usado y libre.");
+    AddTr("h8_4",
+        "Target|The profit target - or, on a trailing profile, the threshold that makes you eligible for a payout.",
+        "Objectif|L'objectif de profit - ou, sur un profil trailing, le seuil qui rend éligible à un retrait.",
+        "Objetivo|El objetivo de beneficio - o, en un perfil trailing, el umbral que da derecho a un pago.");
+    AddTr("h8_5",
+        "Add-ons|Only the add-ons this plan actually allows are listed. One you cannot buy is noise.",
+        "Options|Seules les options que ce plan autorise vraiment sont listées. Une option qu'on ne peut pas acheter est du bruit.",
+        "Complementos|Solo se listan los que este plan permite. Uno que no puedes comprar es ruido.");
+    AddTr("h8_6",
+        "Cycle start|The date every payout counter hangs on. Set it to the day your cycle began.",
+        "Début de cycle|La date à laquelle tous les compteurs de retrait sont accrochés. Mets le jour où ton cycle a commencé.",
+        "Inicio de ciclo|La fecha de la que cuelgan todos los contadores de pago. Pon el día en que empezó tu ciclo.");
+    AddTr("h9_0",
+        "RISK tab|Stop distance, take profit, max margin and risk per trade, planned trades, and the split.",
+        "Onglet RISQUE|Distance de stop, take profit, marge et risque max par trade, trades prévus, et le split.",
+        "Pestaña RIESGO|Distancia de stop, take profit, margen y riesgo máximo por operación, operaciones previstas, y el split.");
+    AddTr("h9_1",
+        "DISCIPLINE tab|Tilt count and window, cooldown count and minutes, self-lock duration.",
+        "Onglet DISCIPLINE|Nombre et fenêtre de tilt, nombre et minutes de pause, durée de l'auto-verrou.",
+        "Pestaña DISCIPLINA|Número y ventana de tilt, número y minutos de pausa, duración del auto-bloqueo.");
+    AddTr("h9_2",
+        "ADVANCED tab|Comfort padding, refresh period, and the tightened caps that apply after a violation.",
+        "Onglet AVANCÉ|Cadrage confort, période de rafraîchissement, et les plafonds resserrés après une violation.",
+        "Pestaña AVANZADO|Encuadre cómodo, periodo de refresco, y los topes apretados tras una violación.");
+    AddTr("h9_3",
+        "DISPLAY tab|Theme, mode, language - and every toggle below them.",
+        "Onglet AFFICHAGE|Thème, mode, langue - et toutes les bascules en dessous.",
+        "Pestaña PANTALLA|Tema, modo, idioma - y todos los interruptores debajo.");
+    AddTr("h9_4",
+        "News HIGH / MEDIUM|Which impact levels you want counted.",
+        "News HIGH / MEDIUM|Les niveaux d'impact que tu veux voir comptés.",
+        "News HIGH / MEDIUM|Qué niveles de impacto quieres que cuenten.");
+    AddTr("h9_5",
+        "Sound|A sound on every status change. Always on for a prop plan.",
+        "Son|Un son à chaque changement de statut. Toujours actif sur un plan prop.",
+        "Sonido|Un sonido en cada cambio de estado. Siempre activo en un plan prop.");
+    AddTr("h9_6",
+        "Telegram|Locked : MQL5 forbids an INDICATOR from sending anything to the web. The EA build is what sends.",
+        "Telegram|Verrouillé : MQL5 interdit à un INDICATEUR d'envoyer quoi que ce soit sur le web. C'est la version EA qui envoie.",
+        "Telegram|Bloqueado : MQL5 prohíbe a un INDICADOR enviar nada a la web. La versión EA es la que envía.");
+    AddTr("h9_7",
+        "Comfort scale|Keeps free room above and below the candles. The CADR button on the top bar does it now.",
+        "Échelle confort|Garde de l'air au-dessus et en dessous des bougies. Le bouton CADR de la barre du haut le fait tout de suite.",
+        "Escala cómoda|Mantiene aire arriba y abajo de las velas. El botón AJUS de la barra superior lo hace al momento.");
+    AddTr("h9_8",
+        "Risk toolkit|Always ON for a prop plan. A personal account may switch it off.",
+        "Outils de risque|Toujours ACTIFS sur un plan prop. Un compte perso peut les couper.",
+        "Herramientas de riesgo|Siempre ACTIVAS en un plan prop. Una cuenta personal puede apagarlas.");
     AddTr("shl_navroom", "ROOM", "MARGE", "MARGEN");
     AddTr("shl_navlot",  "LOT",  "LOT",   "LOTE");
     AddTr("shl_navnews", "NEWS", "NEWS",  "NEWS");

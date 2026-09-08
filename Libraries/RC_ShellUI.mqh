@@ -236,7 +236,10 @@ enum ERCZone {
    RZ_MAXLOT_EDIT,
    // --- v3.27 : the full panel is an ACCORDION - one clickable header per
    // section, contiguous so the index is the offset.
-   RZ_SECH0, RZ_SECH1, RZ_SECH2, RZ_SECH3, RZ_SECH4, RZ_SECH5, RZ_SECH6, RZ_SECH7
+   RZ_SECH0, RZ_SECH1, RZ_SECH2, RZ_SECH3, RZ_SECH4, RZ_SECH5, RZ_SECH6, RZ_SECH7,
+   // v3.44 : the manual's fold-outs, contiguous so the index is the offset
+   RZ_HELP0, RZ_HELP1, RZ_HELP2, RZ_HELP3, RZ_HELP4,
+   RZ_HELP5, RZ_HELP6, RZ_HELP7, RZ_HELP8, RZ_HELP9
 };
 //--- label slots : the shell ships FR defaults ; the host overrides them with
 //--- its own i18n (Tr) so one translation table serves the whole product.
@@ -244,6 +247,10 @@ enum ERCZone {
 // being silently dropped then, and eight slots of headroom is not headroom.
 #define RCS_L_MAX 256      // MUST stay above the last ERCLabel id
 #define RCS_TIP_MAX 192     // tooltip slots, indexed by zone id - MUST stay above the last ERCZone id
+// v3.44 : the HELP section is the manual. One fold-out per surface and per
+// section, each listing its elements with what they mean.
+#define RCS_HELP_TOPICS 10
+#define RCS_HELP_ROWS   14
 enum ERCLabel {
    RCL_SEC_LIM = 0, RCL_SEC_POS, RCL_SEC_LOT, RCL_SEC_NEWS, RCL_SEC_DISC,
    RCL_SEC_CPT, RCL_SEC_CFG, RCL_SEC_HELP,
@@ -283,7 +290,7 @@ enum ERCLabel {
    RCL_NAV_ROOM, RCL_NAV_LOT, RCL_NAV_NEWS, RCL_NAV_FIT,
    RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
    RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
-   RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE
+   RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE, RCL_HELP_MANUAL
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -352,6 +359,12 @@ private:
    int        m_secH[9];        // 0..7 = one section ; 8 = the FULL stack
    bool       m_secOpen[8];     // v3.27 : accordion state of the FULL panel
    string     m_accTitle;       // v3.28 : title just drawn by the accordion
+   // v3.44 : the manual. Pushed by the host like the labels and the tooltips.
+   string     m_hTitle[RCS_HELP_TOPICS];
+   string     m_hKey[RCS_HELP_TOPICS][RCS_HELP_ROWS];
+   string     m_hDesc[RCS_HELP_TOPICS][RCS_HELP_ROWS];
+   int        m_hRows[RCS_HELP_TOPICS];
+   int        m_hOpen;          // ONE topic at a time : -1 = all folded
    bool       m_relayout;        // a measurement moved : re-create the surfaces
    int        m_dragOffX, m_dragOffY;
    int        m_sideX, m_sideY, m_sideH;
@@ -758,6 +771,37 @@ private:
          case RZ_RAIL_HELP: return L(RCL_SEC_HELP, "LEGEND");
       }
       return "";
+   }
+   //--- v3.44 : wrap a description over as many lines as it needs. The panel is
+   //--- 340 px wide and a manual line is a sentence, not a label : cutting it at
+   //--- one line would hide exactly the part that explains.
+   int WrapText(const string s, const int x, int y, const int cpl, const color c) {
+      string rest = s;
+      int guard = 0;
+      while(StringLen(rest) > 0 && guard++ < 12) {
+         string cut = rest;
+         if(StringLen(cut) > cpl) {
+            int sp = -1;
+            const int rl = StringLen(rest);
+            for(int k = cpl; k > cpl / 2; k--) {
+               if(StringGetCharacter(rest, k) != ' ') continue;
+               // v3.46 : French puts a space BEFORE ':' ';' '!' '?', so breaking
+               // on any space starts a line with one. Refuse those candidates.
+               if(k + 1 < rl) {
+                  const ushort nx = StringGetCharacter(rest, k + 1);
+                  if(nx == ':' || nx == ';' || nx == '!' || nx == '?' ||
+                     nx == '%' || nx == ',' || nx == '.') continue;
+               }
+               sp = k; break;
+            }
+            if(sp < 0) sp = cpl;
+            cut  = StringSubstr(rest, 0, sp);
+            rest = StringSubstr(rest, sp + 1);
+         } else rest = "";
+         m_side.Text(x, y, cut, A(c), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+         y += 13;
+      }
+      return y;
    }
    void SecHead(const string s, int &y) {
       // v3.28 : in the accordion the header already carries the section name ;
@@ -1411,6 +1455,37 @@ private:
       y += 14;
       m_side.Text(18, y, L(RCL_HELP_SURVB, "the room : 20% are kept to survive."), A(m_t.text), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
       y += 22;
+      // v3.44 : THE MANUAL. One fold-out per surface and per section, each
+      // listing its elements with what they mean. EXCLUSIVE : opening one closes
+      // the others - ten open topics would overflow any chart, and losing the
+      // bottom of a panel without saying so is the one thing this must not do.
+      y += 6;
+      SecHead(L(RCL_HELP_MANUAL, "USER GUIDE"), y);
+      for(int ht = 0; ht < RCS_HELP_TOPICS; ht++) {
+         if(StringLen(m_hTitle[ht]) == 0) continue;
+         const bool hop = (m_hOpen == ht);
+         m_side.CapsuleStroke(18, y - 2, RCS_SIDE_W - 36, 19,
+                              Mix(m_t.surface, m_t.dim, 0.30),
+                              Mix(m_t.surface, m_t.accent, hop ? 0.12 : 0.04));
+         m_side.Text(27, y + 1, ShortToString((ushort)(hop ? 0x25BE : 0x25B8)),
+                     A(m_t.accent), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
+         m_side.Text(42, y + 1, m_hTitle[ht], A(hop ? m_t.accent : m_t.text),
+                     RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
+         ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 19, RZ_HELP0 + ht);
+         y += 23;
+         if(!hop) continue;
+         for(int hr = 0; hr < m_hRows[ht]; hr++) {
+            if(StringLen(m_hKey[ht][hr]) > 0) {
+               m_side.Text(26, y, m_hKey[ht][hr], A(m_t.accent2),
+                           RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
+               y += 13;
+            }
+            y = WrapText(m_hDesc[ht][hr], 26, y, 46, m_t.text);
+            y += 5;
+         }
+         y += 4;
+      }
+      y += 6;
       SecHead(L(RCL_HELP_ABOUT, "ABOUT"), y);
       y = KV(y, L(RCL_VERSION, "Version"), m_d.version, m_t.dim, RZ_TIP_HELP);
       y = KV(y, L(RCL_NEWS_SOURCE, "Source"), (m_d.newsFF ? "ForexFactory" : "MT5"), m_t.dim);
@@ -1952,6 +2027,8 @@ public:
       // the host overwrites this with the per-login mask it persisted.
       for(int so = 0; so < 8; so++) m_secOpen[so] = (so < 3);
       m_accTitle = "";
+      m_hOpen = -1;
+      for(int ht = 0; ht < RCS_HELP_TOPICS; ht++) { m_hTitle[ht] = ""; m_hRows[ht] = 0; }
       m_relayout = false;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
@@ -2031,6 +2108,29 @@ public:
       if(id >= 0 && id < RCS_L_MAX) { m_L[id] = s; return; }
       Print("RiskCockpit: label id ", id, " >= RCS_L_MAX (", RCS_L_MAX,
             ") - raise it, this string can never be translated");
+   }
+   //--- v3.44 : the manual, pushed by the host. Same contract as the labels :
+   //--- one translation table for the whole product, re-pushed on a language
+   //--- change. A row is packed "label|description", like a tooltip.
+   void SetHelpTopic(const int t, const string title) {
+      if(t < 0 || t >= RCS_HELP_TOPICS) {
+         Print("RiskCockpit: help topic ", t, " >= RCS_HELP_TOPICS (", RCS_HELP_TOPICS,
+               ") - raise it, this topic can never be shown");
+         return;
+      }
+      m_hTitle[t] = title;
+   }
+   void SetHelpRow(const int t, const int r, const string packed) {
+      if(t < 0 || t >= RCS_HELP_TOPICS || r < 0 || r >= RCS_HELP_ROWS) {
+         Print("RiskCockpit: help row ", t, "/", r, " out of ", RCS_HELP_TOPICS,
+               "x", RCS_HELP_ROWS, " - raise it, this line can never be shown");
+         return;
+      }
+      const int bar = StringFind(packed, "|");
+      if(bar <= 0) { m_hKey[t][r] = ""; m_hDesc[t][r] = packed; }
+      else { m_hKey[t][r] = StringSubstr(packed, 0, bar);
+             m_hDesc[t][r] = StringSubstr(packed, bar + 1); }
+      if(r + 1 > m_hRows[t]) m_hRows[t] = r + 1;
    }
    //--- translated tooltip for a zone id ("title|description" packed by the host)
    void SetTip(const int zid, const string packed) {
@@ -2274,6 +2374,15 @@ public:
       // close the panel under the user's finger (RZ_TIP_TARGET and RZ_TIP_MSGS
       // did exactly that in v3.01.12, caught by the zone audit).
       if(hit >= RZ_TIP_CPT && hit <= RZ_TIP_NEWSTR) return true;
+      if(hit >= RZ_HELP0 && hit <= RZ_HELP9) {   // manual : one topic at a time
+         const int ht2 = hit - RZ_HELP0;
+         m_hOpen = (m_hOpen == ht2 ? -1 : ht2);
+         const int hidx = SecIdx(RZ_RAIL_HELP);
+         if(hidx >= 0) m_secH[hidx] = 0;        // the section changed height
+         m_secH[8] = 0;
+         OnChartChange();
+         return true;
+      }
       if(hit >= RZ_SECH0 && hit <= RZ_SECH7) {   // accordion header : fold / unfold
          const int si = hit - RZ_SECH0;
          m_secOpen[si] = !m_secOpen[si];
