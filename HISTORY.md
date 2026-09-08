@@ -92,6 +92,53 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.59.71 — le panneau défile : le guide d'utilisation devient atteignable
+
+🔴 **Le manuel était inatteignable sur un écran de portable.** La section AIDE
+dessine, **avant** le manuel et **sans possibilité de replier**, un préambule
+fixe d'environ **230 px** (COULEURS, RÈGLE NEWS, MARGE DE SURVIE). Les dix
+volets repliés ajoutent 230 px, puis À PROPOS et les deux lignes lecture seule :
+**le manuel FERMÉ mesure déjà ~618 px**. Ouvrir le premier volet — le guide
+pas-à-pas, huit entrées dont trois dépassent 150 caractères — ajoute ~540 px,
+soit **~1 160 px au total**.
+
+La hauteur, elle, est plafonnée par le graphique (`m_sideH = m_chH − 24`). Sur
+un portable 1366×768, MT5 maximisé avec la fenêtre Terminal ouverte —
+**la configuration par défaut de MT5** — la zone graphique fait ~400 px : le
+panneau en fait **376**. Il n'existait **aucun décalage de défilement**, un clic
+sous le bitmap était **explicitement rejeté**, et le seul recours proposé était
+une ligne de texte : *« sections : agrandis la fenêtre »*.
+
+Autrement dit : **le guide d'utilisation écrit pour le débutant était, sur la
+machine du débutant, illisible au-delà du premier tiers** — et la seule réponse
+de l'outil était de lui demander un écran plus grand.
+
+**Le panneau défile maintenant.** Deux chevrons dans l'en-tête, une page par
+clic avec recouvrement, un indicateur de position en bas, et les chevrons
+s'éteignent aux extrémités. Trois pièges traités au passage, parce que faire
+défiler un panneau dessiné sur un bitmap n'est pas seulement soustraire un
+décalage :
+
+- **L'en-tête est peint EN DERNIER** — il recouvre le contenu qui remonte
+  derrière lui — mais **ses zones cliquables restent enregistrées EN PREMIER** :
+  le test d'impact retient le **premier** rectangle trouvé, donc un contenu passé
+  sous l'en-tête ne peut pas voler le clic de la croix de fermeture.
+- **Toute zone entièrement remontée sous l'en-tête est retirée de la liste.**
+  Une zone invisible qui répond encore au clic est un piège, pas une commande.
+- **La hauteur demandée se mesure hors défilement.** Sans ça, descendre réduirait
+  la hauteur demandée, la surface rétrécirait, et on retrouverait exactement
+  l'oscillation d'une image sur deux corrigée en v3.28.
+
+⚖️ **Ce que je n'ai pas touché** : le panneau **complet** (les huit sections
+empilées) garde son accordéon et son message « +N : replie une section ». Il a
+déjà un mécanisme pour ce qui ne rentre pas ; lui ajouter un second aurait
+demandé de refaire sa logique de croissance, celle-là même qui a oscillé en
+v3.28. Le défilement couvre la vue **une section à la fois**, celle dans
+laquelle on lit le manuel.
+
+**Gate : 22 contrôles, 0 en échec. Contrôles positifs : 20/20 + 2
+non-couvertures déclarées. Compilation : 0 erreur, 0 avertissement.**
+
 ### v3.58.70 — 7e lot : la lisibilité des jauges, et le code qui tournait pour personne
 
 - 🔴 **Sur les trois thèmes CLAIRS, la piste des jauges rendait le niveau

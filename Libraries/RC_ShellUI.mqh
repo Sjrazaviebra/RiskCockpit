@@ -244,7 +244,9 @@ enum ERCZone {
    RZ_SECH0, RZ_SECH1, RZ_SECH2, RZ_SECH3, RZ_SECH4, RZ_SECH5, RZ_SECH6, RZ_SECH7,
    // v3.44 : the manual's fold-outs, contiguous so the index is the offset
    RZ_HELP0, RZ_HELP1, RZ_HELP2, RZ_HELP3, RZ_HELP4,
-   RZ_HELP5, RZ_HELP6, RZ_HELP7, RZ_HELP8, RZ_HELP9
+   RZ_HELP5, RZ_HELP6, RZ_HELP7, RZ_HELP8, RZ_HELP9,
+   // v3.59 : les deux chevrons de defilement du panneau
+   RZ_SIDE_UP, RZ_SIDE_DN
 };
 //--- label slots : the shell ships FR defaults ; the host overrides them with
 //--- its own i18n (Tr) so one translation table serves the whole product.
@@ -302,7 +304,7 @@ enum ERCLabel {
    RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
    RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
    RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE, RCL_HELP_MANUAL,
-   RCL_NEWS_SRCDOWN, RCL_BAND_WKNDNOW, RCL_TILT_IN
+   RCL_NEWS_SRCDOWN, RCL_BAND_WKNDNOW, RCL_TILT_IN, RCL_SCROLL
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -378,6 +380,8 @@ private:
    int        m_hRows[RCS_HELP_TOPICS];
    int        m_hOpen;          // ONE topic at a time : -1 = all folded
    bool       m_relayout;        // a measurement moved : re-create the surfaces
+   int        m_scrollY;         // v3.59 : pixels de defilement du panneau simple
+   int        m_scrollMax;       // v3.59 : borne, calculee apres le corps
    int        m_dragOffX, m_dragOffY;
    int        m_sideX, m_sideY, m_sideH;
    // v3.50 : 96 etait le TROISIEME plafond silencieux, et le seul sans
@@ -826,6 +830,19 @@ private:
    }
 
    //================= DEPLOYED PANEL =======================================
+   //--- v3.59 : une page par clic, avec un recouvrement pour ne pas perdre le fil.
+   int  ScrollStep(void) const { return (m_sideH > 160 ? m_sideH - 90 : 70); }
+   //--- v3.59 : les zones du corps remontees SOUS l en-tete sont invisibles ;
+   //--- une zone invisible qui repond encore au clic est un piege. On les retire.
+   void ZClipTop(const int from, const int top) {
+      int w = from;
+      for(int i = from; i < m_zn; i++) {
+         if(m_z[i].y + m_z[i].h <= top) continue;       // entierement cachee
+         if(i != w) m_z[w] = m_z[i];
+         w++;
+      }
+      m_zn = w;
+   }
    int SecIdx(const int sec) const {
       const int i = sec - RZ_RAIL_LIM;
       return (i >= 0 && i < 8 ? i : -1);
@@ -1603,15 +1620,17 @@ private:
       const int W = RCS_SIDE_W, H = m_sideH;
       m_side.SoftShadow(4, 4, W - 8, H - 8, 14, clrBlack, 7, 80);
       m_side.Card(0, 0, W, H, 14, MixC(m_t.surface, clrWhite, 0.04), m_t.surface, LineC());
-      m_side.GradientVFill(1, 1, W - 2, 34, 13,
-                           Mix(m_t.surface, m_t.accent, 0.14), Mix(m_t.surface, clrBlack, 0.06));
-      // header : title + pin (full sidebar) + close
-      m_side.Text(18, 10, (m_state == 2 ? "RISKCOCKPIT" : SectionTitle(m_sec)),
-                  A(m_t.accent), RCS_F_TITLE, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
-      m_side.Text(W - 52, 10, (m_state == 2 ? ">" : "<"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      // header : title + pin (full sidebar) + close.
+      // v3.59 : ses ZONES sont enregistrees ICI, avant celles du corps - le
+      // premier hit gagne, donc un contenu qui a defile sous l en-tete ne peut
+      // pas voler le clic de la croix. Sa PEINTURE, elle, part a la fin.
       ZAdd(m_sideX + W - 64, m_sideY + 4, 24, 26, RZ_PANEL_PIN);
-      m_side.Text(W - 22, 9, ShortToString((ushort)0x00D7), A(m_t.dim), RCS_F_BTN, "Segoe UI", TA_CENTER | TA_TOP);
       ZAdd(m_sideX + W - 34, m_sideY + 4, 24, 26, RZ_PANEL_CLOSE);
+      const bool scrollable = (m_state == 1 && m_scrollMax > 0);
+      if(scrollable) {                       // borne de la frame precedente : stable
+         ZAdd(m_sideX + W - 116, m_sideY + 4, 24, 26, RZ_SIDE_UP);
+         ZAdd(m_sideX + W - 92,  m_sideY + 4, 24, 26, RZ_SIDE_DN);
+      }
       int y = 46;
       if(m_state == 2) {                                   // full sidebar : every section stacked
          int order[8];
@@ -1676,20 +1695,50 @@ private:
                             : (m_sideH < m_chH - 24 ? m_sideH + 120 : m_secH[8]));
          if(wantF > m_secH[8]) { m_secH[8] = wantF; m_relayout = true; }
       } else {
-         y = SecBody(m_sec, y);
-         // MEASURE : the first frame of a section may be drawn at the default
-         // height ; the measurement re-sizes the surface for every frame after.
+         // v3.59 : LE CORPS DEFILE. Le manuel ferme mesure deja ~618 px et
+         // ~1 160 px un volet ouvert, pour un panneau plafonne a la hauteur du
+         // graphique - 376 px sur un portable 1366x768 avec la fenetre Terminal
+         // ouverte, c est-a-dire la configuration par DEFAUT de MT5. Il n y avait
+         // aucun decalage, un clic sous le bitmap etait rejete, et le seul
+         // recours propose etait « agrandis la fenetre ». Le guide ecrit pour le
+         // debutant etait illisible au-dela du premier tiers sur SA machine.
+         const int zn0 = m_zn;                     // debut des zones du corps
+         y = SecBody(m_sec, y - m_scrollY);
          const int idx = SecIdx(m_sec);
-         if(idx >= 0) {
-            const int want = y + 14;
-            if(want != m_secH[idx]) { m_secH[idx] = want; m_relayout = true; }
-            // still taller than the chart allows : SAY it, do not lose the tail
-            if(want > H + 2)
-               m_side.Text(W / 2, H - 15, ShortToString((ushort)0x25BC) + " " +
-                           L(RCL_SECS_RESIZE, "sections : enlarge the window"),
-                           A(m_t.warn), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
+         // La hauteur DEMANDEE se mesure hors defilement : sinon descendre
+         // reduirait la demande, la surface retrecirait, et on retrouverait
+         // l oscillation d une image sur deux de la v3.28.
+         const int want = y + m_scrollY + 14;
+         if(idx >= 0 && want != m_secH[idx]) { m_secH[idx] = want; m_relayout = true; }
+         // 26 px reserves en bas pour l indicateur, sinon il masque la fin.
+         m_scrollMax = (want > H - 26 ? want - (H - 26) : 0);
+         if(m_scrollY > m_scrollMax) m_scrollY = m_scrollMax;
+         if(m_scrollY < 0)           m_scrollY = 0;
+         ZClipTop(zn0, m_sideY + 44);              // rien de clicable sous l en-tete
+         if(m_scrollMax > 0) {
+            const int pct = (int)MathRound(100.0 * m_scrollY / (double)m_scrollMax);
+            m_side.RoundFill(14, H - 21, W - 28, 17, 8,
+                             Mix(m_t.surface, m_t.accent, 0.14));
+            m_side.Text(W / 2, H - 19,
+                        L(RCL_SCROLL, "scroll") + "  " + IntegerToString(pct) + "%",
+                        A(m_t.accent), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
          }
       }
+      // v3.59 : l en-tete est peint EN DERNIER - il recouvre ce qui a defile.
+      m_side.GradientVFill(1, 1, W - 2, 34, 13,
+                           Mix(m_t.surface, m_t.accent, 0.14), Mix(m_t.surface, clrBlack, 0.06));
+      m_side.Text(18, 10, (m_state == 2 ? "RISKCOCKPIT" : SectionTitle(m_sec)),
+                  A(m_t.accent), RCS_F_TITLE, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
+      if(scrollable) {
+         m_side.Text(W - 104, 11, ShortToString((ushort)0x25B2),
+                     A(m_scrollY > 0 ? m_t.accent : m_t.dim),
+                     RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+         m_side.Text(W - 80, 11, ShortToString((ushort)0x25BC),
+                     A(m_scrollY < m_scrollMax ? m_t.accent : m_t.dim),
+                     RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      }
+      m_side.Text(W - 52, 10, (m_state == 2 ? ">" : "<"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      m_side.Text(W - 22, 9, ShortToString((ushort)0x00D7), A(m_t.dim), RCS_F_BTN, "Segoe UI", TA_CENTER | TA_TOP);
       if(!m_d.riskTools) {
          m_side.Text(18, H - 26, L(RCL_RTOOLS_OFF, "Risk toolkit OFF (personal account)."), A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
       }
@@ -1770,6 +1819,8 @@ private:
          case RZ_TIP_TARGET:   t = "Target";       d = "Progress toward the payout / profit threshold."; return true;
          case RZ_TIP_MSGS:     t = "Server msgs";  d = "Orders sent today / the plan's daily cap."; return true;
          case RZ_TIP_HELP:     t = "Version";    d = "Current build + active news source.";         return true;
+         case RZ_SIDE_UP:    t = "Up";         d = "Scrolls this panel one page up.";              return true;
+         case RZ_SIDE_DN:    t = "Down";       d = "Scrolls this panel one page down.";            return true;
          case RZ_CFG_PAL:      t = "Palette";    d = "Emerald / Indigo / Slate.";                     return true;
          case RZ_CFG_MODE:     t = "Mode";       d = "Dark / light.";                                  return true;
          case RZ_CFG_LANG:     t = "Language";     d = "EN / FR / ES (persisted).";                        return true;
@@ -2137,6 +2188,7 @@ public:
       m_hOpen = -1;
       for(int ht = 0; ht < RCS_HELP_TOPICS; ht++) { m_hTitle[ht] = ""; m_hRows[ht] = 0; }
       m_relayout = false;
+      m_scrollY = 0; m_scrollMax = 0;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
       m_lockBlocked = false; m_lockBlockedAt = 0;
@@ -2189,7 +2241,7 @@ public:
    int  SecGet(void)   const { return m_sec; }
    void SetStateSec(const int st, const int sec) {
       if(st >= 0 && st <= 2) m_state = st;
-      if(sec >= RZ_RAIL_LIM && sec <= RZ_RAIL_HELP) m_sec = sec;
+      if(sec >= RZ_RAIL_LIM && sec <= RZ_RAIL_HELP) { m_sec = sec; m_scrollY = 0; }
    }
    void SetSecOpenMask(const int mask) {
       for(int i = 0; i < 8; i++) m_secOpen[i] = ((mask & (1 << i)) != 0);
@@ -2283,6 +2335,8 @@ public:
    //--- restait en anglais en FR et en ES - dont l auto-verrou et sa liberation,
    //--- les quatre onglets de reglages, et les deux cases de violation. Un id
    //--- par accesseur : une insertion dans l enum ne peut pas decaler la serie.
+   int ZidScrollUp(void) const { return RZ_SIDE_UP; }
+   int ZidScrollDn(void) const { return RZ_SIDE_DN; }
    int ZidCfgTab0(void) const { return RZ_CFG_TAB0; }
    int ZidCfgTab1(void) const { return RZ_CFG_TAB1; }
    int ZidCfgTab2(void) const { return RZ_CFG_TAB2; }
@@ -2505,6 +2559,13 @@ public:
       // close the panel under the user's finger (RZ_TIP_TARGET and RZ_TIP_MSGS
       // did exactly that in v3.01.12, caught by the zone audit).
       if(hit >= RZ_TIP_CPT && hit <= RZ_TIP_NEWSTR) return true;
+      if(hit == RZ_SIDE_UP || hit == RZ_SIDE_DN) {   // v3.59 : une page par clic
+         m_scrollY += (hit == RZ_SIDE_DN ? ScrollStep() : -ScrollStep());
+         if(m_scrollY > m_scrollMax) m_scrollY = m_scrollMax;
+         if(m_scrollY < 0)           m_scrollY = 0;
+         RenderAll();
+         return true;
+      }
       if(hit >= RZ_HELP0 && hit <= RZ_HELP9) {   // manual : one topic at a time
          const int ht2 = hit - RZ_HELP0;
          m_hOpen = (m_hOpen == ht2 ? -1 : ht2);
@@ -2576,7 +2637,7 @@ public:
          case RZ_RAIL_DISC: case RZ_RAIL_CPT: case RZ_RAIL_CFG: case RZ_RAIL_HELP:
             if(hit == RZ_RAIL_POS) m_fltHidden = false;     // the only way back after the cross
             if(m_state == 1 && m_sec == hit) m_state = 0;   // toggle (VS Code contract)
-            else { m_state = 1; m_sec = hit; }
+            else { m_state = 1; m_sec = hit; m_scrollY = 0; }   // v3.59 : nouvelle section, en haut
             OnChartChange();
             return true;
          case RZ_RAIL_CHEVRON:

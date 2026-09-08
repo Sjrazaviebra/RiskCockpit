@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.58"
+#property version "3.59"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.58"
+#define RC_VERSION_STR "3.59"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -2069,6 +2069,7 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_NEWS_NONE24,   Tr("shl_none24"));
     g_shell.SetLabel(RCL_RULE40,        Tr("shl_rule40"));
     g_shell.SetLabel(RCL_TILT_IN,       Tr("shl_tiltin"));
+    g_shell.SetLabel(RCL_SCROLL,        Tr("shl_scroll"));
     g_shell.SetLabel(RCL_CHECKFN,       Tr("shl_checkfn"));
     g_shell.SetLabel(RCL_SLG_ON,        Tr("shl_slgon"));
     g_shell.SetLabel(RCL_TILT_ON,       Tr("shl_tilton"));
@@ -2157,6 +2158,8 @@ void ShellPushLabels(void) {
     // en FR et en ES, y compris l auto-verrou (qui arme un STOP de plusieurs
     // heures) et sa liberation. Le repli anglais du shell n est plus le seul
     // texte que ces controles savent dire.
+    g_shell.SetTip(g_shell.ZidScrollUp(),  Tr("tipz_scrollup"));
+    g_shell.SetTip(g_shell.ZidScrollDn(),  Tr("tipz_scrolldn"));
     g_shell.SetTip(g_shell.ZidCfgTab0(),   Tr("tipz_tab0"));
     g_shell.SetTip(g_shell.ZidCfgTab1(),   Tr("tipz_tab1"));
     g_shell.SetTip(g_shell.ZidCfgTab2(),   Tr("tipz_tab2"));
@@ -6068,6 +6071,10 @@ void InitI18n(void) {
         "rule",
         "règle",
         "regla");
+    AddTr("shl_scroll",
+        "scroll",
+        "défilement",
+        "desplazamiento");
     AddTr("shl_tiltin",
         "in",
         "en",
@@ -6449,6 +6456,14 @@ void InitI18n(void) {
     AddTr("tip_cpt",    "Profile|The plan EVERY limit is derived from.",
                         "Profil|Le plan dont TOUTES les limites sont déduites.",
                         "Perfil|El plan del que salen TODOS los límites.");
+    AddTr("tipz_scrollup",
+        "Up|Scrolls this panel one page up.",
+        "Haut|Fait défiler ce panneau d'une page vers le haut.",
+        "Arriba|Desplaza este panel una página hacia arriba.");
+    AddTr("tipz_scrolldn",
+        "Down|Scrolls this panel one page down.",
+        "Bas|Fait défiler ce panneau d'une page vers le bas.",
+        "Abajo|Desplaza este panel una página hacia abajo.");
     AddTr("tipz_tab0",
         "Risk|SL, TP, margin and risk per trade, planned trades.",
         "Risque|SL, TP, marge et risque par trade, trades prévus.",
