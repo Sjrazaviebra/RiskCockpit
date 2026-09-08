@@ -247,11 +247,17 @@ enum ERCZone {
 // v3.36 : 184 ids for 192 slots is how the v3.07 defect comes back - ids were
 // being silently dropped then, and eight slots of headroom is not headroom.
 #define RCS_L_MAX 256      // MUST stay above the last ERCLabel id
-#define RCS_TIP_MAX 192     // tooltip slots, indexed by zone id - MUST stay above the last ERCZone id
+// v3.51 : 170 zones pour 192 fentes, c est la meme marge fine qui a produit le
+// defaut de la v3.07 et, la veille, la saturation du manuel. 256.
+#define RCS_TIP_MAX 256     // tooltip slots, indexed by zone id - MUST stay above the last ERCZone id
 // v3.44 : the HELP section is the manual. One fold-out per surface and per
 // section, each listing its elements with what they mean.
-#define RCS_HELP_TOPICS 10
+// v3.50 : 10 sujets pour 10 fentes = SATURE. Le prochain serait jete avec un
+// Print que personne ne lit, comme les 95 libelles dans 64 fentes de la v3.07.
+#define RCS_HELP_TOPICS 16
 #define RCS_HELP_ROWS   14
+// autant de fentes de clic qu il peut y avoir de zones dessinees dans UNE image
+#define RCS_Z_MAX       256
 enum ERCLabel {
    RCL_SEC_LIM = 0, RCL_SEC_POS, RCL_SEC_LOT, RCL_SEC_NEWS, RCL_SEC_DISC,
    RCL_SEC_CPT, RCL_SEC_CFG, RCL_SEC_HELP,
@@ -370,7 +376,10 @@ private:
    bool       m_relayout;        // a measurement moved : re-create the surfaces
    int        m_dragOffX, m_dragOffY;
    int        m_sideX, m_sideY, m_sideH;
-   RCZone     m_z[96];
+   // v3.50 : 96 etait le TROISIEME plafond silencieux, et le seul sans
+   // avertissement. 256 est au-dessus du nombre total d ids de zones, donc
+   // aucune image ne peut deborder - et si cela arrivait, ZAdd le DIT.
+   RCZone     m_z[RCS_Z_MAX];
    int        m_zn;
    bool       m_pendKill;        // host consumes : remove the indicator
    int        m_pendCfg;         // host consumes : a config toggle was clicked (RZ_CFG_* id, 0 = none)
@@ -433,7 +442,18 @@ private:
    }
    void ZReset(void) { m_zn = 0; }
    void ZAdd(const int x, const int y, const int w, const int h, const int id) {
-      if(m_zn >= 96) return;
+      if(m_zn >= RCS_Z_MAX) {
+         // SetLabel et SetTip impriment quand ils refusent un id ; celui-ci
+         // rendait la main en silence. Une zone jetee est un controle qui ne
+         // repond plus au clic - sans erreur, sans trace, sans rien.
+         static bool s_zfull = false;
+         if(!s_zfull) {
+            s_zfull = true;
+            Print("RiskCockpit: click-zone table full at ", RCS_Z_MAX,
+                  " - raise RCS_Z_MAX, the controls beyond it do not answer");
+         }
+         return;
+      }
       m_z[m_zn].x = x; m_z[m_zn].y = y; m_z[m_zn].w = w; m_z[m_zn].h = h; m_z[m_zn].id = id; m_zn++;
    }
 

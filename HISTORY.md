@@ -86,6 +86,60 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.50.62 / v3.51.63 — le GATE : six trous, deux plafonds silencieux, et un verdict plus large que la mesure
+
+Deuxieme lot de la 3e revue. Cette fois la cible est **mon propre instrument**.
+
+**Six trous dans `audit.py`, tous verifies par lecture avant correction :**
+
+1. **L'exemption `articles/` etait une regle de PROXIMITE de 40 caracteres.** Elle
+   blanchissait un vrai numero de compte des qu'une URL d'article FundedNext
+   trainait n'importe ou dans les 40 caracteres precedents. Les chiffres doivent
+   desormais SUIVRE `articles/` immediatement.
+2. **Le scan de fuite etait une liste blanche d'EXTENSIONS.** Tout fichier sans
+   extension — `LICENSE` en tete — n'etait jamais lu, pendant que le rapport
+   annoncait « 12 fichiers scannes », ce qui se lit comme une couverture
+   complete. Il lit maintenant **tout ce qui se decode en texte** (14 fichiers)
+   et **DIT** combien de binaires il a ecartes.
+3. **« binaire a jour » ne comparait que DEUX des six sources compilees.** Le
+   catalogue des regles prop, les maths pures et le canevas pouvaient etre plus
+   recents que le `.ex5` sans un mot. **Six sources comparees.**
+4. **Le motif « login MT5 » ne voyait que 8 a 10 chiffres** : un login de 7
+   chiffres passait. Et **« chemin local » exigeait des antislashs** : le meme
+   chemin ecrit avec des barres obliques passait en clair.
+5. 🔴 **Deux plafonds silencieux sur quatre n'etaient pas mesures.**
+   `RCS_HELP_TOPICS` etait **SATURE a 10/10** : le prochain sujet d'aide aurait
+   ete jete avec un `Print` que personne ne lit — le defaut de la v3.07, en plus
+   discret. Et **`ZAdd` jetait SANS UN MOT** au-dela de 96 zones, seul des trois
+   plafonds a ne pas avertir : une zone jetee est **un controle qui ne repond
+   plus au clic**, sans erreur et sans trace. Manuel a 16, zones a **256** — au
+   dessus du nombre total d'ids, donc aucune image ne peut plus deborder — et
+   `ZAdd` le dit s'il devait quand meme refuser. Infobulles a 256 aussi : 170/192
+   etait la meme marge fine.
+6. 🔴 **AUCUN controle ne reliait `RC_VERSION_STR` a `#property version`.** C'est
+   le defaut n°1 de la v3.17 : la section AIDE affichait une version que le
+   binaire n'avait pas, donc un test portait sur un binaire qu'on croyait etre
+   l'autre. Il est desormais impossible de les separer sans que le gate le dise.
+
+**Et le self-test rendait un verdict sur 17 controles en n'en exercant que 9.**
+Un controle qu'on n'a jamais fait echouer expres est une decoration. Le harnais
+ne pouvait muter que le `.mq5` ; chaque cas porte maintenant **son** fichier
+cible. **15 injections, 15 detectees**, et le harnais **imprime ce qu'il ne
+couvre pas, avec la raison** — un self-test qui tait sa couverture ment de la
+meme facon qu'un controle qui ne peut pas echouer.
+
+⭐ **Le harnais renforce a trouve un trou de plus, tout seul** : le controle
+« 3 langues par entree » ne verifiait que les entrees que son motif savait lire,
+et se taisait sur les autres — **un verdict plus large que la mesure**, la meme
+faute que le scan binaire d'avant la v3.41. Il compare desormais les entrees
+ANALYSEES aux entrees PRESENTES. ⚠️ Et il a immediatement signale un faux
+positif — la **definition** de `AddTr` comptee comme un appel — corrige dans la
+foulee : c'est exactement ce qu'un controle neuf doit produire une fois, puis
+plus jamais.
+
+**Gate : 17 controles, 0 en echec. Self-test : 15/15, plus 2 non-couvertures
+declarees.**
+
 ### v3.49.61 — premier lot de la 3e revue (180 agents, 73 constats confirmes)
 
 Troisieme revue adversariale, demandee par JR : **14 dimensions** (securite,
