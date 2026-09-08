@@ -125,6 +125,7 @@ struct RCDeckData {
    string pyrText;                      // the advisor line, already formatted
    int    pyrStat;                      // 0 ok, 1 warn, 2 neutral
    bool   weekendHold;                  // open positions into the week-end close
+   int    weekendLvl;                   // v3.55 : 1 = amber (warn), 2 = red (act now)
    bool   unlockArmed;                  // a release click is armed (5 s window)
    // v3.11 : controls the host CANNOT act on in the current state. They stay
    // visible (the setting exists) but are drawn disabled, with the reason.
@@ -149,7 +150,10 @@ struct RCDeckData {
    int    lockKind;
    int    lossStreak;       // consecutive losing trades : what a cooldown is ABOUT
    // --- lot 2b : account card + config toggles --------------------------
-   string planLabel, phaseLabel, acctTypeLabel, addonsLabel, cycleLabel, sizeLabelFull;
+   // v3.58 : addonsLabel a ete retire - il etait calcule deux fois par seconde
+   // par l hote et lu par aucune surface. Le pied de panneau qui le lisait est
+   // mort en v3.06 ; le commentaire qui le nommait, lui, avait survecu.
+   string planLabel, phaseLabel, acctTypeLabel, cycleLabel, sizeLabelFull;
    long   login;
    int    minDays, minDaysDone;
    bool   cfgNewsHigh, cfgNewsMed, cfgSound, cfgTelegram, cfgComfort, cfgDiscipline;
@@ -240,7 +244,9 @@ enum ERCZone {
    RZ_SECH0, RZ_SECH1, RZ_SECH2, RZ_SECH3, RZ_SECH4, RZ_SECH5, RZ_SECH6, RZ_SECH7,
    // v3.44 : the manual's fold-outs, contiguous so the index is the offset
    RZ_HELP0, RZ_HELP1, RZ_HELP2, RZ_HELP3, RZ_HELP4,
-   RZ_HELP5, RZ_HELP6, RZ_HELP7, RZ_HELP8, RZ_HELP9
+   RZ_HELP5, RZ_HELP6, RZ_HELP7, RZ_HELP8, RZ_HELP9,
+   // v3.59 : les deux chevrons de defilement du panneau
+   RZ_SIDE_UP, RZ_SIDE_DN
 };
 //--- label slots : the shell ships FR defaults ; the host overrides them with
 //--- its own i18n (Tr) so one translation table serves the whole product.
@@ -298,7 +304,7 @@ enum ERCLabel {
    RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
    RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
    RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE, RCL_HELP_MANUAL,
-   RCL_NEWS_SRCDOWN
+   RCL_NEWS_SRCDOWN, RCL_BAND_WKNDNOW, RCL_TILT_IN, RCL_SCROLL
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -374,6 +380,8 @@ private:
    int        m_hRows[RCS_HELP_TOPICS];
    int        m_hOpen;          // ONE topic at a time : -1 = all folded
    bool       m_relayout;        // a measurement moved : re-create the surfaces
+   int        m_scrollY;         // v3.59 : pixels de defilement du panneau simple
+   int        m_scrollMax;       // v3.59 : borne, calculee apres le corps
    int        m_dragOffX, m_dragOffY;
    int        m_sideX, m_sideY, m_sideH;
    // v3.50 : 96 etait le TROISIEME plafond silencieux, et le seul sans
@@ -392,6 +400,7 @@ private:
    bool       m_pendUnlock;      // host consumes : RELEASE an active self-lock
    bool       m_lockArm;         // first click : the button asks for confirmation
    bool       m_lockBlocked;     // v3.34 : a click was refused because of the lock
+   datetime   m_lockBlockedAt;   // v3.57 : WHEN - the notice is transient
    bool       m_maxEditOn;       // second copy box (max lot)
    int        m_maxEditX, m_maxEditY;
    string     m_L[RCS_L_MAX];    // i18n slots (empty = the built-in FR default is used)
@@ -423,7 +432,33 @@ private:
       return (color)((b << 16) | (g << 8) | r);
    }
    color LineC(void)  const { return MixC(m_t.surface, m_t.text, 0.16); }
-   color TrackC(void) const { return MixC(m_t.bg, clrBlack, 0.35); }
+   //--- v3.58 : cette recette - melanger le FOND vers le NOIR - ne produit une
+   //--- piste discrete que si le fond est sombre. Sur les trois themes CLAIRS le
+   //--- fond est clair, donc la piste est un gris moyen (#9CA4A2) ; et les
+   //--- remplissages des themes clairs sont des couleurs SOMBRES. Contraste
+   //--- rempli/vide mesure : ambre 1,19:1, vert 1,41:1, rouge 2,06:1 - le
+   //--- minimum pour un element graphique porteur d information est 3:1, et le
+   //--- MEME composant fait 10,2:1 en sombre. On perdait le NIVEAU, c est-a-dire
+   //--- precisement ce que la jauge existe pour dire - y compris sur la jauge
+   //--- verticale du rail, seule lecture permanente quand le panneau est ferme.
+   //--- En clair la piste devient donc la surface elle-meme (3,2 a 4,8:1 avec
+   //--- les trois remplissages) et un lisere la delimite du panneau.
+   bool  ThemeIsLight(void) const { return (StringSubstr(m_t.name, StringLen(m_t.name) - 1) == "L"); }
+   color TrackC(void) const { return (ThemeIsLight() ? m_t.surface
+                                                     : MixC(m_t.bg, clrBlack, 0.35)); }
+   color TrackRingC(void) const { return MixC(m_t.surface, m_t.text, 0.30); }
+   //--- une jauge horizontale : sur un theme clair, le lisere d abord, la jauge
+   //--- ensuite en retrait d un pixel - le trait reste visible tout autour.
+   void  MeterX(const int x, const int y, const int w, const int h,
+                const double ratio, const color fill) {
+      if(ThemeIsLight()) {
+         m_side.Capsule(x, y, w, h, A(TrackRingC()));
+         m_side.Meter(x + 1, y + 1, w - 2, h - 2, ratio, TrackC(), fill,
+                      MixC(fill, clrBlack, 0.25));
+      } else {
+         m_side.Meter(x, y, w, h, ratio, TrackC(), fill, MixC(fill, clrBlack, 0.25));
+      }
+   }
    color VerdictC(void) const {
       if(m_d.verdict >= 2) return m_t.red;
       if(m_d.verdict == 1) return m_t.warn;
@@ -564,7 +599,20 @@ private:
    //--- one navbar chip : LABEL then value, returns the next x -------------
    int NavChip(const int x, const string lab, const string val, const color vc,
                const int zid) {
-      const int w = 86;
+      // v3.58 : la largeur etait FIXE a 86 px et aucun texte n etait mesure -
+      // alors que le kit expose TextSizeGet. Le libelle part a x+7 vers la
+      // droite, la valeur finit a x+w-7 vers la gauche : 72 px utiles. En
+      // espagnol « MARGEN » + « $12.5K » en demandent 79, donc le « $1 » de la
+      // valeur s imprimait par-dessus le « EN » du libelle ; en francais les deux
+      // glyphes se touchaient. C est le chiffre que cette barre existe pour
+      // donner - « est-ce que je peux prendre ce trade » - illisible dans deux
+      // langues sur trois. On mesure. Plancher a 86 px : la barre anglaise ne
+      // bouge pas d un pixel.
+      int lw = 0, vw = 0, th = 0;
+      m_nav.TextSizeGet(lab, RCS_F_SMALL, "Segoe UI", lw, th, FW_BOLD);
+      m_nav.TextSizeGet(val, RCS_F_NUM,   "Consolas", vw, th, FW_BOLD);
+      int w = lw + vw + 22;                 // 7 a gauche + 8 de respiration + 7
+      if(w < 86) w = 86;
       m_nav.CapsuleStroke(x, 7, w, 20, Mix(m_t.surface, m_t.dim, 0.30),
                           Mix(m_t.surface, clrBlack, 0.10));
       m_nav.Text(x + 7, 12, lab, A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
@@ -691,6 +739,9 @@ private:
       if(ratio > 1.0) ratio = 1.0;
       const color rc = LimStatC();
       const int mx = W / 2 - 3, mh = 46;
+      // v3.58 : meme perte de contraste ici, sur la seule jauge visible quand le
+      // panneau est ferme. Lisere puis piste, 1 px de retrait.
+      if(ThemeIsLight()) m_rail.Capsule(mx - 1, cy + 1, 8, mh + 2, A(TrackRingC()));
       m_rail.Capsule(mx, cy + 2, 6, mh, A(TrackC()));
       const int fh = (int)(mh * ratio);
       if(fh > 1) m_rail.CapsuleGradient(mx, cy + 2 + (mh - fh), 6, fh, A(rc), Mix(rc, clrBlack, 0.25));
@@ -714,7 +765,9 @@ private:
       const color lc = (m_d.lotZero ? m_t.red : (m_d.lotCapped ? m_t.warn : m_t.accent));
       const string ls = (m_d.sugLot > 0.0 ? DoubleToString(m_d.sugLot, m_d.lotDigits) : "--");
       m_rail.Text(W / 2, cy + 6, ls, A(lc), RCS_F_BODY, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
-      m_rail.Text(W / 2, cy + 28, "LOT", A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      // v3.57 : la navbar dit « LOTE » en espagnol pour CE nombre, le rail disait
+      // « LOT ». Meme cle, un seul mot.
+      m_rail.Text(W / 2, cy + 28, L(RCL_NAV_LOT, "LOT"), A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(m_railX, m_railY + cy, W, ch, RZ_RAIL_LOT);
       // --- NEWS : minutes to the next RESTRICTED event + source tick ------
       cy = CellY(RZ_RAIL_NEWS); ch = CellH(RZ_RAIL_NEWS);
@@ -777,6 +830,19 @@ private:
    }
 
    //================= DEPLOYED PANEL =======================================
+   //--- v3.59 : une page par clic, avec un recouvrement pour ne pas perdre le fil.
+   int  ScrollStep(void) const { return (m_sideH > 160 ? m_sideH - 90 : 70); }
+   //--- v3.59 : les zones du corps remontees SOUS l en-tete sont invisibles ;
+   //--- une zone invisible qui repond encore au clic est un piege. On les retire.
+   void ZClipTop(const int from, const int top) {
+      int w = from;
+      for(int i = from; i < m_zn; i++) {
+         if(m_z[i].y + m_z[i].h <= top) continue;       // entierement cachee
+         if(i != w) m_z[w] = m_z[i];
+         w++;
+      }
+      m_zn = w;
+   }
    int SecIdx(const int sec) const {
       const int i = sec - RZ_RAIL_LIM;
       return (i >= 0 && i < 8 ? i : -1);
@@ -857,7 +923,7 @@ private:
       const string val = (applies ? DoubleToString(v, 2) + " / " + DoubleToString(cap, 1) + "%" : "N/A");
       m_side.Text(RCS_SIDE_W - 18, y, val, A(applies ? m_t.text : m_t.dim), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       y += 17;
-      m_side.Meter(18, y, RCS_SIDE_W - 36, 8, (ratio > 1.0 ? 1.0 : ratio), TrackC(), st, MixC(st, clrBlack, 0.25));
+      MeterX(18, y, RCS_SIDE_W - 36, 8, (ratio > 1.0 ? 1.0 : ratio), st);
       ZAdd(m_sideX + 18, m_sideY + y - 17, RCS_SIDE_W - 36, 26, zid);
       y += 18;
       return y;
@@ -1102,8 +1168,8 @@ private:
       y += 20;
       // v3.01 parity : the news-window METER (legacy row 8) - it fills over the
       // hour before the event and sits full while the window is open.
-      m_side.Meter(18, y, RCS_SIDE_W - 36, 8, m_d.newsMeterPct / 100.0, TrackC(),
-                   (m_d.newsActive ? m_t.red : m_t.warn), MixC((m_d.newsActive ? m_t.red : m_t.warn), clrBlack, 0.25));
+      MeterX(18, y, RCS_SIDE_W - 36, 8, m_d.newsMeterPct / 100.0,
+             (m_d.newsActive ? m_t.red : m_t.warn));
       y += 16;
       // v3.01 parity : news-trading stats (legacy row 10)
       y = KV(y, L(RCL_NEWSTRADES, "News trades"),
@@ -1121,7 +1187,16 @@ private:
          const color nc = (m_d.newsRestr[i] ? m_t.red : m_t.warn);
          m_side.Text(18, y, ShortToString((ushort)(m_d.newsRestr[i] ? 0x25BC : 0x25C6)), A(nc), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
          m_side.Text(36, y, m_d.newsWhen[i] + "  " + m_d.newsCcy[i], A(m_t.text), RCS_F_NUM, "Consolas", TA_LEFT | TA_TOP);
-         m_side.Text(RCS_SIDE_W - 18, y, (m_d.newsRestr[i] ? L(RCL_RULE40, "40% rule") : L(RCL_CHECKFN, "check FN")),
+         // v3.57 : ce libelle etait EN DUR a « 40% rule » alors que la meme
+         // section lit la vraie part 15 px plus haut. Trois profils du catalogue
+         // mettent cette part a ZERO - FTMO / E8 / MFF funded ANNULENT le profit
+         // de la fenetre. Le trader lisait « regle 40% » sur la surface faite
+         // pour decider s il prend le trade, et croyait garder 40 % de son gain.
+         // Le sens de l erreur MINIMISAIT la penalite.
+         m_side.Text(RCS_SIDE_W - 18, y,
+                     (m_d.newsRestr[i]
+                      ? DoubleToString(m_d.newsSharePct, 0) + "% " + L(RCL_RULE40, "rule")
+                      : L(RCL_CHECKFN, "check FN")),
                      A(nc), RCS_F_SMALL, "Segoe UI", TA_RIGHT | TA_TOP);
          y += 17;
       }
@@ -1173,7 +1248,10 @@ private:
                   A(m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       y += 18;
       m_side.Text(18, y, L(RCL_TILT_WIN, "Tilt window"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
-      m_side.Text(RCS_SIDE_W - 18, y, IntegerToString(m_d.tiltTrades) + " en " +
+      // v3.57 : ce " en " etait un mot FRANCAIS en dur au milieu du chemin i18n -
+      // un utilisateur anglais ou espagnol lisait « 6 en 15 min ».
+      m_side.Text(RCS_SIDE_W - 18, y, IntegerToString(m_d.tiltTrades) +
+                  " " + L(RCL_TILT_IN, "in") + " " +
                   IntegerToString(m_d.tiltWinMin) + " min" + (m_d.tiltN > 0 ? "  (max " + IntegerToString(m_d.tiltN) + ")" : ""),
                   A(m_d.discTilt ? m_t.warn : m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_DISC_TILT);
@@ -1372,8 +1450,8 @@ private:
                      A(tr >= 1.0 ? m_t.ok : m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
          ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_TARGET);
          y += 17;
-         m_side.Meter(18, y, RCS_SIDE_W - 36, 8, (tr > 1.0 ? 1.0 : tr), TrackC(),
-                      (tr >= 1.0 ? m_t.ok : m_t.accent), MixC(tr >= 1.0 ? m_t.ok : m_t.accent, clrBlack, 0.25));
+         MeterX(18, y, RCS_SIDE_W - 36, 8, (tr > 1.0 ? 1.0 : tr),
+                (tr >= 1.0 ? m_t.ok : m_t.accent));
          y += 16;
       }
       y += 6;
@@ -1542,15 +1620,17 @@ private:
       const int W = RCS_SIDE_W, H = m_sideH;
       m_side.SoftShadow(4, 4, W - 8, H - 8, 14, clrBlack, 7, 80);
       m_side.Card(0, 0, W, H, 14, MixC(m_t.surface, clrWhite, 0.04), m_t.surface, LineC());
-      m_side.GradientVFill(1, 1, W - 2, 34, 13,
-                           Mix(m_t.surface, m_t.accent, 0.14), Mix(m_t.surface, clrBlack, 0.06));
-      // header : title + pin (full sidebar) + close
-      m_side.Text(18, 10, (m_state == 2 ? "RISKCOCKPIT" : SectionTitle(m_sec)),
-                  A(m_t.accent), RCS_F_TITLE, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
-      m_side.Text(W - 52, 10, (m_state == 2 ? ">" : "<"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      // header : title + pin (full sidebar) + close.
+      // v3.59 : ses ZONES sont enregistrees ICI, avant celles du corps - le
+      // premier hit gagne, donc un contenu qui a defile sous l en-tete ne peut
+      // pas voler le clic de la croix. Sa PEINTURE, elle, part a la fin.
       ZAdd(m_sideX + W - 64, m_sideY + 4, 24, 26, RZ_PANEL_PIN);
-      m_side.Text(W - 22, 9, ShortToString((ushort)0x00D7), A(m_t.dim), RCS_F_BTN, "Segoe UI", TA_CENTER | TA_TOP);
       ZAdd(m_sideX + W - 34, m_sideY + 4, 24, 26, RZ_PANEL_CLOSE);
+      const bool scrollable = (m_state == 1 && m_scrollMax > 0);
+      if(scrollable) {                       // borne de la frame precedente : stable
+         ZAdd(m_sideX + W - 116, m_sideY + 4, 24, 26, RZ_SIDE_UP);
+         ZAdd(m_sideX + W - 92,  m_sideY + 4, 24, 26, RZ_SIDE_DN);
+      }
       int y = 46;
       if(m_state == 2) {                                   // full sidebar : every section stacked
          int order[8];
@@ -1615,20 +1695,50 @@ private:
                             : (m_sideH < m_chH - 24 ? m_sideH + 120 : m_secH[8]));
          if(wantF > m_secH[8]) { m_secH[8] = wantF; m_relayout = true; }
       } else {
-         y = SecBody(m_sec, y);
-         // MEASURE : the first frame of a section may be drawn at the default
-         // height ; the measurement re-sizes the surface for every frame after.
+         // v3.59 : LE CORPS DEFILE. Le manuel ferme mesure deja ~618 px et
+         // ~1 160 px un volet ouvert, pour un panneau plafonne a la hauteur du
+         // graphique - 376 px sur un portable 1366x768 avec la fenetre Terminal
+         // ouverte, c est-a-dire la configuration par DEFAUT de MT5. Il n y avait
+         // aucun decalage, un clic sous le bitmap etait rejete, et le seul
+         // recours propose etait « agrandis la fenetre ». Le guide ecrit pour le
+         // debutant etait illisible au-dela du premier tiers sur SA machine.
+         const int zn0 = m_zn;                     // debut des zones du corps
+         y = SecBody(m_sec, y - m_scrollY);
          const int idx = SecIdx(m_sec);
-         if(idx >= 0) {
-            const int want = y + 14;
-            if(want != m_secH[idx]) { m_secH[idx] = want; m_relayout = true; }
-            // still taller than the chart allows : SAY it, do not lose the tail
-            if(want > H + 2)
-               m_side.Text(W / 2, H - 15, ShortToString((ushort)0x25BC) + " " +
-                           L(RCL_SECS_RESIZE, "sections : enlarge the window"),
-                           A(m_t.warn), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
+         // La hauteur DEMANDEE se mesure hors defilement : sinon descendre
+         // reduirait la demande, la surface retrecirait, et on retrouverait
+         // l oscillation d une image sur deux de la v3.28.
+         const int want = y + m_scrollY + 14;
+         if(idx >= 0 && want != m_secH[idx]) { m_secH[idx] = want; m_relayout = true; }
+         // 26 px reserves en bas pour l indicateur, sinon il masque la fin.
+         m_scrollMax = (want > H - 26 ? want - (H - 26) : 0);
+         if(m_scrollY > m_scrollMax) m_scrollY = m_scrollMax;
+         if(m_scrollY < 0)           m_scrollY = 0;
+         ZClipTop(zn0, m_sideY + 44);              // rien de clicable sous l en-tete
+         if(m_scrollMax > 0) {
+            const int pct = (int)MathRound(100.0 * m_scrollY / (double)m_scrollMax);
+            m_side.RoundFill(14, H - 21, W - 28, 17, 8,
+                             Mix(m_t.surface, m_t.accent, 0.14));
+            m_side.Text(W / 2, H - 19,
+                        L(RCL_SCROLL, "scroll") + "  " + IntegerToString(pct) + "%",
+                        A(m_t.accent), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
          }
       }
+      // v3.59 : l en-tete est peint EN DERNIER - il recouvre ce qui a defile.
+      m_side.GradientVFill(1, 1, W - 2, 34, 13,
+                           Mix(m_t.surface, m_t.accent, 0.14), Mix(m_t.surface, clrBlack, 0.06));
+      m_side.Text(18, 10, (m_state == 2 ? "RISKCOCKPIT" : SectionTitle(m_sec)),
+                  A(m_t.accent), RCS_F_TITLE, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
+      if(scrollable) {
+         m_side.Text(W - 104, 11, ShortToString((ushort)0x25B2),
+                     A(m_scrollY > 0 ? m_t.accent : m_t.dim),
+                     RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+         m_side.Text(W - 80, 11, ShortToString((ushort)0x25BC),
+                     A(m_scrollY < m_scrollMax ? m_t.accent : m_t.dim),
+                     RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      }
+      m_side.Text(W - 52, 10, (m_state == 2 ? ">" : "<"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      m_side.Text(W - 22, 9, ShortToString((ushort)0x00D7), A(m_t.dim), RCS_F_BTN, "Segoe UI", TA_CENTER | TA_TOP);
       if(!m_d.riskTools) {
          m_side.Text(18, H - 26, L(RCL_RTOOLS_OFF, "Risk toolkit OFF (personal account)."), A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
       }
@@ -1709,6 +1819,8 @@ private:
          case RZ_TIP_TARGET:   t = "Target";       d = "Progress toward the payout / profit threshold."; return true;
          case RZ_TIP_MSGS:     t = "Server msgs";  d = "Orders sent today / the plan's daily cap."; return true;
          case RZ_TIP_HELP:     t = "Version";    d = "Current build + active news source.";         return true;
+         case RZ_SIDE_UP:    t = "Up";         d = "Scrolls this panel one page up.";              return true;
+         case RZ_SIDE_DN:    t = "Down";       d = "Scrolls this panel one page down.";            return true;
          case RZ_CFG_PAL:      t = "Palette";    d = "Emerald / Indigo / Slate.";                     return true;
          case RZ_CFG_MODE:     t = "Mode";       d = "Dark / light.";                                  return true;
          case RZ_CFG_LANG:     t = "Language";     d = "EN / FR / ES (persisted).";                        return true;
@@ -1883,7 +1995,7 @@ private:
          m_float.Text(8 + cw / 2, qy + 11,
                       (m_d.roomMoney >= 0.0 ? DoubleToString(m_d.roomMoney, 0) + " $" : "--"),
                       A(rc2), RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
-         m_float.Text(8 + cw + cw / 2, qy, "LOT", A(m_t.dim), RCS_F_SMALL,
+         m_float.Text(8 + cw + cw / 2, qy, L(RCL_NAV_LOT, "LOT"), A(m_t.dim), RCS_F_SMALL,
                       "Segoe UI", TA_CENTER | TA_TOP);
          m_float.Text(8 + cw + cw / 2, qy + 11,
                       (m_d.sugLot > 0.0 ? DoubleToString(m_d.sugLot, m_d.lotDigits) : "--"),
@@ -1957,7 +2069,11 @@ private:
       if(!m_bandOn) { m_band.Commit(); return; }          // empty = transparent
       const bool hard = (m_d.discLocked || m_d.slGuard);
       const bool wknd = (!hard && !m_d.discTilt && m_d.weekendHold);
-      const color bc  = (hard ? m_t.red : m_t.warn);
+      // v3.55 : le week-end passait sa derniere demi-heure en AMBRE, la meme
+      // couleur que trente minutes plus tot. Au niveau 2 il reste moins d une
+      // demi-heure pour solder : la couleur doit le dire.
+      const bool  wred = (wknd && m_d.weekendLvl >= 2);
+      const color bc  = ((hard || wred) ? m_t.red : m_t.warn);
       const int   W   = m_chW;
       m_band.CapsuleGradient(0, 0, W, RCS_BAND_H, A(bc), Mix(bc, clrBlack, 0.35));
       string msg;
@@ -1973,14 +2089,21 @@ private:
                ? "  -  " + L(RCL_BAND_RAISE, "raise ") + m_d.slGuardSym + " >= " +
                  DoubleToString(m_d.slGuardPrice, (m_d.slGuardPrice >= 100.0 ? 2 : 5)) : "");
       else if(wknd)                                       // v3.06 : week-end hold
-         msg = L(RCL_BAND_WKND, "OPEN POSITIONS INTO THE WEEKLY CLOSE - consider flattening");
+         msg = (wred
+                ? L(RCL_BAND_WKNDNOW, "WEEKLY CLOSE IMMINENT - flatten now or you hold over the weekend")
+                : L(RCL_BAND_WKND, "OPEN POSITIONS INTO THE WEEKLY CLOSE - consider flattening"));
       else
          msg = "TILT - " + IntegerToString(m_d.tiltTrades) + " " +
                L(RCL_BAND_TRADES, "trades in") + " " +
                IntegerToString(m_d.tiltWinMin) + " " + L(RCL_BAND_SLOW, "min : slow down");
       // v3.34 : a refused click must SAY it was refused - a control that does
       // nothing and explains nothing reads as a bug.
-      if(m_lockBlocked && m_d.discLocked)
+      // v3.57 : this flag was cleared ONLY in Init(), i.e. at attach. One refused
+      // click during a lock replaced the band's message FOR GOOD : the trader
+      // lost WHICH lock holds him and HOW LONG is left, on the one surface built
+      // to be impossible to miss. A refusal is an ACKNOWLEDGEMENT - it shows for
+      // a few seconds, then the band says again what matters.
+      if(m_lockBlocked && m_d.discLocked && TimeCurrent() - m_lockBlockedAt <= 4)
          msg = L(RCL_LOCK_BLOCKED, "LOCKED - this control is disabled until the lock ends");
       // v3.54 : l'encre etait derivee du FOND DU THEME. Sur un theme sombre cela
       // donne du sombre sur un bandeau rouge, ce qui marche ; sur les trois
@@ -2065,9 +2188,10 @@ public:
       m_hOpen = -1;
       for(int ht = 0; ht < RCS_HELP_TOPICS; ht++) { m_hTitle[ht] = ""; m_hRows[ht] = 0; }
       m_relayout = false;
+      m_scrollY = 0; m_scrollMax = 0;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
-      m_lockBlocked = false;
+      m_lockBlocked = false; m_lockBlockedAt = 0;
       m_pendUnlock = false;
       m_maxEditOn = false; m_maxEditX = 0; m_maxEditY = 0;
       m_d.addonN = 0; m_d.violMargin = false; m_d.violRisk = false; m_d.beLines = false;
@@ -2081,7 +2205,7 @@ public:
       for(int li = 0; li < RCS_L_MAX; li++) m_L[li] = "";
       for(int ti = 0; ti < RCS_TIP_MAX; ti++) { m_tipT[ti] = ""; m_tipD[ti] = ""; }
       m_d.planLabel = "--"; m_d.phaseLabel = "--"; m_d.acctTypeLabel = "--";
-      m_d.addonsLabel = ""; m_d.cycleLabel = ""; m_d.sizeLabelFull = "--";
+      m_d.cycleLabel = ""; m_d.sizeLabelFull = "--";
       m_d.login = 0; m_d.minDays = 0; m_d.minDaysDone = 0;
       m_d.cfgNewsHigh = true; m_d.cfgNewsMed = true; m_d.cfgSound = true;
       m_d.cfgTelegram = false; m_d.cfgComfort = true; m_d.cfgDiscipline = true;
@@ -2117,7 +2241,7 @@ public:
    int  SecGet(void)   const { return m_sec; }
    void SetStateSec(const int st, const int sec) {
       if(st >= 0 && st <= 2) m_state = st;
-      if(sec >= RZ_RAIL_LIM && sec <= RZ_RAIL_HELP) m_sec = sec;
+      if(sec >= RZ_RAIL_LIM && sec <= RZ_RAIL_HELP) { m_sec = sec; m_scrollY = 0; }
    }
    void SetSecOpenMask(const int mask) {
       for(int i = 0; i < 8; i++) m_secOpen[i] = ((mask & (1 << i)) != 0);
@@ -2206,6 +2330,24 @@ public:
       return (i == 0 ? RZ_FLT_QLIM : (i == 1 ? RZ_FLT_QLOT : RZ_FLT_QNEWS));
    }
    int ZidCfg(const int i)   const { return RZ_CFG_PAL + i; }         // 0..9
+   //--- v3.57 : ONZE zones survolables avaient un repli anglais dans TipText et
+   //--- aucun accesseur : l hote ne pouvait PAS les traduire, donc leur aide
+   //--- restait en anglais en FR et en ES - dont l auto-verrou et sa liberation,
+   //--- les quatre onglets de reglages, et les deux cases de violation. Un id
+   //--- par accesseur : une insertion dans l enum ne peut pas decaler la serie.
+   int ZidScrollUp(void) const { return RZ_SIDE_UP; }
+   int ZidScrollDn(void) const { return RZ_SIDE_DN; }
+   int ZidCfgTab0(void) const { return RZ_CFG_TAB0; }
+   int ZidCfgTab1(void) const { return RZ_CFG_TAB1; }
+   int ZidCfgTab2(void) const { return RZ_CFG_TAB2; }
+   int ZidCfgTab3(void) const { return RZ_CFG_TAB3; }
+   int ZidSelfLock(void) const { return RZ_SELFLOCK; }
+   int ZidUnlock(void)   const { return RZ_UNLOCK; }
+   int ZidHyper(void)    const { return RZ_TIP_HYPER; }
+   int ZidMViol(void)    const { return RZ_CFG_MVIOL; }
+   int ZidRViol(void)    const { return RZ_CFG_RVIOL; }
+   int ZidBeTip(void)    const { return RZ_CFG_BE; }
+   int ZidMaxLotEdit(void) const { return RZ_MAXLOT_EDIT; }
    int ZidCptTip(void) const { return RZ_TIP_CPT; }
    int ZidHelpTip(void) const { return RZ_TIP_HELP; }
    //--- how many times the canvases have been (re-)created. The host watches
@@ -2384,14 +2526,16 @@ public:
       // stays live - rail navigation, folding, tooltips, the copy boxes - and
       // so does the release path, which is the lock's own legitimate exit.
       if(m_d.discLocked) {
-         if(hit == RZ_NAV_KILL) { m_lockBlocked = true; RenderAll(); return true; }
+         if(hit == RZ_NAV_KILL) { m_lockBlocked = true; m_lockBlockedAt = TimeCurrent();
+                                  RenderAll(); return true; }
          if((hit >= RZ_STEP_DEC0 && hit <= RZ_STEP_INC9) ||
             (hit >= RZ_CAS_PREV0 && hit <= RZ_CAS_NEXT4) ||
             (hit >= RZ_ADDON0    && hit <= RZ_ADDON6)    ||
             (hit >= RZ_CFG_PAL   && hit <= RZ_CFG_RTOOLS && hit != RZ_CFG_PAL &&
              hit != RZ_CFG_MODE  && hit != RZ_CFG_LANG)  ||
             hit == RZ_CFG_MVIOL  || hit == RZ_CFG_RVIOL   || hit == RZ_SELFLOCK) {
-            m_lockBlocked = true; RenderAll(); return true;
+            m_lockBlocked = true; m_lockBlockedAt = TimeCurrent();
+            RenderAll(); return true;
          }
       }
       // any click elsewhere disarms a pending lock confirmation : an armed
@@ -2415,6 +2559,13 @@ public:
       // close the panel under the user's finger (RZ_TIP_TARGET and RZ_TIP_MSGS
       // did exactly that in v3.01.12, caught by the zone audit).
       if(hit >= RZ_TIP_CPT && hit <= RZ_TIP_NEWSTR) return true;
+      if(hit == RZ_SIDE_UP || hit == RZ_SIDE_DN) {   // v3.59 : une page par clic
+         m_scrollY += (hit == RZ_SIDE_DN ? ScrollStep() : -ScrollStep());
+         if(m_scrollY > m_scrollMax) m_scrollY = m_scrollMax;
+         if(m_scrollY < 0)           m_scrollY = 0;
+         RenderAll();
+         return true;
+      }
       if(hit >= RZ_HELP0 && hit <= RZ_HELP9) {   // manual : one topic at a time
          const int ht2 = hit - RZ_HELP0;
          m_hOpen = (m_hOpen == ht2 ? -1 : ht2);
@@ -2486,7 +2637,7 @@ public:
          case RZ_RAIL_DISC: case RZ_RAIL_CPT: case RZ_RAIL_CFG: case RZ_RAIL_HELP:
             if(hit == RZ_RAIL_POS) m_fltHidden = false;     // the only way back after the cross
             if(m_state == 1 && m_sec == hit) m_state = 0;   // toggle (VS Code contract)
-            else { m_state = 1; m_sec = hit; }
+            else { m_state = 1; m_sec = hit; m_scrollY = 0; }   // v3.59 : nouvelle section, en haut
             OnChartChange();
             return true;
          case RZ_RAIL_CHEVRON:

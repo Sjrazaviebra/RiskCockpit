@@ -285,6 +285,110 @@ def run(root):
                ("%d champs, lus et ecrits" % len(fresh)) if not missing
                else "absents du cache : " + " ".join(missing))
 
+    # 8c. UN GARDE-FOU DOIT GARDER QUELQUE CHOSE. Une temporisation peut etre
+    #     declaree, commentee, remise a zero a chaque attache - et ne proteger
+    #     rien du tout : le compilateur voit une variable ECRITE, donc utilisee.
+    #     `g_last_telegram_alert[]` a porte « prevents spam on flapping
+    #     transitions » pendant vingt-neuf versions sans jamais etre comparee a
+    #     une horloge, et le son qu elle devait proteger a tourne a 2 Hz.
+    #     Ici : tout nom de temporisation doit apparaitre dans une COMPARAISON.
+    guard_names = set(re.findall(r'#define\s+(RC_\w*(?:COOLDOWN|THROTTLE)\w*)', hcode))
+    guard_names |= set(re.findall(r'\bdatetime\s+(g_\w*(?:alert|throttle|cooldown)\w*)\s*[\[=;]',
+                                  hcode, re.I))
+    guard_dead = []
+    for g in sorted(guard_names):
+        cmp_hit = [ln for ln in hcode.split("\n")
+                   if re.search(r'\b' + g + r'\b', ln) and re.search(r'[<>]=?', ln)]
+        if not cmp_hit:
+            guard_dead.append(g)
+    report("garde-fous branches", not guard_dead,
+           ("%d temporisations comparees" % len(guard_names)) if not guard_dead
+           else "jamais comparees : " + " ".join(guard_dead))
+
+    # 8d. UN GLOBAL ECRIT EST, POUR LE COMPILATEUR, UN GLOBAL UTILISE. Il ne
+    #     dira jamais rien d une ancre de journee posee a chaque attache et lue
+    #     par personne, ni de miettes de diagnostic remplies a chaque appel pour
+    #     une ligne de debug supprimee. Ce sont des reperes qui MENTENT : on les
+    #     lit comme le mecanisme qu ils nomment. Dix vivaient dans ce fichier.
+    hbare = re.sub(r'/\*.*?\*/', '', hcode, flags=re.S)
+    hbare = re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', hbare)
+    TY = r'(?:datetime|double|int|bool|string|ulong|long|uint|uchar|color|float|short)'
+    g_decl = set(re.findall(r'^\s*' + TY + r'\s+(g_\w+)\s*(?:\[[^\]]*\])?\s*(?:=|;)',
+                            hbare, re.M))
+    g_dead = []
+    for g in sorted(g_decl):
+        reads = 0
+        for mm in re.finditer(r'\b' + g + r'\b', hbare):
+            tail = hbare[mm.end():mm.end() + 40]
+            if re.match(r'\s*(?:\[[^\]]*\])?\s*=(?!=)', tail):
+                continue                      # ecriture pure
+            if re.search(TY + r'\s+$', hbare[max(0, mm.start() - 30):mm.start()]):
+                continue                      # la declaration elle-meme
+            reads += 1
+        if reads == 0:
+            g_dead.append(g)
+    report("etat global relu", not g_dead,
+           ("%d globaux, tous relus" % len(g_decl)) if not g_dead
+           else "ecrits et jamais lus : " + " ".join(g_dead))
+
+    # 8e. UNE INFOBULLE QUE L HOTE NE PEUT PAS ATTEINDRE RESTE EN ANGLAIS,
+    #     partout. La coquille porte un repli anglais EN DUR par zone ; l hote
+    #     pousse les trois langues par-dessus. Une zone sans accesseur, ou que
+    #     l hote ne pousse pas, garde ce repli comme SEUL texte - et rien ne le
+    #     dit : ni le compilateur, ni le controle des libelles, qui ne regarde
+    #     pas les infobulles. Onze zones etaient dans cet etat, dont l auto-
+    #     verrou, qui arme un STOP de plusieurs heures.
+    zorder2 = re.findall(r'\b(RZ_\w+)\b',
+                         re.sub(r'//[^\n]*', '',
+                                re.search(r'enum ERCZone \{(.*?)\};', shell, re.S).group(1)))
+    zpos = dict((n, i) for i, n in enumerate(zorder2))
+    # accesseurs : nom -> (base, "scalaire" | "plage") ou liste explicite
+    acc1 = dict(re.findall(r'int\s+(Zid\w+)\(void\)\s*const\s*\{\s*return\s+(RZ_\w+)\s*;', shell))
+    accN = dict(re.findall(r'int\s+(Zid\w+)\(const int i\)\s*const\s*\{\s*return\s+(RZ_\w+)\s*\+\s*i\s*;', shell))
+    accL = {}
+    for nm, body in re.findall(r'int\s+(Zid\w+)\(const int i\)\s*const\s*\{(.*?)\}', shell, re.S):
+        ids = re.findall(r'\b(RZ_\w+)\b', body)
+        if nm not in accN and ids:
+            accL[nm] = ids
+    covered = set()
+    for m in re.finditer(r'SetTip\(\s*g_shell\.(Zid\w+)\(\s*\)', host):
+        if m.group(1) in acc1:
+            covered.add(acc1[m.group(1)])
+    # indices litteraux : g_shell.SetTip(g_shell.ZidPanel(0), ...)
+    for m in re.finditer(r'SetTip\(\s*g_shell\.(Zid\w+)\(\s*(\d+)\s*\)', host):
+        nm, k = m.group(1), int(m.group(2))
+        if nm in accL and k < len(accL[nm]):
+            covered.add(accL[nm][k])
+        elif nm in accN:
+            b = zpos.get(accN[nm], -1)
+            if 0 <= b + k < len(zorder2):
+                covered.add(zorder2[b + k])
+    for m in re.finditer(r'for\s*\(int i = 0; i < ([^;]+); \+\+i\)\s*g_shell\.SetTip\('
+                         r'g_shell\.(Zid\w+)\(i\)', host):
+        bound, nm = m.group(1).strip(), m.group(2)
+        if nm in accL:
+            covered |= set(accL[nm])
+            continue
+        if nm not in accN:
+            continue
+        if bound.isdigit():
+            n = int(bound)
+        else:                                   # borne = un accesseur de l enum
+            mm = re.search(r'int\s+' + re.escape(bound.split('.')[-1].rstrip('()')) +
+                           r'\(void\)\s*const\s*\{\s*return\s+(RZ_\w+)\s*-\s*(RZ_\w+)', shell)
+            n = (zpos[mm.group(1)] - zpos[mm.group(2)] + 1) if mm else 0
+        b = zpos.get(accN[nm], -1)
+        for k in range(n):
+            if 0 <= b + k < len(zorder2):
+                covered.add(zorder2[b + k])
+    tip_body = re.search(r'bool\s+TipText\(.*?\n   \}', shell, re.S)
+    tip_cases = re.findall(r'case (RZ_\w+):', tip_body.group(0)) if tip_body else []
+    tip_orph = [c for c in tip_cases if c not in covered]
+    report("infobulles traduisibles", bool(tip_cases) and not tip_orph,
+           ("%d zones, toutes poussees" % len(tip_cases)) if tip_cases and not tip_orph
+           else ("TipText introuvable" if not tip_cases
+                 else "anglais force : " + " ".join(tip_orph)))
+
     # 9. PUBLIC repo : nothing personal, in the sources or in the binary.
     #    The binary check needs its positive control first.
     # One or TWO backslashes : source code escapes them, markdown and comments
@@ -427,6 +531,21 @@ def run(root):
         report("binaire a jour", not stale,
                ("%d sources comparees" % len(srcs)) if not stale
                else "plus recents que le .ex5 : " + " ".join(stale))
+
+    # 11. LE CHIFFRE DU README EST TENU PAR LE GATE. Il annoncait « Eleven
+    #     static checks » pendant que le gate en executait 21 : il a derive a
+    #     chaque lot, parce que rien ne le tenait. Un chiffre faux sur la
+    #     premiere page d un depot public est ce qui decide si le lecteur fait
+    #     confiance au reste. Ce controle est le DERNIER, et il se compte
+    #     lui-meme (d ou le +1).
+    rd = read(root, "README.md")
+    if rd is not None:
+        mm = re.search(r'^\s*(\d+)\s+static checks\b', rd, re.M)
+        want = len(results) + 1
+        report("compte du README", bool(mm) and int(mm.group(1)) == want,
+               ("%d controles annonces" % want) if mm and int(mm.group(1)) == want
+               else ("README : aucun « N static checks »" if not mm
+                     else "README dit %s, le gate en execute %d" % (mm.group(1), want)))
 
 
 if __name__ == "__main__":

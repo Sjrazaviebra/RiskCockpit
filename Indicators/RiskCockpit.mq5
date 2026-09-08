@@ -1,18 +1,24 @@
 ﻿//+------------------------------------------------------------------+
-//|                                          RiskCockpit.mq5   |
+//|                                                  RiskCockpit.mq5 |
 //|                                                JR Trading - 2026 |
-//|                                          https://javadrazavi.fr  |
+//|                                           https://javadrazavi.fr |
 //|                                                                  |
-//|  RiskCockpit Indicator                                     |
-//|  ---------------------------                                     |
-//|  Real-time rule-monitoring panel for prop-firm traders on        |
-//|  FundedNext (Stellar 1-Step / 2-Step / Lite / Instant).          |
-//|  No auto-actions: this is an ADVISOR. Trades stay in the user's  |
-//|  hands. The companion EA (V2) executes auto-fixes.               |
+//|  RiskCockpit - prop-firm rule dashboard                          |
+//|  --------------------------------------                          |
+//|  Real-time rule-monitoring panel for prop-firm traders. Built-in |
+//|  profiles for FundedNext (Stellar 1-Step / 2-Step / Lite /       |
+//|  Instant) plus FTMO / E8 / The5ers / MyFundedFX rule sets.       |
 //|                                                                  |
-//|  T6 (this commit): UI skeleton + panel rendering.                |
-//|  T7 (next commit): live rule evaluation hooked to MQL5 trade     |
-//|                    APIs and OnTradeTransaction events.           |
+//|  READ-ONLY BY CONSTRUCTION. There is no trading function in this |
+//|  file : it cannot open, close or modify a position. It reads the |
+//|  account, computes the distance to every limit that can end it,  |
+//|  and says what it finds. Every decision stays with the user.     |
+//|                                                                  |
+//|  News classification comes from the companion SERVICE            |
+//|  RCNewsFeeder : MQL5 forbids WebRequest inside an indicator, so  |
+//|  the service fetches the calendar and the indicator reads the    |
+//|  file. Without it, the MetaTrader calendar is used instead and   |
+//|  the panel says so on screen.                                    |
 //|                                                                  |
 //|  Color literals MUST use the hex form ((color)0x00BBGGRR) - the  |
 //|  clang-format auto-formatter on this workspace breaks the        |
@@ -20,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.54"
+#property version "3.60"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.54"
+#define RC_VERSION_STR "3.60"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -243,9 +249,9 @@ ThemeColors g_theme;
 // its opaque glow lives in a margin band around the panel edge (over the chart).
 // Named "RC_fx" -> dragged by MovePanelBy, cleared by DestroyAllObjects, and the
 // GPU resource is freed in OnDeinit / before every re-create.
-bool    g_fx_was_breach = false;   // gate idle GPU updates (only redraw while breaching / on clear)
-int     g_fx_w  = 0;
-int     g_fx_h  = 0;
+// v3.56 : g_fx_was_breach / g_fx_w / g_fx_h lived here - the last three globals
+// of the legacy full-screen breach overlay, replaced by the shell's band. They
+// were declared, initialised, and touched by nothing.
 #define RC_FX_MARGIN 12
 
 // v1.4 MODERN : the panel body is drawn in ONE CCanvasKit bitmap (rounded card,
@@ -397,49 +403,36 @@ int RC_CapWidth(const string txt, const int h, const string font) {
 //+------------------------------------------------------------------+
 //| Rule row definition                                              |
 //+------------------------------------------------------------------+
+// v3.58 : five of the seven fields were written on EVERY refresh and read by
+// nobody, under a comment naming a consumer that no longer exists ("the ONE
+// source the Telegram message is built from" - that path died in v3.47).
+// `label` was worse : eleven English labels assigned once, while what the panel
+// actually draws comes from the i18n table - a second, contradictory list that
+// a reader could take for the source of truth. The registry now carries what it
+// is really for : the key the rule loop switches on, and the status the alarm
+// compares against its previous value.
 struct RuleRow {
     string key;        // internal id  (also used in object names)
-    string label;      // displayed left
-    double value_pct;  // 0..100 (or 0 if N/A)
-    double max_pct;    // upper bound for the bar
-    string value_text; // free-form ("35% / 70%" or "N/A")
     ENUM_RC_STATUS status;
-    bool applies; // false -> shown greyed
 };
 
 #define RC_RULE_COUNT 11
 RuleRow g_rows[RC_RULE_COUNT];
 
 void DefineRules(void) {
-    g_rows[0].key = "rule_margin_cum";
-    g_rows[0].label = "Cumulative Margin";
-    g_rows[1].key = "rule_margin_pt";
-    g_rows[1].label = "Max lot allowed"; // 1.1 : was "Per-Trade Margin" (bar hidden in indicator)
-    g_rows[2].key = "rule_risk_cum";
-    g_rows[2].label = "Cumulative Open Risk";
-    g_rows[3].key = "rule_daily_dd";
-    g_rows[3].label = "Daily DD";
-    g_rows[4].key = "rule_overall_dd";
-    g_rows[4].label = "Overall DD";
-    g_rows[5].key = "rule_target";
-    g_rows[5].label = "Profit Target";
-    g_rows[6].key = "rule_qs";
-    g_rows[6].label = "Quick Strike Ratio";
-    g_rows[7].key = "rule_hyper";
-    g_rows[7].label = "Hyperactivity (trades)";
-    g_rows[8].key = "rule_news";
-    g_rows[8].label = "News Window";
-    g_rows[9].key = "rule_msgs";
-    g_rows[9].label = "Server msgs (orders)";
-    g_rows[10].key = "rule_newsstats";          // V1.24 G2 : text-only News-Trading stats row
-    g_rows[10].label = "News Trades";
-    for (int i = 0; i < RC_RULE_COUNT; ++i) {
-        g_rows[i].value_pct = 0.0;
-        g_rows[i].max_pct = 100.0;
-        g_rows[i].value_text = "--";
+    g_rows[0].key  = "rule_margin_cum";
+    g_rows[1].key  = "rule_margin_pt";
+    g_rows[2].key  = "rule_risk_cum";
+    g_rows[3].key  = "rule_daily_dd";
+    g_rows[4].key  = "rule_overall_dd";
+    g_rows[5].key  = "rule_target";
+    g_rows[6].key  = "rule_qs";
+    g_rows[7].key  = "rule_hyper";
+    g_rows[8].key  = "rule_news";
+    g_rows[9].key  = "rule_msgs";
+    g_rows[10].key = "rule_newsstats";         // V1.24 G2 : text-only News-Trading stats row
+    for (int i = 0; i < RC_RULE_COUNT; ++i)
         g_rows[i].status = RC_STATUS_NA;
-        g_rows[i].applies = true;
-    }
 }
 
 //+------------------------------------------------------------------+
@@ -455,7 +448,12 @@ int g_addons_mask = FN_ADDON_NONE;
 CPyramidEngine g_pyramid_engine;
 
 // Live-state caches (T7)
-datetime g_day_start = 0;
+// v3.56 : g_day_start lived here - a day anchor set to server midnight at every
+// OnInit and read by NOBODY. Its twin g_equity_at_day_start had already been
+// removed as dead code ; this one stayed, a named landmark in the very block
+// where the deadliest rule of the product is computed, suggesting the daily DD
+// is measured from it and therefore reset on each timeframe switch. It is not :
+// Live_DailyDdPct rebuilds the day from the deal history, every time.
 double g_peak_balance = 0.0; // v2.02.05 FIX 1 : REALIZED-balance high-water mark (FN Instant trailing
                              // floor follows the balance, not equity) ; persisted per login (RC_ins_pb_<login>)
 
@@ -493,10 +491,14 @@ ulong g_last_tickets[];
 // Suppress sound alerts during the very first refresh (OnInit, timeframe switch).
 bool g_alerts_armed = false;
 
-// Telegram per-rule rate limiter : last alert timestamp per rule index.
-// 15-second cooldown per rule prevents spam on flapping transitions.
-datetime g_last_telegram_alert[RC_RULE_COUNT];
-#define RC_TELEGRAM_COOLDOWN_SEC 15
+// v3.55 : per-rule SOUND rate limiter : last alert timestamp per rule index.
+// It was declared for the Telegram path with exactly this comment - "prevents
+// spam on flapping transitions" - and that path died in v3.26, so the limiter
+// guarded nothing while the sound it was meant to protect ran unthrottled : a
+// rule breathing across its band alternated two sounds at 2 Hz, without end,
+// precisely when the rule matters. It guards the SOUND.
+datetime g_last_sound_alert[RC_RULE_COUNT];
+#define RC_SOUND_COOLDOWN_SEC 15
 
 // Post-violation tightening (B7). Runtime-mutable via clickable checkboxes
 // in front of the Margin / Risk rows; persisted across reattach via
@@ -506,6 +508,9 @@ bool g_margin_violation_active = false;
 bool g_risk_violation_active   = false;
 
 // M1b : throttle for the max-lot margin debug Print (avoid Experts-log spam).
+// v3.56 : that Print had disappeared, so this throttle - like the three
+// breadcrumbs it guards - was written on every call and read by nobody. See
+// MaxLotDbg : they say again what their comments promise.
 datetime g_maxlot_dbg_last = 0;
 // FIX (LOT 1) : caches throttlent les scans lourds dans OnTimer pour eviter que
 // OBJECT_CLICK ne soit affame (le panel update mais les boutons ne repondent plus).
@@ -564,11 +569,9 @@ int    g_maxlot_err  = 0;
 double   g_comm_per_lot = -1.0;  // -1 = unknown (no recent deal on this symbol)
 datetime g_comm_scan    = 0;
 string   g_comm_sym      = "";
-// V1.24 G3 B-COPY : raw lot numbers exposed in read-only OBJ_EDIT fields so the
-// trader can click + Ctrl+C them into the native order panel (no clipboard DLL).
-double   g_maxlot_copy  = 0.0;   // broker max lot for the active symbol
-int      g_maxlot_digits = 2;    // display digits derived from SYMBOL_VOLUME_STEP
-double   g_suglot_copy  = 0.0;   // suggested lot
+// v3.56 : the three V1.24 G3 copy globals lived here. The copy boxes moved to
+// the shell in v3.25 and own their own values ; one of these was still being
+// written on every lot computation, for a reader that no longer existed.
 double MarginPerLot(const string sym);
 double MaxLotAllowed(const string sym, double cap_pct, double balance);
 
@@ -635,13 +638,7 @@ void InitEffectiveSettings(void) {
     // toolkit cannot be disabled) ; Personal defaults OFF and its RC_risktools
     // toggle decides. Resolved here (seed + GV folded) so a Personal "OFF" GV
     // can never leak onto a prop account.
-    if (PlanIsPersonal()) {
-        g_eff_risktools = false;
-        if (GlobalVariableCheck("RC_risktools"))
-            g_eff_risktools = (GlobalVariableGet("RC_risktools") != 0.0);
-    } else {
-        g_eff_risktools = true; // PROP : always ON, ignores input + GV
-    }
+    ResolveRiskTools();   // v3.56 : one function, re-run on every plan change
     // V1.29 I : Personal type auto-detected (Demo if the broker account is a demo).
     g_eff_personal_demo = (AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_DEMO) ? 1 : 0;
     // v2.13 FEATURE C : account-profile settings load PER LOGIN (legacy global =
@@ -770,7 +767,7 @@ datetime FFNextEvt(const bool restricted_class);
 bool FFInNewsWindow(void);
 string FormatAge(int seconds);
 string PositionStatusLabel(ENUM_RC_STATUS s, int age, bool sl_missing);
-void TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status);
+int  TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status);
 bool PositionListChanged(void);
 void SnapshotPositionList(void);
 
@@ -786,6 +783,8 @@ double EffectiveMarginCap(void);
 double EffectiveRiskCap(void);
 bool   ProfileCanBeRestricted(void);
 void PersistViolationFlags(void);
+void LoadViolationFlags(void);
+void ResolveRiskTools(void);
 
 // V2 (this revision) - profit metrics + suggested lot + editable max parallel
 double SumClosedDealsPnL(const datetime from, const datetime to);
@@ -973,29 +972,6 @@ int OnInit(void) {
     else
         g_max_parallel = MathMax(1, InpMaxParallelPositions);
 
-    // Post-violation flags (B7) : input is the default, GlobalVariable (set by
-    // a previous click) wins so the tightened caps survive a reattach.
-    g_margin_violation_active = InpMarginViolationActive;
-    g_risk_violation_active   = InpRiskViolationActive;
-    if (GlobalVariableCheck("RC_margin_violation"))
-        g_margin_violation_active = (GlobalVariableGet("RC_margin_violation") != 0.0);
-    {   // A 2nd strike belongs to ONE account, like size / phase / plan. Stored
-        // globally, it followed the trader onto every other login.
-        //
-        // v3.49 : the two twin flags were NOT read in the same order. Margin was
-        // global-then-per-login, so the per-login value won - correct. Risk was
-        // per-login-THEN-GLOBAL, so the GLOBAL won and the per-login read was
-        // dead. A trader clearing the box on a clean account wiped the
-        // restriction off every OTHER account : EffectiveRiskCap went back to
-        // 3 % instead of 1 %, and that cap feeds the LIM meter, every position's
-        // status, the SL lines and above all the LOT ADVISOR'S BUDGET - three
-        // times the risk advised on an account where the next violation ends it.
-        // The global lines that followed are gone : GVGetLogin already falls back
-        // to the un-suffixed key, so no migration is lost.
-        double mv = 0.0, rv = 0.0;
-        if (GVGetLogin("RC_margin_violation", mv)) g_margin_violation_active = (mv != 0.0);
-        if (GVGetLogin("RC_risk_violation",   rv)) g_risk_violation_active   = (rv != 0.0);
-    }
 
     // v3 : mouse-move events feed the shell (drag of the floating table +
     // hover-intent tooltips). The legacy panel anchor died with the panel.
@@ -1062,29 +1038,19 @@ int OnInit(void) {
         Print("RiskCockpit: combination not in catalog - using fallback profile ",
               g_profile.profile_id);
 
-    // FIX 4 (V1.0.1) : challenge / free profiles have no 2nd-strike restriction
-    // concept. Never let a flag persisted by a previous FUNDED/Instant session
-    // silently tighten their caps - force the violation flags off here (now that
-    // the profile is resolved). Funded / Instant keep whatever was set above.
-    if (!ProfileCanBeRestricted()) {
-        g_margin_violation_active = false;
-        g_risk_violation_active   = false;
-    }
+    // v3.56 : the two 2nd-strike flags are loaded HERE and nowhere else, now
+    // that the profile is resolved. They used to be read only at attach, and
+    // ApplySettingsChange erased them with no symmetric reload.
+    LoadViolationFlags();
 
     // Live-state baseline
     // v2.02.05 FIX 1 : realized-balance high-water mark, persisted PER LOGIN (GV name
     // carries the login, so switching accounts NEVER destroys another login's peak).
     LoadOrSeedPeakBalance();
-    MqlDateTime mdt;
-    TimeToStruct(TimeCurrent(), mdt);
-    mdt.hour = 0;
-    mdt.min = 0;
-    mdt.sec = 0;
-    g_day_start = StructToTime(mdt);
     ArrayResize(g_last_tickets, 0);
     for (int i = 0; i < RC_RULE_COUNT; ++i) {
         g_last_status[i] = RC_STATUS_NA;
-        g_last_telegram_alert[i] = 0;
+        g_last_sound_alert[i] = 0;
     }
 
     // Telegram setup hint (B1) - cheap one-time message at attach time.
@@ -1521,13 +1487,9 @@ void BuildDeckData(RCDeckData &d) {
     d.warnRisk    = RuleWarnRatio("rule_risk_cum",   d.trailing);
     d.warnDaily   = RuleWarnRatio("rule_daily_dd",   d.trailing);
     d.warnOverall = RuleWarnRatio("rule_overall_dd", d.trailing);
-    // v3.39 : the catalogue carries Quick Strike's OWN warning band
-    // (warn_pct / violate_pct) and the legacy row used it. Use it when the
-    // profile defines one ; fall back to the generic threshold otherwise.
-    d.warnQuick   = ((g_profile.quick_strike_warn_pct > 0.0 &&
-                      g_profile.quick_strike_violate_pct > 0.0)
-                     ? g_profile.quick_strike_warn_pct / g_profile.quick_strike_violate_pct
-                     : RuleWarnRatio("rule_qs", d.trailing));
+    // v3.55 : the Quick Strike band now lives INSIDE RuleWarnRatio, where the
+    // sound reads it too. It was computed here only, so the two disagreed.
+    d.warnQuick   = RuleWarnRatio("rule_qs",        d.trailing);
     d.warnHyper   = RuleWarnRatio("rule_hyper",      d.trailing);
     // worst = raw consumption (what a BAR must show) ; sev = consumption
     // measured against each rule's OWN warning threshold (what a COLOUR must
@@ -1633,11 +1595,13 @@ void BuildDeckData(RCDeckData &d) {
     d.pyrOn       = (InpEnablePyramidSafe && BuildPyramidLine(d.pyrText, d.pyrStat));
     // v3.06 : week-end hold. The legacy clock blinked it AND fired the alert ;
     // the shell had neither. The alert keeps its own once-per-window latch.
-    d.weekendHold = IsWeekendHoldRisk();
+    d.weekendLvl  = WeekendHoldLevel();
+    d.weekendHold = (d.weekendLvl > 0);
     // v3.11 : say which controls the host will refuse to act on
     d.rtoolsLocked = !PlanIsPersonal();          // prop plan : toolkit forced ON
     d.violLocked   = !ProfileCanBeRestricted();  // the flags would be reset at once
-    if (d.weekendHold) FireWeekendAlert(); else g_weekend_warned = false;
+    if (d.weekendHold) FireWeekendAlert(d.weekendLvl); else g_weekend_warned = 0;
+    FireDisciplineAlerts(d);   // v3.55 : tilt and hard locks finally have a voice
     // --- lot advisor (cell LOT) -------------------------------------------
     SuggestedLot s;
     if (Live_ComputeSuggestedLot(s)) {
@@ -1837,17 +1801,10 @@ void BuildDeckData(RCDeckData &d) {
     // comme n'ayant jamais trade.
     d.minDaysDone   = Live_TradingDaysCount();
     d.cycleLabel    = "";
-    d.addonsLabel   = "";
-    {   // active add-ons, short list (same mask the footer prints)
-        string ad = "";
-        if ((g_addons_mask & FN_ADDON_LIFETIME_95) != 0) ad += "95% ";
-        if ((g_addons_mask & FN_ADDON_NO_MIN_DAYS) != 0) ad += "NoMinDays ";
-        if ((g_addons_mask & FN_ADDON_SWAP_FREE)   != 0) ad += "SwapFree ";
-        if ((g_addons_mask & FN_ADDON_10PCT_DD)    != 0) ad += "10%DD ";
-        if ((g_addons_mask & FN_ADDON_DOUBLE_UP)   != 0) ad += "DoubleUp ";
-        if ((g_addons_mask & FN_ADDON_BI_WEEKLY)   != 0) ad += "BiWeekly ";
-        d.addonsLabel = (StringLen(ad) > 0 ? ad : Tr("addons_none"));
-    }
+    // v3.58 : a six-branch add-on list was built here TWICE A SECOND and thrown
+    // away - its only reader, the footer of the legacy panel, died in v3.06. The
+    // list the panel really draws is built thirty lines below, from its own
+    // table. The comment ("same mask the footer prints") outlived the footer.
     d.cfgNewsHigh   = g_eff_news_high;
     d.cfgNewsMed    = g_eff_news_med;
     d.cfgSound      = g_eff_sound;
@@ -2117,6 +2074,8 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_IN_MIN,        Tr("shl_inmin"));
     g_shell.SetLabel(RCL_NEWS_NONE24,   Tr("shl_none24"));
     g_shell.SetLabel(RCL_RULE40,        Tr("shl_rule40"));
+    g_shell.SetLabel(RCL_TILT_IN,       Tr("shl_tiltin"));
+    g_shell.SetLabel(RCL_SCROLL,        Tr("shl_scroll"));
     g_shell.SetLabel(RCL_CHECKFN,       Tr("shl_checkfn"));
     g_shell.SetLabel(RCL_SLG_ON,        Tr("shl_slgon"));
     g_shell.SetLabel(RCL_TILT_ON,       Tr("shl_tilton"));
@@ -2158,6 +2117,7 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_SECS_RESIZE,   Tr("shl_secsize"));
     g_shell.SetLabel(RCL_RTOOLS_OFF,    Tr("shl_rtoolsoff"));
     g_shell.SetLabel(RCL_BAND_WKND,     Tr("shl_bandwknd"));
+    g_shell.SetLabel(RCL_BAND_WKNDNOW,  Tr("shl_bandwkndnow"));
     g_shell.SetLabel(RCL_MINS_LEFT,     Tr("shl_minsleft"));
     g_shell.SetLabel(RCL_BAND_RAISE,    Tr("shl_bandraise"));
     g_shell.SetLabel(RCL_BAND_SLLOW,    Tr("shl_bandsllow"));
@@ -2199,6 +2159,24 @@ void ShellPushLabels(void) {
         Tr("tipq_" + IntegerToString(i)));
     g_shell.SetTip(g_shell.ZidCptTip(),  Tr("tip_cpt"));
     g_shell.SetTip(g_shell.ZidHelpTip(), Tr("tip_help"));
+    // v3.57 : ces onze zones n avaient QUE le repli anglais code dans le shell -
+    // aucune traduction ne leur etait poussee, donc leur aide restait en anglais
+    // en FR et en ES, y compris l auto-verrou (qui arme un STOP de plusieurs
+    // heures) et sa liberation. Le repli anglais du shell n est plus le seul
+    // texte que ces controles savent dire.
+    g_shell.SetTip(g_shell.ZidScrollUp(),  Tr("tipz_scrollup"));
+    g_shell.SetTip(g_shell.ZidScrollDn(),  Tr("tipz_scrolldn"));
+    g_shell.SetTip(g_shell.ZidCfgTab0(),   Tr("tipz_tab0"));
+    g_shell.SetTip(g_shell.ZidCfgTab1(),   Tr("tipz_tab1"));
+    g_shell.SetTip(g_shell.ZidCfgTab2(),   Tr("tipz_tab2"));
+    g_shell.SetTip(g_shell.ZidCfgTab3(),   Tr("tipz_tab3"));
+    g_shell.SetTip(g_shell.ZidSelfLock(),  Tr("tipz_selflock"));
+    g_shell.SetTip(g_shell.ZidUnlock(),    Tr("tipz_unlock"));
+    g_shell.SetTip(g_shell.ZidHyper(),     Tr("tipz_hyper"));
+    g_shell.SetTip(g_shell.ZidMViol(),     Tr("tipz_mviol"));
+    g_shell.SetTip(g_shell.ZidRViol(),     Tr("tipz_rviol"));
+    g_shell.SetTip(g_shell.ZidBeTip(),     Tr("tipz_be"));
+    g_shell.SetTip(g_shell.ZidMaxLotEdit(), Tr("tipz_maxlot"));
 }
 // v3 SHELL : a config toggle was clicked. The SHELL never mutates the model -
 // the change lands HERE, on the same globals + persistence the modal uses.
@@ -2251,11 +2229,22 @@ void ShellApplyCfg(const int id) {
         // - which also writes the PER-LOGIN copy the loader reads first - existed,
         // was declared, and was called by nothing : the flag leaked from one
         // account to the next and was never saved where it is looked for.
-        g_margin_violation_active = !g_margin_violation_active;
-        PersistViolationFlags();
+        // v3.56 : the shell draws these two DISABLED whenever the profile cannot
+        // be restricted - and the host took the click anyway, PERSISTING a
+        // violation onto an account that has no such concept. The damage was
+        // masked (the RAM copy was wiped right after) but the STORED value
+        // stayed : the day the trader came back to a funded phase, a violation
+        // he never had came back with it, and a 1 % cap instead of 3 %.
+        // A control drawn refused must be refused.
+        if (ProfileCanBeRestricted()) {
+            g_margin_violation_active = !g_margin_violation_active;
+            PersistViolationFlags();
+        }
     } else if (id == g_shell.CfgIdViolRisk()) {
-        g_risk_violation_active = !g_risk_violation_active;
-        PersistViolationFlags();
+        if (ProfileCanBeRestricted()) {
+            g_risk_violation_active = !g_risk_violation_active;
+            PersistViolationFlags();
+        }
     } else if (id == g_shell.CfgIdBe()) {
         g_be_visible = !g_be_visible;
         PersistBE();
@@ -2297,7 +2286,20 @@ void ShellApplyCycle(const int field, const int dir) {
     else                 dd = ((dd - 1 + dir) % 31 + 31) % 31 + 1;
     const int dim = DaysInMonth(y, m);      // shared with RC_Math : leap years included
     if (dd > dim) dd = dim;                 // never build an impossible date
-    g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
+    // v3.56 : the SHAPE was validated, the POSITION IN TIME never was. One click
+    // too many on the year cycler put the cycle start in the FUTURE, and the
+    // value is persisted per login - so it survived detach, timeframe switch and
+    // restart. From then on HistorySelect(future, now) returns an empty range :
+    // Quick Strike showed 0.00 % on an empty GREEN meter while the trader could
+    // be past the FN violation threshold, and the news card showed 0 trades. Two
+    // rules whose only witness is this screen went from "watched" to "always
+    // clean", with no message and no n/a. A cycle cannot start tomorrow.
+    MqlDateTime tdy;
+    TimeToStruct(TimeCurrent(), tdy);       // broker server time : the same clock
+    const int today = tdy.year * 10000 + tdy.mon * 100 + tdy.day;
+    int ymd_new = y * 10000 + m * 100 + dd;
+    if (ymd_new > today) ymd_new = today;
+    g_eff_cycle_ymd = (double)ymd_new;
     GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd);
 }
 // v3.04 : arm the self-lock (the shell already asked for confirmation twice).
@@ -2565,6 +2567,14 @@ void ShellEditsTopmost(void) {
 // on a green panel : the corrected threshold had no voice. One function, both
 // consumers - the sound and the deck the shell paints from.
 double RuleWarnRatio(const string key, const bool trailing) {
+    // v3.55 : Quick Strike carries its OWN band in the catalogue (warn at 20 %,
+    // violate at 25 %). v3.39 handed that band to the SCREEN and left the SOUND
+    // on the generic 0.80, i.e. 24 % : between the two the row is amber and the
+    // alarm stays silent. That is the v3.31 invariant - ONE source for both -
+    // broken by me. It lives here, so both consumers read it.
+    if (key == "rule_qs" && g_profile.quick_strike_warn_pct > 0.0 &&
+        g_profile.quick_strike_violate_pct > 0.0)
+        return g_profile.quick_strike_warn_pct / g_profile.quick_strike_violate_pct;
     if (key == "rule_risk_cum" || key == "rule_daily_dd") return 0.70;
     if (key == "rule_overall_dd") return (trailing ? 0.50 : 0.70);   // trailing = account killer
     if (key == "rule_hyper" || key == "rule_msgs")        return 0.75;
@@ -2572,9 +2582,9 @@ double RuleWarnRatio(const string key, const bool trailing) {
 }
 void ShellRuleAlerts(const RCDeckData &d) {
     if (!g_eff_risktools) return;
+    int worst_evt = 0;   // v3.55 : 0 none, 1 back to OK, 2 warn, 3 breach
     for (int i = 0; i < RC_RULE_COUNT; ++i) {
         double used = -1.0, cap = 0.0;
-        string txt = "";
         const string k = g_rows[i].key;
         if (k == "rule_margin_cum")      { used = d.marginPct; cap = d.marginCap; }
         // rule_margin_pt was a TEXT row in the legacy panel (status N/A, never
@@ -2592,18 +2602,30 @@ void ShellRuleAlerts(const RCDeckData &d) {
         else if (k == "rule_msgs")       { used = (double)d.msgsToday;   cap = (double)d.msgsCap; }
         else continue;                   // target / news rows : informational, never alert
         if (used < 0.0 || cap <= 0.0) { g_last_status[i] = RC_STATUS_NA; continue; }
-        txt = FormatPct(used) + " / " + FormatPct(cap);
-        g_rows[i].value_pct  = used;     // the registry stays the ONE source the
-        g_rows[i].max_pct    = cap;      // Telegram message is built from
-        g_rows[i].value_text = txt;
         // The legacy rows did NOT share one threshold : risk / daily / overall
         // warned at 70 %, a TRAILING overall at 50 % (it is the account killer),
         // hyper / msgs at 75 %. Flattening everything to 80 % made every alert
         // fire later than it used to - a risk tool must not warn later.
         const double warn = RuleWarnRatio(k, d.trailing);   // v3.31 : ONE source
-        g_rows[i].status     = ComputeRangeStatus(used, cap, warn, 1.00);
-        TryFireSoundAlert(i, g_rows[i].status);
+        // v3.55 : hysteresis on the DESCENT only. A value sitting on its band -
+        // 870 against a warning line at 875 - flipped amber / green on every
+        // frame, exactly when the rule matters. Coming DOWN, a rule keeps its
+        // amber until it is 5 % clear of the band ; going UP it changes at once.
+        // A risk tool may linger on the safe side, never on the loose one.
+        ENUM_RC_STATUS st = ComputeRangeStatus(used, cap, warn, 1.00);
+        if (st == RC_STATUS_OK && g_last_status[i] == RC_STATUS_WARN &&
+            used > warn * cap * 0.95)
+            st = RC_STATUS_WARN;
+        g_rows[i].status     = st;
+        const int ev = TryFireSoundAlert(i, g_rows[i].status);
+        if (ev > worst_evt) worst_evt = ev;
     }
+    // v3.55 : ONE sound per pass, at the WORST severity seen. They used to play
+    // INSIDE the loop, in registry order and with no priority : the sound of a
+    // breach could be drowned by a plain warning that transitioned after it.
+    if (worst_evt == 3)      PlaySound(InpSoundRed);
+    else if (worst_evt == 2) PlaySound(InpSoundWarn);
+    else if (worst_evt == 1) PlaySound(InpSoundOK);
 }
 
 void ShellRefresh(void) {
@@ -2688,30 +2710,58 @@ void RefreshPanel(void) {
 //+------------------------------------------------------------------+
 //| B5 : next HIGH-impact news + B4 : weekend-hold warning state      |
 //+------------------------------------------------------------------+
-bool     g_weekend_warned = false; // weekend alert already fired this window
+int      g_weekend_warned = 0;    // highest weekend level already announced
 
 // B5 : time of the next HIGH-impact event (any currency) within 24h, 0 if none.
 // V1.29 P/R : next HIGH **or** MEDIUM news (respecting the level toggles), and
 // reports whether it is HIGH via out_high. (Name kept for minimal churn.)
 
-// B4 : weekend-hold risk = weekend hold NOT allowed (funded) + Friday >= 22:00
+// B4 : weekend-hold risk = weekend hold NOT allowed (funded) + Friday evening
 // UTC + at least one open position.
-bool IsWeekendHoldRisk(void) {
-    if (g_profile.weekend_hold_allowed) return false;
-    if (PositionsTotal() <= 0) return false;
+// v3.55 : this asked the user to "flatten before the weekend" from Friday
+// 22:00 UTC - an HOUR AFTER the forex weekly close, when flattening is no
+// longer possible. A warning that arrives after the deadline is not a warning.
+// It now warns from 18:00 UTC, with time to work an exit, and turns red at
+// 20:30 - the last window in which an order still goes through.
+// Returns 0 = nothing, 1 = amber (warn), 2 = red (act now).
+int WeekendHoldLevel(void) {
+    if (g_profile.weekend_hold_allowed) return 0;
+    if (PositionsTotal() <= 0) return 0;
     MqlDateTime g;
     TimeToStruct(TimeGMT(), g);
-    return (g.day_of_week == 5 && g.hour >= 22);
+    if (g.day_of_week != 5) return 0;          // Friday only
+    const int mins = g.hour * 60 + g.min;
+    if (mins >= 20 * 60 + 30) return 2;        // 20:30 UTC : the last useful window
+    if (mins >= 18 * 60)      return 1;        // 18:00 UTC : room to exit calmly
+    return 0;
 }
 
-void FireWeekendAlert(void) {
-    if (g_weekend_warned) return;
-    g_weekend_warned = true;
-    if (g_eff_sound) PlaySound(InpSoundRed);
-    if (g_eff_telegram)
-        SendTelegramMessage("[RED] RiskCockpit - WEEKEND HOLD risk : Friday 22:00+ UTC with " +
-                            IntegerToString(PositionsTotal()) +
-                            " open position(s). Funded accounts must flatten before the weekend.");
+// One announcement per LEVEL : the escalation to red must be heard even when
+// the amber one already fired.
+void FireWeekendAlert(const int lvl) {
+    if (lvl <= g_weekend_warned) return;
+    g_weekend_warned = lvl;
+    if (g_eff_sound) PlaySound(lvl >= 2 ? InpSoundRed : InpSoundWarn);
+}
+
+// v3.55 : the header block of the discipline section promises "a soft amber
+// banner + sound", and g_disc_last_alert has carried the comment "tilt
+// sound/Telegram throttle" since the day it was declared - but NO PlaySound
+// has ever existed on this path. A banner at the top of a chart nobody is
+// looking at is a warning nobody receives. Both transitions now sound, under
+// the throttle that was written for them.
+void FireDisciplineAlerts(const RCDeckData &d) {
+    static bool s_tilt = false;
+    static int  s_lock = 0;
+    const bool tilt_up = (d.discTilt && !s_tilt);
+    const bool lock_up = (d.lockKind != 0 && d.lockKind != s_lock);
+    s_tilt = d.discTilt;                       // recorded even while disarmed,
+    s_lock = d.lockKind;                       // so the first pass never fires
+    if (!g_alerts_armed || !g_eff_sound) return;
+    if (!tilt_up && !lock_up) return;
+    if (TimeCurrent() - g_disc_last_alert < RC_SOUND_COOLDOWN_SEC) return;
+    g_disc_last_alert = TimeCurrent();
+    PlaySound(lock_up ? InpSoundRed : InpSoundWarn);
 }
 
 //+------------------------------------------------------------------+
@@ -3272,7 +3322,6 @@ double Live_MaxLot(double &pct_disp, string &tag, int &ld,
     if (lot < vmin) lot = 0.0;
     else if (vmax > 0.0 && lot > vmax) lot = vmax;
     ld = LotDigits(step);
-    g_maxlot_copy = (lot > 0.0 ? lot : 0.0); g_maxlot_digits = ld;   // V1.24 G3 copy
     // which cap binds ? (tie -> target, then cumulative room, then free margin)
     if (tgt_money <= room_money + 1e-6 && tgt_money <= free_m + 1e-6) { tag = "marg"; pct_disp = tgt_pct; }
     else if (room_money <= free_m + 1e-6)                            { tag = "room"; pct_disp = room_pct; }
@@ -3604,13 +3653,18 @@ void ComputeNewsStats(void) {
     // not at all, so the card counts HIGH+MEDIUM events gated by the official
     // table : conservative estimate, FN dashboard authoritative. Keep EVERY
     // event (any level) with name/importance for the DIAG journal lines below.
+    // v3.58 : les quatre tableaux etaient agrandis d UN cran par evenement, donc
+    // potentiellement quatre reallocations et quatre recopies a chaque tour d une
+    // boucle qui peut compter des centaines d evenements. On reserve une fois la
+    // borne connue - le nombre d entrees du calendrier - et on remplit.
     datetime evt[]; string evtccy[]; string evtname[]; int evtimp[]; int ne = 0;
-    for (int i = 0; i < ArraySize(cv); ++i) {
+    const int ncv = ArraySize(cv);
+    ArrayResize(evt, ncv); ArrayResize(evtccy, ncv);
+    ArrayResize(evtname, ncv); ArrayResize(evtimp, ncv);
+    for (int i = 0; i < ncv; ++i) {
         MqlCalendarEvent ev; if (!CalendarEventById(cv[i].event_id, ev)) continue;
         if (ev.importance == CALENDAR_IMPORTANCE_NONE) continue; // holidays etc.
         MqlCalendarCountry c; if (!CalendarCountryById(ev.country_id, c)) continue;
-        ArrayResize(evt, ne + 1); ArrayResize(evtccy, ne + 1);
-        ArrayResize(evtname, ne + 1); ArrayResize(evtimp, ne + 1);
         evt[ne] = cv[i].time; evtccy[ne] = c.currency;
         evtname[ne] = ev.name; evtimp[ne] = (int)ev.importance; ne++;
     }
@@ -3637,11 +3691,18 @@ void ComputeNewsStats(void) {
             const bool mapped = NewsCcyAffectsSymbol(dsym, evtccy[k]); // official FN instrument<->currency table
             const string impl = (evtimp[k] == (int)CALENDAR_IMPORTANCE_HIGH ? "HIGH" :
                                  (evtimp[k] == (int)CALENDAR_IMPORTANCE_MODERATE ? "MED" : "LOW"));
-            ArrayResize(diag, ndiag + 1);
-            diag[ndiag++] = dsym + " deal " + TimeToString(dt, TIME_DATE | TIME_SECONDS) +
+            // v3.58 : cette ligne etait CONSTRUITE a chaque rencontre deal x
+            // evenement - deux TimeToString et huit concatenations - pour un seul
+            // lecteur, derriere un drapeau dont la valeur par defaut est false.
+            // Le COMPTEUR, lui, sert a la signature du cache : il compte toujours.
+            if (InpVerboseLog) {
+                ArrayResize(diag, ndiag + 1);
+                diag[ndiag] = dsym + " deal " + TimeToString(dt, TIME_DATE | TIME_SECONDS) +
                             " ~ evt " + TimeToString(evt[k], TIME_DATE | TIME_MINUTES) + " " + evtccy[k] +
                             " " + impl + " '" + evtname[k] + "' (FN-table " + (mapped ? "y" : "n") + ") -> " +
                             (lvl_ok && mapped ? "COUNTED" : (!mapped ? "skipped (not FN-mapped)" : "skipped (not HIGH)"));
+            }
+            ndiag++;
             if (lvl_ok && mapped && !innews) { // count rule : HIGH event mapped per the FN-confirmed table (v2.02.05 FIX 2c)
                 innews = true;
                 minfo = dsym + " deal " + TimeToString(dt, TIME_DATE | TIME_SECONDS) +
@@ -3695,7 +3756,7 @@ void ComputeNewsStats(void) {
         s_news_sig = sig;
         PrintFormat("RC news-card : %d matched, %d winning, win-pnl %.2f, eligible %.2f (window +/-%d min, scan from %s, %d deal~event encounters)",
                     npos, win_n, win_pnl, g_news_eligible, g_profile.news_window_minutes, TimeToString(from, TIME_DATE), ndiag);
-        for (int k = 0; k < ndiag; ++k)
+        for (int k = 0; k < ArraySize(diag); ++k)
             Print("RC news-scan : ", diag[k]);
         for (int k = 0; k < npos; ++k)
             PrintFormat("RC news-trade %d/%d : %s  pnl %.2f%s", k + 1, npos, posinfo[k], pospnl[k],
@@ -3859,8 +3920,14 @@ void RefreshSlLinesForChart(const long chart_id) {
                 ObjectCreate(chart_id, txt_id, OBJ_TEXT, 0, anchor_time, sl_price);
                 ObjectSetInteger(chart_id, txt_id, OBJPROP_TIME, anchor_time);
                 ObjectSetDouble(chart_id, txt_id, OBJPROP_PRICE, sl_price);
+                // v3.57 : la ligne HLINE - invisible, OBJPROP_HIDDEN - recevait la
+                // version TRADUITE, et le texte reellement DESSINE sur le graphique
+                // recevait une version anglaise en dur, dont seul le suffixe
+                // d avertissement etait traduit : la seule ligne d alerte posee sur
+                // le graphique s affichait mi-anglaise mi-francaise. La traduction
+                // existait deja - elle etait ecrite la ou personne ne la lit.
                 ObjectSetString(chart_id, txt_id, OBJPROP_TEXT,
-                                "SL " + DoubleToString(budget_pct, 2) + "% rec  " +
+                                Tr("sl_rec") + " " + DoubleToString(budget_pct, 2) + "%  " +
                                     type_str + " " + DoubleToString(vol, 2) + "  #" +
                                     IntegerToString((int)ticket) + status_suffix);
                 ObjectSetInteger(chart_id, txt_id, OBJPROP_COLOR, final_line_clr);
@@ -3946,6 +4013,9 @@ double ComputePositionRiskMoney(const string sym, const int type,
 
 // A1 : UpdateDayStartEquity + g_equity_at_day_start removed (dead code - the
 // daily-DD figure is reconstructed live via SumClosedDealsPnL, never from these).
+// v3.56 : g_day_start, the last survivor of that pair, is gone too. It was set
+// at every attach and read nowhere - a landmark pointing at a mechanism that
+// does not exist.
 
 // v2.02.05 FIX 1 : the FN Instant trailing floor follows the realized BALANCE
 // high (floating equity spikes do NOT raise the FN floor). Persist on increase
@@ -4110,33 +4180,43 @@ string PositionStatusLabel(ENUM_RC_STATUS s, int age, bool sl_missing) {
 //+------------------------------------------------------------------+
 //| Alert dispatcher on status transitions (sound + Telegram, B1)    |
 //+------------------------------------------------------------------+
-void TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status) {
+// v3.55 : this dispatcher used to PLAY the sound itself, from inside the rule
+// loop. It now RETURNS the severity of the transition - 0 nothing, 1 back to
+// OK, 2 warning, 3 breach - and the caller plays ONE sound, the worst, after
+// the loop. It also honours the per-rule cooldown that had been declared for
+// the dead Telegram path and never applied to the sound.
+int TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status) {
     if (idx < 0 || idx >= RC_RULE_COUNT)
-        return;
+        return 0;
     // FIX 3 (V1.0.1) : the Profit Target row is a PROGRESS meter - its amber/green
     // transitions are informational (you're doing well), never warnings. Cache the
     // status so the chip colour still updates, but never fire sound / Telegram.
     if (g_rows[idx].key == "rule_target") {
         g_last_status[idx] = new_status;
-        return;
+        return 0;
     }
     const ENUM_RC_STATUS prev = g_last_status[idx];
     g_last_status[idx] = new_status;
     if (!g_alerts_armed) // first refresh after OnInit / timeframe switch
-        return;
+        return 0;
     if (new_status == prev)
-        return;
+        return 0;
+    if (!g_eff_sound)
+        return 0;
+    // the limiter finally guards what its own comment always promised
+    if (TimeCurrent() - g_last_sound_alert[idx] < RC_SOUND_COOLDOWN_SEC)
+        return 0;
+    g_last_sound_alert[idx] = TimeCurrent();
 
-    // --- Sound (local) ---
-    if (g_eff_sound) {
-        if (new_status == RC_STATUS_WARN && prev != RC_STATUS_RED)
-            PlaySound(InpSoundWarn);
-        if (new_status == RC_STATUS_RED)
-            PlaySound(InpSoundRed);
-        // back under the limit : the setting existed but nothing ever played it
-        if (new_status == RC_STATUS_OK && (prev == RC_STATUS_WARN || prev == RC_STATUS_RED))
-            PlaySound(InpSoundOK);
-    }
+    // --- Severity of the transition ; the caller does the playing ---
+    if (new_status == RC_STATUS_RED)
+        return 3;
+    if (new_status == RC_STATUS_WARN && prev != RC_STATUS_RED)
+        return 2;
+    // back under the limit : the setting existed but nothing ever played it
+    if (new_status == RC_STATUS_OK && (prev == RC_STATUS_WARN || prev == RC_STATUS_RED))
+        return 1;
+    return 0;
 
     // v3.47 : the Telegram alert block that sat here was guarded by
     // `if (false && ...)` and composed a message carrying the ACCOUNT LOGIN.
@@ -5144,6 +5224,21 @@ double CcyToDepositRate(const string ccy) {
 //| SYMBOL_TRADE_CALC_MODE - indices = CFDINDEX cs*px*(tv/ts)*ri,    |
 //| NOT the leverage formula. Returns 0.0 only if all paths fail.    |
 //+------------------------------------------------------------------+
+// v3.56 : path / err / dbg2 were filled on EVERY call - including a six-part
+// concatenation with five DoubleToString - and printed by nobody : the debug
+// line they were written for is gone. They are not deleted, they are wired
+// back. This fires only where OrderCalcMargin has already refused, which is
+// exactly when the trader reads "n/a" on the max-lot line with no reason
+// given, and these four values are the reason. Verbose flag + 60 s throttle,
+// symbol properties only - nothing about the account.
+void MaxLotDbg(const string sym) {
+    if (!InpVerboseLog) return;
+    if (TimeCurrent() - g_maxlot_dbg_last < 60) return;
+    g_maxlot_dbg_last = TimeCurrent();
+    Print("RiskCockpit : margin-per-lot fallback on ", sym, " - path=", g_maxlot_path,
+          " ocm_err=", g_maxlot_err, (g_maxlot_dbg2 == "" ? "" : " " + g_maxlot_dbg2));
+}
+
 double MarginPerLot(const string sym) {
     g_maxlot_path = "none";
     g_maxlot_m1 = 0.0;
@@ -5157,7 +5252,7 @@ double MarginPerLot(const string sym) {
     if (px <= 0.0) px = SymbolInfoDouble(sym, SYMBOL_ASK);
     if (px <= 0.0) px = SymbolInfoDouble(sym, SYMBOL_BID);
     if (px <= 0.0) px = SymbolInfoDouble(sym, SYMBOL_LAST);
-    if (px <= 0.0) { g_maxlot_path = "no_price"; return 0.0; }
+    if (px <= 0.0) { g_maxlot_path = "no_price"; MaxLotDbg(sym); return 0.0; }
 
     double m = 0.0; // (3) PRIMARY = OrderCalcMargin (the broker truth)
     ResetLastError();
@@ -5211,6 +5306,7 @@ double MarginPerLot(const string sym) {
     r *= fx; // FIX 2 : margin-currency -> deposit currency (no-op when fx = 1.0)
     g_maxlot_path = (r > 0.0 ? "calcmode" : "fail");
     g_maxlot_m1 = r;
+    MaxLotDbg(sym);
     return r;
 }
 
@@ -5333,7 +5429,7 @@ void InitI18n(void) {
     AddTr("pyr_nopos",
         "No position on",
         "Pas de position sur",
-        "Sin posicion en");
+        "Sin posición en");
     AddTr("pyr_hedged",
         "Hedged basket (BUY+SELL) : not supported",
         "Panier couvert (BUY+SELL) : non gere",
@@ -5362,6 +5458,14 @@ void InitI18n(void) {
         "locks",
         "verrouille",
         "asegura");
+    AddTr("pyr_add",
+        "add",
+        "ajoute",
+        "añade");
+    AddTr("pyr_loss",
+        "loss",
+        "perte",
+        "pérdida");
     AddTr("pyr_basket",
         "basket",
         "panier",
@@ -5371,10 +5475,12 @@ void InitI18n(void) {
         "Pause après pertes",
         "Pausa tras pérdidas");
     AddTr("shl_losses", "losses", "pertes", "pérdidas");
+    // v3.57 : « GUIA DE USO » se dessinait a 23 px de « GUÍA DE USO » (h_t0) -
+    // les deux memes mots, deux orthographes, l une sous l autre.
     AddTr("shl_manual",
         "USER GUIDE",
         "GUIDE D'UTILISATION",
-        "GUIA DE USO");
+        "GUÍA DE USO");
     AddTr("shl_newssrcdown",
         "SOURCE UNREADABLE",
         "SOURCE ILLISIBLE",
@@ -5747,10 +5853,15 @@ void InitI18n(void) {
         "News HIGH / MEDIUM|Which impact levels you want counted.",
         "News HIGH / MEDIUM|Les niveaux d'impact que tu veux voir comptés.",
         "News HIGH / MEDIUM|Qué niveles de impacto quieres que cuenten.");
+    // v3.57 : cette entree garantissait que le son est « toujours actif sur un
+    // plan prop » - le libelle de la ligne du DESSOUS (les outils de risque),
+    // repris sans son verrou : ni la bascule ni l hote n imposent quoi que ce
+    // soit ici. Le son est un reglage, les alertes visuelles ne s eteignent
+    // jamais. Le manuel dit maintenant ce que le code fait.
     AddTr("h9_5",
-        "Sound|A sound on every status change. Always on for a prop plan.",
-        "Son|Un son à chaque changement de statut. Toujours actif sur un plan prop.",
-        "Sonido|Un sonido en cada cambio de estado. Siempre activo en un plan prop.");
+        "Sound|A sound on every status change. Your choice - the on-screen alerts never stop.",
+        "Son|Un son à chaque changement de statut. À toi de voir - les alertes à l'écran, elles, ne s'arrêtent jamais.",
+        "Sonido|Un sonido en cada cambio de estado. Tú decides: las alertas en pantalla no se detienen nunca.");
     AddTr("h9_6",
         "Telegram|Locked : MQL5 forbids an INDICATOR from sending anything to the web. The EA build is what sends.",
         "Telegram|Verrouillé : MQL5 interdit à un INDICATEUR d'envoyer quoi que ce soit sur le web. C'est la version EA qui envoie.",
@@ -5894,9 +6005,11 @@ void InitI18n(void) {
         "DISCIPLINE",
         "DISCIPLINE",
         "DISCIPLINA");
+    // v3.57 : « AVANCE » est une progression ; l onglet s appelle « AVANCÉ », et
+    // c est deja le nom que le manuel lui donne (h9_2).
     AddTr("shl_tabadv",
         "ADVANCED",
-        "AVANCE",
+        "AVANCÉ",
         "AVANZADO");
     AddTr("shl_tabdisp",
         "DISPLAY",
@@ -5958,10 +6071,20 @@ void InitI18n(void) {
         "Nothing in the next 24 h.",
         "Rien dans les 24 h.",
         "Nada en las próximas 24 h.");
+    // v3.57 : ce libelle portait le 40 % EN DUR. Le chiffre vient desormais du
+    // profil actif, qui le met a ZERO sur FTMO / E8 / MFF funded.
     AddTr("shl_rule40",
-        "40% rule",
-        "règle 40%",
-        "regla 40%");
+        "rule",
+        "règle",
+        "regla");
+    AddTr("shl_scroll",
+        "scroll",
+        "défilement",
+        "desplazamiento");
+    AddTr("shl_tiltin",
+        "in",
+        "en",
+        "en");
     AddTr("shl_checkfn",
         "check FN",
         "vérifier FN",
@@ -6126,6 +6249,10 @@ void InitI18n(void) {
         "OPEN POSITIONS INTO THE WEEKLY CLOSE - consider flattening",
         "POSITIONS OUVERTES AVANT LA CLÔTURE HEBDO - envisage de solder",
         "POSICIONES ABIERTAS ANTES DEL CIERRE SEMANAL - considera cerrar");
+    AddTr("shl_bandwkndnow",
+        "WEEKLY CLOSE IMMINENT - flatten now or you hold over the weekend",
+        "CLÔTURE HEBDO IMMINENTE - solde maintenant ou tu tiens tout le week-end",
+        "CIERRE SEMANAL INMINENTE - cierra ahora o aguantas todo el fin de semana");
     AddTr("shl_minsleft",
         "min left",
         "min restantes",
@@ -6335,6 +6462,58 @@ void InitI18n(void) {
     AddTr("tip_cpt",    "Profile|The plan EVERY limit is derived from.",
                         "Profil|Le plan dont TOUTES les limites sont déduites.",
                         "Perfil|El plan del que salen TODOS los límites.");
+    AddTr("tipz_scrollup",
+        "Up|Scrolls this panel one page up.",
+        "Haut|Fait défiler ce panneau d'une page vers le haut.",
+        "Arriba|Desplaza este panel una página hacia arriba.");
+    AddTr("tipz_scrolldn",
+        "Down|Scrolls this panel one page down.",
+        "Bas|Fait défiler ce panneau d'une page vers le bas.",
+        "Abajo|Desplaza este panel una página hacia abajo.");
+    AddTr("tipz_tab0",
+        "Risk|SL, TP, margin and risk per trade, planned trades.",
+        "Risque|SL, TP, marge et risque par trade, trades prévus.",
+        "Riesgo|SL, TP, margen y riesgo por operación, operaciones previstas.");
+    AddTr("tipz_tab1",
+        "Discipline|Tilt, cooldown, self-lock duration.",
+        "Discipline|Tilt, pause après pertes, durée de l'auto-verrou.",
+        "Disciplina|Tilt, pausa tras pérdidas, duración del autobloqueo.");
+    AddTr("tipz_tab2",
+        "Advanced|Comfort padding, refresh period, post-violation caps.",
+        "Avancé|Cadrage confort, période de rafraîchissement, plafonds après violation.",
+        "Avanzado|Encuadre, período de refresco, límites tras una violación.");
+    AddTr("tipz_tab3",
+        "Display|Theme, language, news, alerts.",
+        "Affichage|Thème, langue, news, alertes.",
+        "Pantalla|Tema, idioma, noticias, alertas.");
+    AddTr("tipz_selflock",
+        "Self-lock|Two clicks : arms a full STOP for the set duration.",
+        "Auto-verrou|Deux clics : arme un STOP complet pour la durée réglée.",
+        "Autobloqueo|Dos clics: arma un STOP completo durante la duración fijada.");
+    AddTr("tipz_unlock",
+        "Release|Two clicks within 5 s to end the self-lock early.",
+        "Libérer|Deux clics en moins de 5 s pour lever l'auto-verrou plus tôt.",
+        "Liberar|Dos clics en menos de 5 s para levantar el autobloqueo antes.");
+    AddTr("tipz_hyper",
+        "Hyperactivity|Trades today / the plan's daily cap.",
+        "Hyperactivité|Trades du jour / le plafond quotidien du plan.",
+        "Hiperactividad|Operaciones de hoy / el límite diario del plan.");
+    AddTr("tipz_mviol",
+        "Margin violation|Tightened margin cap after a violation.",
+        "Violation marge|Plafond de marge resserré après une violation.",
+        "Violación margen|Límite de margen reducido tras una violación.");
+    AddTr("tipz_rviol",
+        "Risk violation|Tightened risk cap after a violation.",
+        "Violation risque|Plafond de risque resserré après une violation.",
+        "Violación riesgo|Límite de riesgo reducido tras una violación.");
+    AddTr("tipz_be",
+        "Break-even|Draws the basket break-even line.",
+        "Point mort|Trace la ligne de point mort du panier.",
+        "Punto de equilibrio|Traza la línea de equilibrio de la cesta.");
+    AddTr("tipz_maxlot",
+        "Max lot|Select it then Ctrl+C to paste it.",
+        "Lot max|Sélectionne-le puis Ctrl+C pour le coller.",
+        "Lote máx|Selecciónalo y Ctrl+C para pegarlo.");
     AddTr("tip_help",   "Version|Current build + active news source.",
                         "Version|Build en cours + source des news active.",
                         "Versión|Build actual + fuente de noticias activa.");
@@ -6624,6 +6803,60 @@ bool ProfileCanBeRestricted(void) {
     return false; // Futures placeholders + Free Trial + Free Competition
 }
 
+// v3.56 : the 2nd-strike flags used to be read ONCE, at attach. Every step of
+// the settings cascade calls ApplySettingsChange, which forced them to false
+// whenever the CURRENT profile cannot be restricted - with nothing to reload
+// them when it can again. Stepping the PHASE cycler onto "Challenge P1" to see
+// what it would give, then back onto "Funded", was enough : the panel then
+// showed a 3 % cap on an account carrying a 1 % restriction, the lot advisor
+// TRIPLED its budget, and the "Risk violation" box drew itself unticked and
+// enabled - it looked like a faithful mirror of a state it contradicted. The
+// GlobalVariable still held 1, so a mere timeframe switch flipped back to the
+// 1 % cap : two answers for the same account at the same moment.
+// ONE loader, called wherever the profile moves. It never WRITES the flags -
+// only PersistViolationFlags does - so a non-restrictable phase hides them
+// without destroying them.
+void LoadViolationFlags(void) {
+    // input = the default, the per-login GlobalVariable (set by a click) wins.
+    g_margin_violation_active = InpMarginViolationActive;
+    g_risk_violation_active   = InpRiskViolationActive;
+    // A 2nd strike belongs to ONE account, like size / phase / plan. v3.49 : the
+    // twins were not read in the same order and the GLOBAL won for risk, so
+    // clearing the box on a clean account wiped the restriction off every OTHER
+    // account. GVGetLogin falls back to the un-suffixed legacy key on its own,
+    // so the migration seed is not lost.
+    double mv = 0.0, rv = 0.0;
+    if (GVGetLogin("RC_margin_violation", mv)) g_margin_violation_active = (mv != 0.0);
+    if (GVGetLogin("RC_risk_violation",   rv)) g_risk_violation_active   = (rv != 0.0);
+    // FIX 4 (V1.0.1) : challenge / free profiles have no 2nd-strike concept.
+    // Never let a flag persisted by a FUNDED/Instant session silently tighten
+    // their caps. RAM only : the stored value stays intact for the way back.
+    if (!ProfileCanBeRestricted()) {
+        g_margin_violation_active = false;
+        g_risk_violation_active   = false;
+    }
+}
+
+// V1.29 J / M : the risk toolkit is PERSONAL-ONLY. Prop accounts are ALWAYS ON
+// (the toolkit is the product) ; Personal defaults OFF and its RC_risktools
+// toggle decides. Folded here so a Personal "OFF" can never leak onto a prop
+// account.
+// v3.56 : this used to be resolved ONCE, at attach - but the plan is editable
+// HOT from the cascade. Going from Personal to a prop plan mid-session left the
+// toolkit OFF : no rule alert at all, no discipline lock, no tilt banner, while
+// the gauges kept painting amber and red exactly as usual - so nothing on
+// screen said the alarms were mute. And there was no way back : on a prop plan
+// the toggle refuses the click, under a sentence that says it is "always on".
+void ResolveRiskTools(void) {
+    if (PlanIsPersonal()) {
+        g_eff_risktools = false;
+        if (GlobalVariableCheck("RC_risktools"))
+            g_eff_risktools = (GlobalVariableGet("RC_risktools") != 0.0);
+    } else {
+        g_eff_risktools = true; // PROP : always ON, ignores input + GV
+    }
+}
+
 void PersistViolationFlags(void) {
     // v3.49 : this used to write the GLOBAL variable too, which made the last
     // account touched dictate the value for every other one through GVGetLogin's
@@ -6789,26 +7022,13 @@ double DetectStartingBalance(void) {
     return (bal > 0.0 ? bal : 1.0);
 }
 // V1.28 (item 6) : lot decimals from the symbol's volume step (up to 4).
-int VolDigits(const string sym) {
-    const double step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
-    if (step <= 0.0)   return 2;
-    if (step >= 1.0)   return 0;
-    if (step >= 0.1)   return 1;
-    if (step >= 0.01)  return 2;
-    if (step >= 0.001) return 3;
-    return 4;
-}
-// V1.28 (item 4) : short month name for the "chic" cycle-date display.
-string MonthShort(const int m) {
-    if (m < 1 || m > 12) return "?";
-    // V1.29 F3 : localized short month names (was EN-only on the FR/ES date picker).
-    string en[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-    string fr[12] = {"Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"};
-    string es[12] = {"Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"};
-    if (g_lang == 1) return fr[m - 1];
-    if (g_lang == 2) return es[m - 1];
-    return en[m - 1];
-}
+// v3.58 : VolDigits vivait ici - jamais appelee, et DOUBLON de LotDigits avec un
+// resultat DIFFERENT : sur un pas crypto de 0,00001 LotDigits rend 5 et celle-ci
+// rendait 4, ce qui affiche « 0.00 » a la place du lot. Deux reponses au meme
+// calcul dans le meme fichier, dont une fausse et morte.
+// v3.58 : MonthShort vivait ici - trois tableaux de douze mois traduits, pour un
+// selecteur de date « chic » qui n a jamais existe dans la coquille. Le cycle se
+// regle par trois compteurs annee / mois / jour, en chiffres.
 // V1.28 : days in a month (leap-aware) so the cycle-date picker never produces
 // an invalid date like "31 Feb".
 string PhaseLabelLocal(int ph) {
@@ -6837,10 +7057,11 @@ void ApplySettingsChange(void) {
     if (g_eff_split >= 0.0) g_profile.profit_split_pct = g_eff_split; // V1.27 : manual split override
     if (EffectivePlan() == FN_PLAN_PERSONAL && g_eff_size <= 0.0)
         g_profile.initial_balance = DetectStartingBalance(); // V1.28 : Personal "Auto" -> real balance
-    if (!ProfileCanBeRestricted()) {
-        g_margin_violation_active = false;
-        g_risk_violation_active   = false;
-    }
+    // v3.56 : these three lines used to ERASE the 2nd-strike flags with no way
+    // back, and the risk toolkit was never re-resolved at all. Both now follow
+    // the plan, in both directions.
+    LoadViolationFlags();
+    ResolveRiskTools();
     LoadOrSeedPeakBalance(); // v2.02.05 : self-heal a poisoned first seed after a size/plan change
     DestroyAllObjects();
     // v3 SHELL : DestroyAllObjects wipes the WHOLE "RC_" namespace - the shell's
@@ -6975,10 +7196,13 @@ bool BuildPyramidLine(string &line, int &stat) {
     StringConcatenate(line,
                       Tr("pyr_if"), " ", (is_buy ? ">=" : "<="), " ",
                       DoubleToString(step.trigger_price, _Digits),
-                      " add ", DoubleToString(step.add_lot, pld),
+                      " " + Tr("pyr_add") + " ", DoubleToString(step.add_lot, pld),
                       " " + Tr("pyr_moveall") + " ", DoubleToString(step.new_unified_stop, _Digits),
                       " = " + Tr("pyr_locks") + " ",
-                      (step.worst_case_money >= 0.0 ? "min +$" : "perte -$"),
+                      // v3.57 : « perte » etait un mot FRANCAIS en dur au milieu
+                      // d une ligne assemblee morceau par morceau avec Tr() - un
+                      // panier en perte affichait un mot francais en EN et en ES.
+                      (step.worst_case_money >= 0.0 ? "min +$" : Tr("pyr_loss") + " -$"),
                       DoubleToString(MathAbs(step.worst_case_money), 2),
                       "  [" + Tr("pyr_basket") + " ", DoubleToString(sum_vol, pld),
                       " @", DoubleToString(anchor_entry, _Digits), "]");

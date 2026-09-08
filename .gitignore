@@ -1,3 +1,11 @@
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Média de la fiche Market : REGENERABLES, et lourds.
+# La piste fait 8 Mo et la vidéo une dizaine ; les deux se reconstruisent à
+# l'identique avec tools/build-market-music.py puis tools/build-market-video.py.
+# Ce qui est versionné, c'est la RECETTE, pas le rendu — un dépôt public n'a pas
+# à porter dix mégaoctets qu'une commande rejoue.
+market_video/*.wav
+market_video/*.mp4

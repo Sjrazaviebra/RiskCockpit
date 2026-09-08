@@ -102,6 +102,40 @@ def mut_snapshot(b):
 
 
 # (libelle attendu, fichier a muter, mutation)
+def mut_guard(b):
+    # Debrancher la temporisation du son : la variable reste declaree,
+    # commentee et remise a zero a l attache - mais plus rien ne la compare
+    # a une horloge. C est l etat exact dans lequel g_last_telegram_alert[]
+    # a passe vingt-neuf versions, en promettant de brider un son qu il ne
+    # bridait pas. Le compilateur ne voit rien : la variable est ECRITE.
+    return b.replace(
+        b'    if (TimeCurrent() - g_last_sound_alert[idx] < RC_SOUND_COOLDOWN_SEC)',
+        b'    if (false)', 1)
+
+
+def mut_deadglob(b):
+    # Poser un global que rien ne relit : c est l etat exact dans lequel
+    # g_day_start a vecu, ancre de journee initialisee a minuit a chaque
+    # attache, lue nulle part, au milieu du bloc ou se calcule la regle la
+    # plus meurtriere du produit. Le compilateur ne dit rien.
+    return b.replace(b'bool g_alerts_armed = false;',
+                     b'bool g_alerts_armed = false;\r\ndatetime g_dead_anchor = 0;', 1)
+
+
+def mut_tiporph(b):
+    # Retirer la poussee d une infobulle : la zone garde le repli ANGLAIS code
+    # dans la coquille comme seul texte, en francais comme en espagnol, et rien
+    # ne le signale. Onze zones ont vecu comme ca.
+    return b.replace(b'g_shell.SetTip(g_shell.ZidSelfLock(),  Tr("tipz_selflock"));',
+                     b'', 1)
+
+
+def mut_readme(b):
+    # Faire deriver le chiffre du README : c est exactement ce qui s est passe
+    # lot apres lot, sans que rien ne le dise. « Eleven » contre vingt et un.
+    return b.replace(b'2 static checks answer', b'9 static checks answer', 1)
+
+
 CASES = [
     ("BOM unique", IND, mut_bom),
     ("reglages actifs", IND, mut_input),
@@ -120,6 +154,10 @@ CASES = [
     ("plafond des infobulles", SHELL, mut_tipmax),
     ("3 langues par entree", IND, mut_lang),
     ("series d infobulles alignees", IND, mut_serie),
+    ("garde-fous branches", IND, mut_guard),
+    ("etat global relu", IND, mut_deadglob),
+    ("infobulles traduisibles", IND, mut_tiporph),
+    ("compte du README", "README.md", mut_readme),
 ]
 
 # Ce que le harnais NE couvre pas, et pourquoi. Un self-test qui tait sa

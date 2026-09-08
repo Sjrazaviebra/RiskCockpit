@@ -19,7 +19,7 @@ folder that holds the includes and the resource in those exact places.
 |---|---|
 | Build tree (MT5 data folder) | `%APPDATA%\MetaQuotes\Terminal\<TERMINAL-ID>\MQL5\` |
 | Compiled source | `…\MQL5\Indicators\mql5_market\RiskCockpit\RiskCockpit.mq5` |
-| Includes (all four) | `…\MQL5\Libraries\` : `CChallengeProfileCatalog.mqh`, `CPyramidEngine.mqh`, `JR_CanvasUI.mqh`, `RC_ShellUI.mqh` |
+| Includes (all five) | `…\MQL5\Libraries\` : `CChallengeProfileCatalog.mqh`, `CPyramidEngine.mqh`, `JR_CanvasUI.mqh`, **`RC_Math.mqh`**, `RC_ShellUI.mqh` |
 | Embedded resource | `RiskCockpit_logo.bmp`, next to the `.mq5` |
 | Output | `RiskCockpit.ex5`, same folder |
 | Companion service | `…\MQL5\Services\RCNewsFeeder.mq5` |
@@ -55,7 +55,13 @@ including the compile, the commit and the push.)
 | `Libraries/RC_ShellUI.mqh` | `MQL5\Libraries\RC_ShellUI.mqh` |
 | `Libraries/CChallengeProfileCatalog.mqh` | idem |
 | `Libraries/CPyramidEngine.mqh` | idem |
+| `Libraries/RC_Math.mqh` | idem |
+| `Scripts/RC_SelfTest.mq5` | `MQL5\Scripts\RC_SelfTest.mq5` |
 | `Services/RCNewsFeeder.mq5` | `MQL5\Services\RCNewsFeeder.mq5` |
+
+*(v3.58 : cette table en oubliait deux — `RC_Math.mqh`, qui porte les fonctions pures et
+le sixième `#include` de la source, et le script de self-test. Reconstruire l'arbre depuis
+l'ancienne table donnait un arbre qui ne compile pas.)*
 
 ### Compiling (autonomous, no keyboard F7)
 
@@ -85,6 +91,359 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 ## 2. Log
 
 ## 3.x — the v3 shell becomes the interface
+
+### v3.60.72 — préparation de la mise en ligne Market
+
+**L'en-tête du fichier décrivait un autre logiciel.** Les vingt premières lignes
+sont ce qu'un validateur MQL5 lit en premier — et elles annonçaient
+*« T6 (this commit): UI skeleton + panel rendering »* pour un squelette remplacé
+deux fois depuis, *« T7 (next commit): live rule evaluation »* pour un travail
+fait depuis longtemps, et surtout **« The companion EA (V2) executes
+auto-fixes »** : une promesse de fonctionnalité, dans un dépôt **public** et dans
+la source soumise au Market, pour un EA qui n'existe pas. L'en-tête dit
+maintenant ce que le fichier fait — et ce qu'il ne peut pas faire : aucune
+fonction de trading n'y existe.
+
+**Les pièces de la fiche Market, préparées et vérifiées :**
+
+- `MARKET-DESCRIPTION.md` — la description en EN / FR / ES, écrite contre les
+  règles officielles Part IV : aucune garantie ni promesse de bénéfice, aucun
+  superlatif, aucun backtest, aucun lien externe.
+- **Les icônes 200 / 140 / 60** — et la ligne **« v1.30 » effacée du logo**. Le
+  logo publié portait une version de deux versions majeures en arrière, imprimée
+  dans l'image : c'est ce qu'un acheteur voit **avant** de lire quoi que ce soit,
+  et ça dit « abandonné ». Rien n'oblige à graver une version sur une icône — il
+  faudrait la redessiner à chaque mise à jour, c'est-à-dire recréer le problème.
+- `market_screens/SHOTLIST.md` — les onze prises, l'état de l'interface à
+  préparer pour chacune, et la règle qui ne se vérifie qu'à l'œil : **l'interface
+  doit être en anglais**, et RiskCockpit retient la langue par compte.
+- `tools/prep_screens.py` — met les captures aux spécifications (≥ 720 px sur un
+  côté, ≤ 1920×1080, ≤ 2 Mo) et **refuse** ce qui ne peut pas y passer, au lieu
+  de produire un fichier rejeté à la soumission.
+- `tools/build-market-music.py` — la piste, **synthétisée** : 47,7 s, ni
+  revendication Content ID possible, ni attribution à porter. Le script **mesure
+  le niveau seconde par seconde et refuse d'écrire** si un creux dépasse ce qui
+  est audible (mesuré : creux le plus bas à 81 % de la moyenne).
+- `tools/build-market-video.py` — le montage, sur la palette **échantillonnée sur
+  le produit** et non choisie. Il **refuse de tourner s'il manque une capture** :
+  on ne fabrique pas une vidéo avec des trous.
+- `RELEASE-3.60.md` — la séquence de mise en ligne, ce qui est prêt, et ce qui
+  ne l'est pas.
+
+⭐ **Le gate a attrapé une fuite dans MON propre outillage** : j'avais écrit en
+dur un chemin `C:\Users\<nom>\AppData\Local\...` dans le script de montage —
+exactement ce que le contrôle « fuite de données perso » existe pour trouver, et
+il l'a trouvé sur mon code. Le chemin est désormais construit à l'exécution
+depuis les variables d'environnement : le fichier ne porte plus aucun nom
+d'utilisateur.
+
+⚖️ **Ce qui n'est PAS fait, et pourquoi** : les captures. Elles demandent
+d'ouvrir chaque section dans MT5, donc de cliquer. Le 08/09/2026, une séance de
+vérification visuelle a coïncidé avec l'ouverture d'une position `SDRM-TEST` sur
+le compte démo — un commentaire que seul le bouton SELL de StrategyDeck produit,
+et qui n'est atteignable que par un clic. Sur un compte démo, StrategyDeck
+démarre **armé**. La séance de captures attend donc un désarmement, pour qu'un
+clic mal placé devienne un refus affiché et non un ordre envoyé.
+
+**Gate : 22 contrôles, 0 en échec. Compilation : 0 erreur, 0 avertissement.**
+
+### v3.59.71 — le panneau défile : le guide d'utilisation devient atteignable
+
+🔴 **Le manuel était inatteignable sur un écran de portable.** La section AIDE
+dessine, **avant** le manuel et **sans possibilité de replier**, un préambule
+fixe d'environ **230 px** (COULEURS, RÈGLE NEWS, MARGE DE SURVIE). Les dix
+volets repliés ajoutent 230 px, puis À PROPOS et les deux lignes lecture seule :
+**le manuel FERMÉ mesure déjà ~618 px**. Ouvrir le premier volet — le guide
+pas-à-pas, huit entrées dont trois dépassent 150 caractères — ajoute ~540 px,
+soit **~1 160 px au total**.
+
+La hauteur, elle, est plafonnée par le graphique (`m_sideH = m_chH − 24`). Sur
+un portable 1366×768, MT5 maximisé avec la fenêtre Terminal ouverte —
+**la configuration par défaut de MT5** — la zone graphique fait ~400 px : le
+panneau en fait **376**. Il n'existait **aucun décalage de défilement**, un clic
+sous le bitmap était **explicitement rejeté**, et le seul recours proposé était
+une ligne de texte : *« sections : agrandis la fenêtre »*.
+
+Autrement dit : **le guide d'utilisation écrit pour le débutant était, sur la
+machine du débutant, illisible au-delà du premier tiers** — et la seule réponse
+de l'outil était de lui demander un écran plus grand.
+
+**Le panneau défile maintenant.** Deux chevrons dans l'en-tête, une page par
+clic avec recouvrement, un indicateur de position en bas, et les chevrons
+s'éteignent aux extrémités. Trois pièges traités au passage, parce que faire
+défiler un panneau dessiné sur un bitmap n'est pas seulement soustraire un
+décalage :
+
+- **L'en-tête est peint EN DERNIER** — il recouvre le contenu qui remonte
+  derrière lui — mais **ses zones cliquables restent enregistrées EN PREMIER** :
+  le test d'impact retient le **premier** rectangle trouvé, donc un contenu passé
+  sous l'en-tête ne peut pas voler le clic de la croix de fermeture.
+- **Toute zone entièrement remontée sous l'en-tête est retirée de la liste.**
+  Une zone invisible qui répond encore au clic est un piège, pas une commande.
+- **La hauteur demandée se mesure hors défilement.** Sans ça, descendre réduirait
+  la hauteur demandée, la surface rétrécirait, et on retrouverait exactement
+  l'oscillation d'une image sur deux corrigée en v3.28.
+
+⚖️ **Ce que je n'ai pas touché** : le panneau **complet** (les huit sections
+empilées) garde son accordéon et son message « +N : replie une section ». Il a
+déjà un mécanisme pour ce qui ne rentre pas ; lui ajouter un second aurait
+demandé de refaire sa logique de croissance, celle-là même qui a oscillé en
+v3.28. Le défilement couvre la vue **une section à la fois**, celle dans
+laquelle on lit le manuel.
+
+**Gate : 22 contrôles, 0 en échec. Contrôles positifs : 20/20 + 2
+non-couvertures déclarées. Compilation : 0 erreur, 0 avertissement.**
+
+### v3.58.70 — 7e lot : la lisibilité des jauges, et le code qui tournait pour personne
+
+- 🔴 **Sur les trois thèmes CLAIRS, la piste des jauges rendait le niveau
+  illisible.** La recette était « mélanger le FOND vers le NOIR » — ce qui ne
+  donne une piste discrète que si le fond est sombre. Sur un thème clair la
+  piste devenait un gris moyen (#9CA4A2) pendant que les remplissages des
+  thèmes clairs sont, eux, des couleurs **sombres**. Contraste rempli/vide
+  mesuré : **ambre 1,19:1**, vert 1,41:1, rouge 2,06:1 — le minimum pour un
+  élément graphique porteur d'information est **3:1**, et le **même composant
+  fait 10,2:1 en sombre**. Une jauge à 15 % et la même à 85 % renvoyaient la
+  même impression : on perdait le **niveau**, c'est-à-dire exactement ce que la
+  jauge existe pour donner. La jauge verticale du rail — **la seule lecture
+  permanente quand le panneau est fermé** — subissait la même perte. En thème
+  clair, la piste est désormais la surface elle-même (3,2 à 4,8:1 avec les trois
+  remplissages) et un liseré la délimite du panneau.
+- **La pastille MARGE/ROOM de la barre du haut se chevauchait en FR et en ES.**
+  Largeur **fixe** à 86 px, **aucun texte mesuré** — alors que le kit expose
+  `TextSizeGet`. Le libellé part à gauche, la valeur finit à droite : 72 px
+  utiles. « MARGEN » + « $12.5K » en demandent 79 : le « $1 » de la valeur
+  s'imprimait **par-dessus** le « EN » du libellé ; en français, les deux
+  glyphes se touchaient. C'est le chiffre que cette barre existe pour donner —
+  *est-ce que je peux prendre ce trade* — illisible dans deux langues sur trois.
+  La pastille se mesure ; plancher à 86 px, donc la barre anglaise ne bouge pas.
+- **Cinq des sept champs du registre des règles étaient écrits à chaque
+  rafraîchissement et lus par personne**, sous un commentaire qui nommait un
+  consommateur supprimé en v3.47 (« la ONE source dont le message Telegram est
+  construit »). Pire, `label` portait onze libellés **anglais** — une seconde
+  liste, contradictoire avec la table i18n dont le panneau tire réellement ses
+  textes, qu'un relecteur pouvait prendre pour la source de vérité. Le registre
+  ne porte plus que ce à quoi il sert : la clé et le statut.
+- **Une liste d'add-ons était construite deux fois par seconde puis jetée** ; son
+  seul lecteur, le pied de l'ancien panneau, est mort en v3.06. Le commentaire
+  qui le nommait, lui, avait survécu.
+- **`VolDigits` et `MonthShort` : deux fonctions complètes, jamais appelées.**
+  La première **duplique** `LotDigits` avec un résultat **différent** : sur un
+  pas crypto de 0,00001 l'une rend 5 et l'autre 4 — c'est-à-dire « 0.00 » à la
+  place du lot. Deux réponses au même calcul dans le même fichier, dont une
+  fausse et morte.
+- **`ComputeNewsStats` réallouait quatre tableaux d'un cran par événement**
+  (des centaines par balayage) et **construisait une ligne de journal à chaque
+  rencontre deal × événement** — deux `TimeToString` et huit concaténations —
+  pour un unique lecteur, derrière un drapeau dont la valeur par défaut est
+  `false`. Réservation unique, journal construit seulement quand quelqu'un le lit.
+- **Deux chiffres de documentation avaient dérivé** : la section « Build
+  topology » — qui se présente comme *la première chose à lire après un clone* —
+  annonçait « Includes (all four) » pour **cinq** includes (`RC_Math.mqh`
+  manquait, ainsi que le self-test dans la table de synchronisation :
+  reconstruire l'arbre depuis cette table donnait un arbre qui **ne compile
+  pas**) ; et le README annonçait « Eleven static checks » quand le gate en
+  exécutait 21.
+
+⭐ **Le 22e contrôle tient ce dernier chiffre** : il compare le nombre écrit dans
+le README au nombre de contrôles réellement exécutés. Il se place en dernier et
+se compte lui-même. Un chiffre faux sur la première page d'un dépôt public est
+ce qui décide si le lecteur fait confiance au reste.
+
+**Gate : 22 contrôles, 0 en échec. Contrôles positifs : 20/20 + 2 non-couvertures
+déclarées. Compilation : 0 erreur, 0 avertissement.**
+
+### v3.57.69 — 6e lot : ce que l'écran DIT
+
+- 🔴 **La liste « À VENIR » annonçait « règle 40% » là où le profil VOIDE
+  100 % du profit.** Le libellé était **écrit en dur** alors que la même section
+  lit la vraie part du profil quinze pixels plus haut. Trois profils du
+  catalogue mettent cette part à **zéro** — FTMO 2-Step funded, E8, MFF : le
+  profit réalisé dans la fenêtre news est **entièrement annulé**. Le panneau
+  affichait donc simultanément, à dix-sept pixels d'écart : « ACTIVE - profit
+  éligible 0% », « elig +0.00 », « seuls 0% du profit comptent » — et, juste
+  en dessous, chaque événement rouge étiqueté **« règle 40% »**. Sur la surface
+  faite pour décider si on prend le trade, et **dans le sens qui minimise la
+  pénalité**. Le chiffre vient maintenant du profil.
+- **Un seul clic refusé effaçait définitivement l'identité du verrou.** Le
+  bandeau affiche « VERROU DISCIPLINE — Verrou journalier — 45 min restantes ».
+  Réflexe du débutant : cliquer la croix pour retirer l'outil. Le clic est
+  refusé — c'est voulu — mais le drapeau qui le note n'était remis à zéro **que
+  dans `Init()`**, donc à l'attache. À partir de ce clic, et pour le reste de la
+  session, le bandeau ne disait plus que « VERROUILLÉ — ce contrôle est
+  désactivé ». Le trader avait perdu **quel** verrou le tient et **combien** de
+  temps il reste, sur la seule surface conçue pour être impossible à manquer.
+  Un refus est un **accusé de réception** : il dure quatre secondes, puis le
+  bandeau redit ce qui compte.
+- **Le manuel garantissait que le son est « toujours actif sur un plan prop ».**
+  Ni la bascule (dessinée déverrouillée) ni l'hôte (qui l'inverse sans le
+  moindre test) ne le font. La phrase avait été reprise de l'entrée du dessous —
+  celle des outils de risque, où la promesse **est** tenue par un verrou — sans
+  reprendre le verrou. C'est la **documentation** qui est corrigée, pas le code :
+  imposer du son à quelqu'un qui a besoin de silence n'est pas le rôle d'un
+  outil consultatif, et les alertes à l'écran, elles, ne s'arrêtent jamais.
+- **Quatre chaînes échappaient à l'i18n.** Un `" en "` **français en dur** au
+  milieu de la ligne TILT — un anglophone lisait « 6 en 15 min » ; un `"perte"`
+  **français en dur** dans le conseiller de panier, à côté d'un `" add "`
+  **anglais en dur**, sur une ligne pourtant assemblée fragment par fragment
+  avec `Tr()` ; et « LOT » écrit en dur dans le rail et la table flottante là
+  où la navbar dit « LOTE » — pour **le même nombre**.
+- **L'annotation SL posée sur le graphique était anglaise en dur — mais son
+  suffixe d'alerte, lui, était traduit.** La seule ligne d'avertissement dessinée
+  sur le prix s'affichait donc **mi-anglaise mi-française**. Et la version
+  entièrement traduite existait déjà : elle était écrite dans la propriété
+  `OBJPROP_TEXT` d'une ligne horizontale **masquée**, que personne n'affiche
+  jamais.
+- 🔴 **Onze contrôles survolables n'avaient jamais eu de traduction poussée.**
+  La coquille porte un texte de repli **en anglais** par zone ; l'hôte pousse
+  les trois langues par-dessus. Onze zones n'avaient aucun accesseur : leur
+  aide restait en anglais en français comme en espagnol — dont **l'auto-verrou,
+  qui arme un STOP de plusieurs heures**, et sa libération. Un accesseur par
+  zone (jamais une plage : une insertion ne peut plus décaler la série).
+- **Deux orthographes espagnoles côte à côte.** « GUIA DE USO » se dessinait à
+  vingt-trois pixels de « GUÍA DE USO » — les deux mêmes mots, deux graphies,
+  l'une sous l'autre. Et l'onglet « AVANCE » (une progression) est devenu
+  « AVANCÉ », le nom que le manuel du même produit lui donne déjà.
+
+⭐ **Le gate a appris la classe** (21e contrôle) : *une infobulle que l'hôte ne
+peut pas atteindre reste en anglais, partout*. Il développe les accesseurs de la
+coquille et les boucles de l'hôte, puis exige que **chaque** zone de `TipText`
+soit poussée. Il a d'abord dit NON sur deux zones réellement poussées — par un
+indice littéral, une forme que mon motif ne lisait pas : **c'est l'instrument
+qui a été corrigé, pas le contrôle qui a été désactivé.**
+
+⚖️ **Ce que je n'ai PAS fait** : de contrôle automatique des accents. La sonde a
+mesuré 26 candidats sur les 364 entrées ; **24 étaient des faux positifs de mon
+propre dictionnaire** (« posiciones » et « operaciones » perdent leur accent au
+pluriel, « verrouille » est ici un verbe). Un contrôle dont je ne peux pas
+garantir le dictionnaire dirait NON à tort, et un gate qui crie au loup finit
+par être ignoré. Les deux vrais écarts sont corrigés à la main.
+
+**Gate : 21 contrôles, 0 en échec. Contrôles positifs : 19/19 + 2 non-couvertures
+déclarées. Compilation : 0 erreur, 0 avertissement.**
+
+### v3.56.68 — 5e lot : l'état, ce qui est chargé une fois et jamais rechargé
+
+- 🔴 **Un aller-retour de phase effaçait le 2e strike, définitivement.**
+  `ApplySettingsChange` — appelée à la fin de **chaque pas** de la cascade —
+  remettait les deux drapeaux de violation à `false` dès que le profil courant
+  ne peut pas être restreint. **Sans symétrique** : rien ne les rechargeait au
+  retour, et ils n'étaient lus qu'à l'attache. Faire un clic sur le sélecteur de
+  phase pour regarder ce que donnerait « Challenge P1 », puis revenir sur
+  « Funded », suffisait. Le panneau affichait alors **3 % de plafond sur un
+  compte qui en porte 1**, le conseiller de lot **triplait son budget**, et la
+  case « Violation risque » se dessinait décochée **et active** : elle avait
+  l'air d'être le reflet fidèle d'un état qu'elle contredisait. La variable
+  globale, elle, valait toujours 1 — donc un simple changement d'unité de temps
+  rebasculait au plafond de 1 %. **Deux réponses pour le même compte au même
+  instant**, au gré du dernier événement de cycle de vie. Un seul chargeur
+  désormais (`LoadViolationFlags`), appelé partout où le profil bouge ; une
+  phase non restreignable **masque** les drapeaux, elle ne les détruit plus.
+- 🔴 **Et le clic que l'écran refusait, l'hôte l'acceptait.** Le shell dessine
+  ces deux cases désactivées dès que le profil ne peut pas être restreint —
+  l'hôte, lui, prenait le clic et **écrivait** la violation dans la variable du
+  compte. Le dégât était masqué par l'effacement ci-dessus ; la valeur stockée,
+  elle, restait. Un contrôle dessiné refusé est maintenant refusé.
+- 🔴 **Un changement de plan à chaud laissait la boîte à outils de risque sur
+  OFF.** `g_eff_risktools` n'était résolu qu'à l'attache, alors que le plan est
+  modifiable **à chaud** depuis la cascade. En passant de Personal à un plan
+  prop en cours de session : **plus une seule alerte de règle**, plus de verrou
+  discipline, plus de bandeau tilt — pendant que les jauges continuaient à
+  peindre l'ambre et le rouge **exactement comme d'habitude**, donc sans que
+  rien à l'écran ne dise que les alarmes étaient muettes. Et le retour arrière
+  était impossible : sur un plan prop la bascule refuse le clic, sous une phrase
+  qui affirme qu'elle est « toujours active », au-dessus d'un interrupteur
+  dessiné OFF. La résolution est une fonction, rejouée à chaque changement.
+- **La date de début de cycle pouvait être posée dans le FUTUR en un clic.** La
+  *forme* était validée (jamais de 31 février) — la *position dans le temps*
+  jamais. Et la valeur est persistée par login : elle survit au détachement, au
+  changement d'unité de temps et au redémarrage. À partir de là,
+  `HistorySelect(futur, maintenant)` rend un intervalle vide : **Quick Strike
+  affiche 0,00 % sur un mètre vide et VERT** alors que le trader peut être
+  au-delà du seuil de violation FN, et la carte news affiche 0 trade. Deux
+  règles dont l'écran est le seul témoin passent de « surveillées » à
+  « toujours propres », sans un message et sans un « n/a ». Plafonnée à
+  aujourd'hui.
+- **Dix globaux écrits et lus par personne.** Mesure faite **avant** de
+  construire l'instrument : 89 globaux, **10 jamais relus**. `g_day_start` —
+  une ancre de journée posée à minuit heure serveur à chaque attache, au milieu
+  du bloc où se calcule **la règle la plus meurtrière du produit**, suggérant
+  que la perte journalière est mesurée à partir de là et donc remise à zéro à
+  chaque changement d'unité de temps. Elle ne l'est pas. Son jumeau avait déjà
+  été retiré comme code mort ; celui-là avait survécu au nettoyage. Idem pour
+  les trois restes de la surcouche plein écran et les trois anciennes boîtes de
+  copie. Les **quatre miettes de diagnostic de la marge**, elles, ne sont pas
+  supprimées : elles reprennent le rôle écrit dessus — une ligne verbeuse,
+  limitée à une par minute, sur le **seul** chemin où le trader lit « n/a » sans
+  raison. Elles coûtaient une concaténation de six morceaux à chaque appel pour
+  un lecteur inexistant.
+
+⭐ **Deux classes de défaut apprises par le gate** (20 contrôles) :
+*un garde-fou doit garder quelque chose* — toute temporisation, constante ou
+horodatage, doit apparaître dans une **comparaison** ; et *un état global doit
+être relu* — un global écrit est, pour le compilateur, un global « utilisé ».
+Les deux contrôles ont leur contrôle positif : on débranche, le gate dit NON.
+
+**Gate : 20 contrôles, 0 en échec. Contrôles positifs : 18/18 + 2 non-couvertures
+déclarées. Compilation : 0 erreur, 0 avertissement.**
+
+### v3.55.67 — 4e lot : le chemin sonore, de bout en bout
+
+Cinq constats de la revue, tous sur la meme fonction : **l'alarme**. Le panneau
+sait depuis longtemps CALCULER le danger ; ce lot repare ce qu'il en DIT a voix
+haute.
+
+- 🔴 **Le limiteur d'alertes ne limitait rien.** Le fichier declarait, depuis
+  toujours, un tableau d'horodatages avec son role ecrit dessus — *« 15-second
+  cooldown per rule prevents spam on flapping transitions »*. Ce limiteur
+  n'etait branche que sur le chemin Telegram, **mort depuis la v3.26**. Le son,
+  lui, tournait sans bride : une regle qui respire autour de son seuil — un DD
+  journalier a 870 $ pour une bande d'avertissement a 875 — faisait **alterner
+  deux sons deux fois par seconde, sans fin**, exactement au moment ou la regle
+  compte. Le compilateur ne voyait rien : la variable etait ecrite, donc
+  « utilisee ». Elle garde desormais le SON, et la redescente gagne une
+  **hysteresis** : on ne repasse en vert qu'a 5 % sous la bande, jamais des
+  qu'on la frole. L'hysteresis ne joue que du **cote sur** — un outil de risque
+  peut s'attarder en ambre, jamais en vert.
+- **Plusieurs sons partaient a la suite, sans priorite.** Le declencheur jouait
+  lui-meme, **a l'interieur de la boucle du registre**. Quand deux regles
+  changeaient d'etat dans le meme rafraichissement, les sons s'enchainaient dans
+  l'ordre du registre : **le son d'une BRECHE pouvait etre couvert par celui
+  d'un simple avertissement declenche apres lui**. Le declencheur rend maintenant
+  la GRAVITE de la transition, la boucle en garde le maximum, et **un seul son
+  part**, le plus grave.
+- 🔴 **Quick Strike avait deux seuils — et c'est moi qui les ai separes.** La
+  v3.31 avait pose l'invariant *« une seule source pour le son et pour
+  l'ecran »* ; la v3.39 a donne a l'**ecran** la bande du profil (avertir a
+  20 %, violer a 25 %, soit 0,80 de la bande) en laissant le **son** sur le 0,80
+  **generique**, calcule sur autre chose. Entre les deux valeurs, la ligne
+  passait en ambre **et l'alarme se taisait**. La bande du profil vit desormais
+  dans la fonction que les deux consommateurs lisent.
+- **Le tilt et les verrous n'ont JAMAIS eu de son.** Le bloc d'en-tete de la
+  section discipline promet *« a soft amber banner + sound »*, et la variable de
+  temporisation porte *« tilt sound/Telegram throttle »* depuis le jour de sa
+  declaration — mais **aucun `PlaySound` n'a jamais existe sur ce chemin**. Un
+  bandeau ambre en haut d'un graphique qu'on ne regarde pas est un avertissement
+  que personne ne recoit. Les deux transitions sonnent, sous la temporisation
+  ecrite pour elles.
+- 🔴 **L'alerte de tenue de week-end arrivait APRES la cloture.** Elle demandait
+  d'aplatir a partir de **vendredi 22:00 UTC** — une heure **apres** la
+  fermeture du forex, quand aplatir n'est plus possible. Un avertissement qui
+  arrive apres l'echeance n'est pas un avertissement. Elle previent maintenant
+  des **18:00 UTC** en ambre, de quoi travailler une sortie, et passe en
+  **rouge a 20:30**, la derniere fenetre ou un ordre passe encore — avec son
+  propre texte, et une annonce **par niveau** pour que l'escalade s'entende
+  meme quand l'ambre a deja sonne.
+
+⭐ **Le gate a appris la classe de defaut** (19e controle) : *un garde-fou doit
+garder quelque chose*. Toute temporisation — constante `#define` ou horodatage
+global — doit apparaitre dans une **comparaison**. Une variable ecrite mais
+jamais confrontee a une horloge est une promesse non tenue, et le compilateur la
+declare « utilisee ». Deux l'etaient dans ce seul fichier. Le controle positif
+correspondant debranche la comparaison et verifie que le gate dit NON.
+
+**Gate : 19 controles, 0 en echec. Controles positifs : 17/17 + 2 non-couvertures
+declarees. Compilation : 0 erreur, 0 avertissement.**
 
 ### v3.52.64 -> v3.54.66 — 3e lot : deux chiffres impossibles, une carte volatile, une regression a moi
 
