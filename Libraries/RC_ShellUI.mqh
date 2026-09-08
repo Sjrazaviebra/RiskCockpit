@@ -2546,8 +2546,19 @@ public:
       if(m_d.discLocked) {
          if(hit == RZ_NAV_KILL) { m_lockBlocked = true; m_lockBlockedAt = TimeCurrent();
                                   RenderAll(); return true; }
+         // v3.62 : la cascade de profil etait dans cette liste. Vecu : basculer
+         // le profil sur une taille plus petite fait d une perte ordinaire 86 %
+         // du plafond journalier, le verrou s arme - et la cascade, gelee, ne
+         // permet plus de corriger le reglage qui vient de le creer. On est
+         // enferme dans une configuration fausse par une regle qu elle a produite.
+         // Or ce verrou est CONSULTATIF : l outil n a aucune fonction de trading
+         // et ne bloque aucun ordre. Geler la cascade n empeche donc rien de reel ;
+         // ca empeche seulement le panneau de dire la verite sur le compte. La
+         // DECLARATION du programme ne doit pas etre verrouillee par la regle
+         // qu elle definit. Restent geles les controles qui desserrent la regle
+         // EN VIGUEUR : steppers, add-ons, bascules, drapeaux de violation,
+         // auto-verrou, et la croix qui retire l outil.
          if((hit >= RZ_STEP_DEC0 && hit <= RZ_STEP_INC9) ||
-            (hit >= RZ_CAS_PREV0 && hit <= RZ_CAS_NEXT4) ||
             (hit >= RZ_ADDON0    && hit <= RZ_ADDON6)    ||
             (hit >= RZ_CFG_PAL   && hit <= RZ_CFG_RTOOLS && hit != RZ_CFG_PAL &&
              hit != RZ_CFG_MODE  && hit != RZ_CFG_LANG)  ||

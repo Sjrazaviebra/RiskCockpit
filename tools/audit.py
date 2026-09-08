@@ -438,7 +438,8 @@ def run(root):
     # pas - LICENSE en tete - pendant que le rapport annoncait un nombre de
     # fichiers scannes, ce qui se lit comme une couverture complete. On lit
     # maintenant TOUT ce qui se decode en texte, et on DIT ce qui a ete ecarte.
-    BINAIRE = ('.ex5', '.ex4', '.png', '.ico', '.bmp', '.jpg', '.gif', '.zip', '.wav')
+    BINAIRE = ('.ex5', '.ex4', '.png', '.ico', '.bmp', '.jpg', '.jpeg', '.gif',
+               '.zip', '.wav', '.mp4', '.mp3', '.pdf', '.ttf', '.otf', '.exe')
     scanned, ecartes = [], []
     for base, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d != '.git']
@@ -448,10 +449,20 @@ def run(root):
                 ecartes.append(rel)
                 continue
             scanned.append(rel)
+    # v3.62 : la liste d extensions n est qu un raccourci - c est la DECODABILITE
+    # qui tranche. Le gate a plante sur un .mp4 absent de la liste : il a tente
+    # de le decoder et s est arrete sur une exception, sans rendre de verdict.
+    # Un gate qui plante ne dit ni oui ni non, et on committe par-dessus.
+    lus = []
     for rel in scanned:
-        txt = read(root, rel)
+        try:
+            txt = read(root, rel)
+        except (UnicodeDecodeError, ValueError):
+            ecartes.append(rel)          # illisible en texte = binaire, et on le dit
+            continue
         if txt is None:
             continue
+        lus.append(rel)
         for label, rx in pats:
             if rx is None:
                 continue
@@ -461,7 +472,7 @@ def run(root):
     # THE SOURCES carry the verdict : they are plain text, every byte is readable,
     # a leak in them cannot hide.
     report("fuite de donnees perso (sources)", not leaks,
-           ("%d fichiers texte lus, %d binaires ecartes" % (len(scanned), len(ecartes)))
+           ("%d fichiers texte lus, %d binaires ecartes" % (len(lus), len(ecartes)))
            if not leaks else " | ".join(sorted(set(leaks))))
 
     # THE BINARY is a separate, weaker check, and it must say so. Its positive
