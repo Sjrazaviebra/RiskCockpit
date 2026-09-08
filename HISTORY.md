@@ -86,6 +86,56 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.49.61 — premier lot de la 3e revue (180 agents, 73 constats confirmes)
+
+Troisieme revue adversariale, demandee par JR : **14 dimensions** (securite,
+surete du risque, regles FN, entrees non fiables, beaute, ergonomie, qualite du
+code, robustesse MQL5, i18n, coherence des surfaces, etat et persistance, le gate
+lui-meme, doc contre code, alertes), **au plus 6 constats chacune**, chacun
+attaque par **deux angles independants** — un qui reproduit le chemin
+d'execution ligne par ligne, un qui cherche a le refuter.
+**180 agents, 22,3 M tokens, 83 constats bruts, 73 confirmes a l'unanimite.**
+⚠️ Chaque constat est **reverifie a la main ici** avant d'etre touche : un
+rapport d'agent est une donnee, pas un ordre.
+
+🔴 **CRITIQUE — le drapeau « 2e strike RISQUE » par login etait ECRASE par la
+variable globale lue juste apres.** Les deux drapeaux jumeaux n'etaient pas lus
+dans le meme ordre : la marge lisait global PUIS par-login (le par-login gagne,
+c'est correct) ; le risque lisait par-login PUIS global — **le global gagnait**,
+et la lecture par login etait morte. Consequence : un trader qui decoche la case
+sur un compte propre **efface la restriction de TOUS ses autres comptes**.
+`EffectiveRiskCap()` rend alors 3 % au lieu de 1 %, et ce plafond alimente le
+compteur LIMITES, le statut de chaque position, les lignes SL du graphique et
+surtout **le budget du CONSEILLER DE LOT** : trois fois trop de risque conseille
+sur un compte deja sous restriction, ou la prochaine violation est terminale.
+Et le global n'etait pas la graine gelee que son propre commentaire decrit :
+`PersistViolationFlags` le reecrivait a chaque clic, donc **le dernier compte
+touche dictait la valeur de tous les autres** via le repli legacy. Les deux
+lignes globales sont supprimees (`GVGetLogin` retombe deja sur la cle non
+suffixee, aucune migration perdue) et la persistance n'ecrit plus que le par-login.
+
+🔴 **Une bascule d'AFFICHAGE eteignait une REGLE.** `g_eff_news_high` est offerte
+dans l'onglet AFFICHAGE comme un filtre — « quels niveaux d'impact tu veux voir
+comptes » — et elle gardait les **quatre chemins de la REGLE** :
+`Live_InNewsWindow`, `Live_NextNewsEvt`, `FFInNewsWindow`, `FFNextEvt`. La
+decocher n'enlevait pas des marqueurs : elle **eteignait la regle des 40 %**, et
+le panneau annoncait « aucune news » pendant un NFP. Un reglage d'affichage ne
+doit JAMAIS pouvoir desactiver une regle. Elle ne filtre plus que ce qui est
+DESSINE.
+
+🔴 **Le chiffre que la firme NOTE ne pilotait rien.** La v3.35 a mis le risque
+VERROUILLE a l'ecran — le risque au stop pose A L'OUVERTURE, celui que
+FundedNext score — et l'a laisse **hors de l'agregat** : ni le score, ni la jauge
+du rail, ni le verdict, ni l'alarme ne le voyaient. Le panneau pouvait afficher
+3,1 % de risque verrouille **en restant vert**. Il entre dans l'agregat, avec le
+seuil de la regle de risque.
+
+**Un calendrier MUET etait rendu comme « aucune news ».** `CalendarValueHistory`
+qui echoue faisait rendre `false` a la fenetre et `0` au prochain evenement : le
+panneau affichait « Rien dans les 24 h » avec la meme serenite que s'il avait
+verifie. La source MT5 etait **la seule sans detection de panne** — le pont
+ForexFactory en a une depuis la v3.26. Elle dit maintenant « SOURCE ILLISIBLE ».
+
 ### v3.47.59 / v3.48.60 — deux chemins morts retires, et la news qui se contredisait
 
 **v3.47 — du code mort dans un depot PUBLIC.**

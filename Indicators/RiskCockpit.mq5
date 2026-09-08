@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.48"
+#property version "3.49"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.48"
+#define RC_VERSION_STR "3.49"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -473,6 +473,10 @@ struct FFEvent {
 FFEvent  g_ff_events[];       // parsed cache (this-week feed, refreshed 1/60 min)
 bool     g_ff_active = false; // feed fetched + parsed OK -> FF drives rule + display
 datetime g_ff_last_try = 0;   // fetch throttle (0 = fetch on the first timer tick)
+// v3.49 : the MT5 calendar was the only source with no failure state. A call
+// that fails rendered exactly like a quiet week - "nothing in the next 24 h",
+// with the same serenity as if it had checked.
+bool     g_cal_down = false;
 
 // v2.03 F4 : unified display event (FF or MT5 fallback), SERVER-time for the chart axis.
 struct NewsDispItem {
@@ -970,12 +974,21 @@ int OnInit(void) {
         g_margin_violation_active = (GlobalVariableGet("RC_margin_violation") != 0.0);
     {   // A 2nd strike belongs to ONE account, like size / phase / plan. Stored
         // globally, it followed the trader onto every other login.
+        //
+        // v3.49 : the two twin flags were NOT read in the same order. Margin was
+        // global-then-per-login, so the per-login value won - correct. Risk was
+        // per-login-THEN-GLOBAL, so the GLOBAL won and the per-login read was
+        // dead. A trader clearing the box on a clean account wiped the
+        // restriction off every OTHER account : EffectiveRiskCap went back to
+        // 3 % instead of 1 %, and that cap feeds the LIM meter, every position's
+        // status, the SL lines and above all the LOT ADVISOR'S BUDGET - three
+        // times the risk advised on an account where the next violation ends it.
+        // The global lines that followed are gone : GVGetLogin already falls back
+        // to the un-suffixed key, so no migration is lost.
         double mv = 0.0, rv = 0.0;
         if (GVGetLogin("RC_margin_violation", mv)) g_margin_violation_active = (mv != 0.0);
         if (GVGetLogin("RC_risk_violation",   rv)) g_risk_violation_active   = (rv != 0.0);
     }
-    if (GlobalVariableCheck("RC_risk_violation"))
-        g_risk_violation_active = (GlobalVariableGet("RC_risk_violation") != 0.0);
 
     // v3 : mouse-move events feed the shell (drag of the floating table +
     // hover-intent tooltips). The legacy panel anchor died with the panel.
@@ -1517,7 +1530,13 @@ void BuildDeckData(RCDeckData &d) {
     // was reachable with the hyperactivity counter sitting at its cap.
     double worst = 0.0, sev = 0.0, mark = 0.80;
     RC_WorstRule(worst, sev, mark, d.marginPct,  d.marginCap,  true,               d.warnMargin);
-    RC_WorstRule(worst, sev, mark, d.riskPct,    d.riskCap,    d.riskCap > 0.0,    d.warnRisk);
+    RC_WorstRule(worst, sev, mark, d.riskPct,    d.riskCap,    d.riskCap > 0.0,  d.warnRisk);
+    // v3.49 : the LOCKED risk - the figure FundedNext actually scores, since it
+    // fixes to the stop posed at OPENING - was put on screen in v3.35 and left
+    // OUT of the aggregate. Neither the score, nor the rail gauge, nor the
+    // verdict, nor the alarm could see it : the panel could show 3.1 % of locked
+    // risk and stay green. It counts.
+    RC_WorstRule(worst, sev, mark, d.lockedRiskPct, d.riskCap, d.riskCap > 0.0, d.warnRisk);
     RC_WorstRule(worst, sev, mark, d.dailyPct,   d.dailyCap,   d.dailyApplies,     d.warnDaily);
     RC_WorstRule(worst, sev, mark, d.overallPct, d.overallCap, d.overallApplies,   d.warnOverall);
     // The aggregate stays OPEN here : Quick Strike, hyperactivity and server
@@ -1676,7 +1695,8 @@ void BuildDeckData(RCDeckData &d) {
     // rule on this profile" twice a second, and the height change re-created
     // every surface with it. A value that costs nothing must never sit behind a
     // cache : it buys no time and creates a way to be wrong.
-    d.newsApplies = g_profile.news_rule_applies;
+    d.newsApplies  = g_profile.news_rule_applies;   // v3.37 : say N/A, don't invent
+    d.newsSrcDown  = (!g_ff_active && g_cal_down);  // v3.49 : say it could not read
     static datetime s_newsScan = 0;
     static RCDeckData s_newsCache;
     if (TimeCurrent() - s_newsScan < 15 && s_newsScan > 0) {
@@ -2022,6 +2042,7 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_LOT_MARGSHORT, Tr("shl_lotmargshort"));
     g_shell.SetLabel(RCL_LOT_REDUCE,    Tr("shl_lotreduce"));
     g_shell.SetLabel(RCL_NEWS_NORULE,   Tr("shl_newsnorule"));
+    g_shell.SetLabel(RCL_NEWS_SRCDOWN,  Tr("shl_newssrcdown"));
     g_shell.SetLabel(RCL_HELP_MANUAL,   Tr("shl_manual"));
     ShellPushHelp();                    // v3.44 : the manual follows the language
     g_shell.SetLabel(RCL_SEC_CPTST,  Tr("shl_cptstate"));
@@ -3313,8 +3334,11 @@ bool Live_InNewsWindow(void) {
     const datetime t_to = TimeCurrent() + win_sec;
 
     MqlCalendarValue values[];
-    if (!CalendarValueHistory(values, t_from, t_to, NULL, NULL))
+    if (!CalendarValueHistory(values, t_from, t_to, NULL, NULL)) {
+        g_cal_down = true;   // v3.49 : could not READ is not "nothing to report"
         return false;
+    }
+    g_cal_down = false;
 
     for (int i = 0; i < ArraySize(values); ++i) {
         MqlCalendarEvent ev;
@@ -3324,7 +3348,10 @@ bool Live_InNewsWindow(void) {
         // 2026). MEDIUM never triggers the 40% rule - it only gets the separate
         // "check FN" vigilance display (Live_NextMedNewsEvt).
         if (ev.importance != CALENDAR_IMPORTANCE_HIGH) continue;
-        if (!g_eff_news_high) continue;
+        // v3.49 : `g_eff_news_high` used to gate this. It is a DISPLAY toggle,
+        // offered in the DISPLAY tab as "which impact levels you want counted" -
+        // and it was switching the 40% RULE off, so the panel announced "no news"
+        // during an NFP. A display setting must never disable a rule.
 
         MqlCalendarCountry country;
         if (!CalendarCountryById(ev.country_id, country))
@@ -3369,7 +3396,7 @@ datetime Live_NextNewsEvt(void) {
         // v2.02.05 FIX 2a : the RULE tracks HIGH-impact ONLY (FN : 40% of winning-
         // trade profit in the ±window ; MEDIUM has NO rule -> vigilance helper below).
         if (ev.importance != CALENDAR_IMPORTANCE_HIGH) continue;
-        if (!g_eff_news_high) continue;
+        // v3.49 : display toggle removed from the RULE path - see above.
         MqlCalendarCountry ctry;
         if (!CalendarCountryById(ev.country_id, ctry)) continue;
         if (!NewsCcyAffectsSymbol(_Symbol, ctry.currency)) continue;
@@ -4235,7 +4262,7 @@ datetime FFNextEvt(const bool restricted_class) {
     // toggle contract identical to the MT5 fallback bodies (v2.02.05) : the HIGH
     // toggle silences the restricted class, the MEDIUM toggle is already checked
     // by the Live_NextMedNewsEvt caller.
-    if (restricted_class && !g_eff_news_high) return 0;
+    // v3.49 : the display toggle no longer gates the rule (see Live_InNewsWindow).
     const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
     const datetime now_utc = TimeGMT();
     const int srv_off = (int)(TimeCurrent() - TimeGMT());
@@ -4257,7 +4284,7 @@ bool FFInNewsWindow(void) {
     // not, so switching to the ForexFactory feed brought the rule back to life
     // on a profile where FundedNext does not apply it at all.
     if (!g_profile.news_rule_applies) return false;
-    if (!g_eff_news_high) return false; // same toggle contract as the MT5 fallback body
+    // v3.49 : the display toggle no longer gates the rule (see Live_InNewsWindow).
     const int win_sec = (g_profile.news_window_minutes > 0 ? g_profile.news_window_minutes : 5) * 60;
     const datetime now_utc = TimeGMT();
     for (int i = 0; i < ArraySize(g_ff_events); ++i) {
@@ -5219,6 +5246,10 @@ void InitI18n(void) {
         "USER GUIDE",
         "GUIDE D'UTILISATION",
         "GUIA DE USO");
+    AddTr("shl_newssrcdown",
+        "SOURCE UNREADABLE",
+        "SOURCE ILLISIBLE",
+        "FUENTE ILEGIBLE");
     AddTr("shl_newsnorule",
         "No news rule on this profile.",
         "Aucune règle news sur ce profil.",
@@ -6462,10 +6493,12 @@ bool ProfileCanBeRestricted(void) {
 }
 
 void PersistViolationFlags(void) {
+    // v3.49 : this used to write the GLOBAL variable too, which made the last
+    // account touched dictate the value for every other one through GVGetLogin's
+    // legacy fallback - and contradicted the comment on GVSetLogin, which calls
+    // the global a frozen migration seed. It is one now.
     GVSetLogin("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
     GVSetLogin("RC_risk_violation",   g_risk_violation_active   ? 1.0 : 0.0);
-    GlobalVariableSet("RC_margin_violation", g_margin_violation_active ? 1.0 : 0.0);
-    GlobalVariableSet("RC_risk_violation", g_risk_violation_active ? 1.0 : 0.0);
 }
 
 // D-FULL step 2 : the ACTIVE state repaints the face in the accent gradient + a dark

@@ -104,6 +104,7 @@ struct RCDeckData {
    // news (cell NEWS)
    bool   newsHasEvt, newsHigh, newsActive, newsFF;
    bool   newsApplies;      // v3.37 : this profile HAS a news rule at all
+   bool   newsSrcDown;      // v3.49 : the calendar could not be read AT ALL
    int    newsMins;
    // discipline (cell DISC)
    bool   discLocked, discTilt, slGuard;
@@ -290,7 +291,8 @@ enum ERCLabel {
    RCL_NAV_ROOM, RCL_NAV_LOT, RCL_NAV_NEWS, RCL_NAV_FIT,
    RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
    RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
-   RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE, RCL_HELP_MANUAL
+   RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE, RCL_HELP_MANUAL,
+   RCL_NEWS_SRCDOWN
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -1063,8 +1065,13 @@ private:
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_NEWS_SRC);
       y += 18;
       m_side.Text(18, y, L(RCL_NEWS_STATE, "State"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
-      string st = L(RCL_INACTIVE, "inactive");
-      color  sc = m_t.dim;
+      // v3.49 : a calendar that could not be READ is not a calendar that says
+      // "nothing". The MT5 source was the only one without a failure state -
+      // the file bridge has had one since v3.26 - so a silent calendar rendered
+      // exactly like a quiet week.
+      string st = (m_d.newsSrcDown ? L(RCL_NEWS_SRCDOWN, "SOURCE UNREADABLE")
+                                   : L(RCL_INACTIVE, "inactive"));
+      color  sc = (m_d.newsSrcDown ? m_t.warn : m_t.dim);
       if(m_d.newsActive)      { st = L(RCL_NEWS_ACT_EL, "ACTIVE - eligible profit ") + DoubleToString(m_d.newsSharePct, 0) + "%"; sc = m_t.red; }
       else if(m_d.newsHasEvt) { st = L(RCL_IN_MIN, "in ") + IntegerToString(m_d.newsMins) + " min"; sc = (m_d.newsHigh ? m_t.red : m_t.warn); }
       m_side.Text(RCS_SIDE_W - 18, y, st, A(sc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
