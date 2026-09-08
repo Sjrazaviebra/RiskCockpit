@@ -242,8 +242,13 @@ def run(root):
     #     l horloge, le libelle le plus dangereux pose sur le mauvais controle.
     SERIES = [("tipn_", "RZ_NAV_LOGO", "RZ_NAV_KILL", "barre du haut"),
               ("tipr_", "RZ_RAIL_LIM", "RZ_RAIL_HELP", "rail")]
+    # v3.66 : ce comptage lisait les COMMENTAIRES de l enum comme du code - un
+    # commentaire qui mentionne « RZ_NAV_VITALS » ajoutait un id fantome et le
+    # controle disait NON a tort. Un instrument qui confond code et commentaire
+    # ne mesure pas ce qu il annonce. On retire les commentaires d abord.
     zorder = re.findall(r'\b(RZ_\w+)\b',
-                        re.search(r'enum ERCZone \{(.*?)\};', shell, re.S).group(1))
+                        re.sub(r'//[^\n]*', '',
+                               re.search(r'enum ERCZone \{(.*?)\};', shell, re.S).group(1)))
     serie_bad = []
     for pfx, first, last, quoi in SERIES:
         if first not in zorder or last not in zorder:

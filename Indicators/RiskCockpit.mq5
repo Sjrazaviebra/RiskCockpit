@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.63"
+#property version "3.66"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.63"
+#define RC_VERSION_STR "3.66"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -4078,8 +4078,20 @@ bool GVGetLogin(const string base, double &v) {
     if (GlobalVariableCheck(base))           { v = GlobalVariableGet(base);           return true; } // legacy fallback
     return false;
 }
+// v3.66 : cette ecriture ignorait sa valeur de retour. JR : « a chaque fois que
+// tu compiles, l app oublie les settings ». Reproduit : avant rechargement
+// FundedNext / Stellar 2-Step / Funded / 6K, apres rechargement Personal. Et le
+// discriminant est net - la LANGUE et le THEME survivent (ils passent par
+// GlobalVariableSet direct), le PLAN, la TAILLE, la PHASE et le TYPE DE COMPTE
+// non (ils passent par ici). MT5 a plusieurs facons d echouer en silence sur
+// une ecriture de variable globale, dont un magasin sature : 4096 au maximum,
+// et depuis la v3.53 ce produit en cree UNE PAR TICKET.
+// On ne devine pas : on rend l echec visible, avec sa cle et son code.
 void GVSetLogin(const string base, const double v) {
-    GlobalVariableSet(LoginKey(base), v); // per-login only : the global stays frozen as the migration seed
+    if (!GlobalVariableSet(LoginKey(base), v))
+        PrintFormat("RiskCockpit : ECHEC d'ecriture de la variable globale '%s' "
+                    "(err=%d). Ce reglage ne survivra PAS au rechargement.",
+                    LoginKey(base), GetLastError());
 }
 // v3.52 : le point haut REEL de la balance realisee, reconstruit depuis
 // l'historique. La graine etait max(balance initiale, balance courante) : sur
@@ -5142,7 +5154,13 @@ void RefreshNewsZonesForChart(const long chart_id) {
             ObjectSetInteger(chart_id, flag_id, OBJPROP_FONTSIZE, 10);
             ObjectSetString (chart_id, flag_id, OBJPROP_FONT, "Consolas");
             ObjectSetInteger(chart_id, flag_id, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
-            ObjectSetInteger(chart_id, flag_id, OBJPROP_BACK, false);
+            // v3.64 : ce `false` mettait l etiquette au PREMIER PLAN, donc peinte
+            // APRES le bitmap du panneau et imprimee dessus - « les icones de news
+            // en bas qui chevauchent le menu ». Les traits verticaux de la meme
+            // fonction sont deja en arriere-plan. Un repere decoratif pose sur le
+            // prix ne doit jamais recouvrir la surface qu on lit : c est la lecon
+            // de la v3.24, l ordre de PEINTURE, pas le z-order.
+            ObjectSetInteger(chart_id, flag_id, OBJPROP_BACK, true);
             ObjectSetInteger(chart_id, flag_id, OBJPROP_SELECTABLE, false);
             ObjectSetInteger(chart_id, flag_id, OBJPROP_HIDDEN, true);
             ObjectSetString (chart_id, flag_id, OBJPROP_TOOLTIP, gr_tip);
@@ -5746,9 +5764,9 @@ void InitI18n(void) {
         "Quick Strike|La part de ton profit faite en trades très courts - une règle notée par la firme.",
         "Quick Strike|La parte de tu beneficio hecha en operaciones muy cortas - una regla que la firma puntúa.");
     AddTr("h4_6",
-        "Survival room|Money before the nearest limit, and the 80% of it a SINGLE trade may risk. The last 20% is what lets you survive a bad one.",
-        "Marge de survie|L'argent avant la limite la plus proche, et les 80% qu'UN SEUL trade peut risquer. Les 20% restants sont ce qui te fait survivre.",
-        "Margen de supervivencia|El dinero antes del límite más cercano, y el 80% que UNA sola operación puede arriesgar. El 20% restante es lo que te deja sobrevivir.");
+        "Survival room|What is left before the CLOSEST limit, daily or overall : (cap % - used %) x the programme size. Beside it, the 80% a SINGLE trade may risk - the last 20% is what lets you survive a bad one.",
+        "Marge de survie|Ce qu'il reste avant la limite la PLUS PROCHE, journalière ou totale : (% du plafond - % consommé) x la taille du programme. À côté, les 80% qu'UN SEUL trade peut risquer - les 20% restants sont ce qui te fait survivre.",
+        "Margen de supervivencia|Lo que queda antes del límite MÁS CERCANO, diario o total : (% del límite - % consumido) x el tamaño del programa. Al lado, el 80% que UNA sola operación puede arriesgar - el 20% restante es lo que te deja sobrevivir.");
     AddTr("h4_7",
         "Floor|The equity level at which the account is LOST. Below it, it is over.",
         "Plancher|Le niveau d'équité auquel le compte est PERDU. En dessous, c'est fini.",
@@ -6374,18 +6392,30 @@ void InitI18n(void) {
     AddTr("tipn_8", "Clock|Broker server time.",
                     "Horloge|Heure serveur du broker.",
                     "Reloj|Hora del servidor del broker.");
-    AddTr("tipn_9", "Remove|Takes RiskCockpit off this chart.",
-                    "Retirer|Retire RiskCockpit de ce graphique.",
-                    "Quitar|Quita RiskCockpit de este gráfico.");
+    // v3.66 : trois zones inserees avant la croix ; la serie SUIT l enum, et le
+    // gate compare le nombre de cles a la taille de la plage - c est ce controle
+    // qui a rattrape la meme insertion en v3.27.
+    AddTr("tipn_9", "Room|Left before the CLOSEST loss limit, daily or overall : (cap % - used %) x the programme size.",
+                    "Marge|Ce qui reste avant la limite de perte la PLUS PROCHE, journalière ou totale : (% du plafond - % consommé) x la taille du programme.",
+                    "Margen|Lo que queda antes del límite de pérdida MÁS CERCANO, diario o total : (% del límite - % consumido) x el tamaño del programa.");
+    AddTr("tipn_10", "Advised lot|Size for your risk per trade, your stop distance and the room left.",
+                     "Lot conseillé|Taille pour ton risque par trade, ta distance de stop et la marge restante.",
+                     "Lote aconsejado|Tamaño para tu riesgo por operación, tu distancia de stop y el margen restante.");
+    AddTr("tipn_11", "News|Minutes to the next event your programme puts a rule on.",
+                     "News|Minutes avant le prochain événement sur lequel ton programme pose une règle.",
+                     "Noticias|Minutos hasta el próximo evento sobre el que tu programa pone una regla.");
+    AddTr("tipn_12", "Remove|Takes RiskCockpit off this chart.",
+                     "Retirer|Retire RiskCockpit de ce graphique.",
+                     "Quitar|Quita RiskCockpit de este gráfico.");
     AddTr("tipp_close", "Close|Closes the panel, the rail stays.",
                         "Fermer|Referme le panneau, le rail reste.",
                         "Cerrar|Cierra el panel, el carril queda.");
     AddTr("tipp_pin",   "Sidebar|Single section / full sidebar.",
                         "Sidebar|Section unique / sidebar complète.",
                         "Barra lateral|Sección única / barra completa.");
-    AddTr("tipl_0", "Room|Dollars before the nearest active limit.",
-                    "Marge|Dollars avant la limite active la plus proche.",
-                    "Margen|Dólares antes del límite activo más cercano.");
+    AddTr("tipl_0", "Room|Left before the CLOSEST loss limit, daily or overall : (cap % - used %) x the programme size.",
+                    "Marge|Ce qui reste avant la limite de perte la PLUS PROCHE, journalière ou totale : (% du plafond - % consommé) x la taille du programme.",
+                    "Margen|Lo que queda antes del límite de pérdida MÁS CERCANO, diario o total : (% del límite - % consumido) x el tamaño del programa.");
     AddTr("tipl_1", "Floor|Equity under this level = account lost.",
                     "Plancher|Equity sous ce niveau = compte perdu.",
                     "Suelo|Equity bajo este nivel = cuenta perdida.");
@@ -6486,9 +6516,9 @@ void InitI18n(void) {
         "Closing|Disabled : an indicator cannot send orders. Closing lives in the EA version.",
         "Fermeture|Désactivé : un indicateur ne passe pas d'ordre. La fermeture est dans la version EA.",
         "Cierre|Desactivado : un indicador no envía órdenes. El cierre está en la versión EA.");
-    AddTr("tipq_0",     "Room|Distance in $ to the nearest active limit. Click : the limits.",
-                        "Marge|Distance en $ à la limite active la plus proche. Clic : les limites.",
-                        "Margen|Distancia en $ al límite activo más cercano. Clic : los límites.");
+    AddTr("tipq_0",     "Room|Dollars before the closest limit, daily or overall. Click : the limits.",
+                        "Marge|Dollars avant la limite la plus proche, journalière ou totale. Clic : les limites.",
+                        "Margen|Dólares antes del límite más cercano, diario o total. Clic : los límites.");
     AddTr("tipq_1",     "Lot|Advised size for the current risk. Click : the advisor.",
                         "Lot|Taille conseillée pour le risque en cours. Clic : le conseiller.",
                         "Lote|Tamaño aconsejado para el riesgo actual. Clic : el asesor.");

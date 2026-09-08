@@ -120,6 +120,85 @@ exactement ce qui s'est passé. La liste d'extensions devient un raccourci ;
 c'est désormais la **décodabilité** qui tranche, et ce qui n'est pas lisible en
 texte est écarté *et compté comme tel*.
 
+### v3.64.76 — un clic dans un menu ne le ferme plus, et les repères news passent dessous
+
+- 🔴 **« Si je clique sur un menu il ne faut pas que ça se ferme. »** Un clic
+  dans le panneau qui ne tombait sur **aucune zone enregistrée** le refermait.
+  Or un panneau est plein d'espace mort : entre deux lignes, sur un titre de
+  section, dans une marge. On vise une valeur, on manque de trois pixels, et la
+  surface disparaît — **on apprend à cliquer avec précaution dans un outil fait
+  pour être consulté vite.** Le repli automatique n'a de sens que pour un clic
+  *ailleurs*, sur le graphique. (Ce défaut m'a refermé le panneau six fois
+  pendant la séance de captures : je l'avais pris pour de la maladresse.)
+- 🔴 **Les repères news du graphique passaient par-dessus le panneau.** Les
+  étiquettes de la frise — « ▼ USD », « ◆ EUR » — étaient créées avec
+  `OBJPROP_BACK` à `false`, donc au **premier plan** : MT5 les peint **après**
+  le bitmap du panneau et elles s'impriment dessus. Les traits verticaux de la
+  même fonction, eux, sont déjà en arrière-plan. Un repère décoratif posé sur le
+  prix ne doit jamais recouvrir la surface qu'on lit. **C'est la leçon de la
+  v3.24** : ce n'est pas un problème de z-order, c'est un problème d'**ordre de
+  peinture**.
+
+### v3.65.77 — la table flottante « perd un peu la place », et c'est mesurable
+
+Elle était dimensionnée pour des polices de 7 à 9 points. La v3.63 les a toutes
+montées d'un point — environ 13 px de haut au lieu de 12 — et sa géométrie ne
+suivait pas : la bande d'accès rapide écrit sa valeur **11 px** sous son
+libellé, donc « 0.01 » mordait sur la première position ; et une ligne de
+position écrit le symbole à `y` et l'âge à `y + 14`, avec le P&L à droite de la
+première ligne et le bouton CLOSE à droite de la seconde — à 14 px d'écart,
+**« +2.68 » et « CLOSE × » se chevauchaient**. La table passe à 296 px, la bande
+et les lignes gagnent leur interligne. Aucune couleur, aucun texte, aucun
+comportement ne change : c'est de la place, rien d'autre.
+
+### v3.66.78 — « c'est quoi ROOM et comment c'est calculé ? »
+
+JR a écrit le produit et ne sait pas ce que dit **le chiffre le plus en vue de
+la barre du haut**. Aucun acheteur ne le saura. Deux causes, les deux réparées.
+
+- 🔴 **Les trois pastilles de la barre partageaient une seule zone.** ROOM, LOT
+  et NEWS étaient toutes enregistrées sous `RZ_NAV_VITALS` — la zone de
+  l'equity. Survoler « ROOM » répondait donc *« Vitals : equity courante et
+  positions ouvertes »*, qui parle d'autre chose. **Les trois chiffres que la
+  barre existe pour donner avaient une aide qui ne les concernait pas.**
+- **Le texte ne disait pas le calcul.** *« Dollars avant la limite active la
+  plus proche »* nomme la chose sans dire comment on l'obtient. L'infobulle et
+  la ligne du manuel portent maintenant la formule : **(% du plafond − %
+  consommé) × la taille du programme**, sur la limite **journalière** ou
+  **totale**, celle des deux qui est la plus proche.
+- Et les trois pastilles **ouvrent la section correspondante**, comme les trois
+  cellules de la table flottante : du chiffre au détail qui est derrière.
+
+⭐ **Le gate a dit NON trois fois sur cette version — et il avait raison deux fois
+sur trois.** (1) Les trois nouvelles zones étaient **dessinées sans être
+traitées** : elles seraient tombées dans le repli automatique — exactement le
+défaut que ce contrôle existe pour attraper, trouvé sur mon propre code une
+heure après que j'aie écrit à quoi il sert. (2) Deux entrées i18n écrites en
+fragments concaténés sur plusieurs lignes étaient **« NON ANALYSÉES »** : le
+contrôle refuse de conclure au lieu de les déclarer propres. (3) La troisième
+alerte était **fausse, et le défaut était dans l'instrument** : le contrôle des
+séries comptait les identifiants de l'énumération **sans retirer les
+commentaires**, et mon commentaire explicatif mentionnait `RZ_NAV_VITALS` — un
+id fantôme. Un contrôle qui lit un commentaire comme du code ne mesure pas ce
+qu'il annonce. Corrigé.
+
+🔎 **Et une régression de fond, reproduite, qui n'est PAS une erreur de JR.**
+*« À chaque fois que tu compiles, l'app oublie les settings. »* Mesuré :
+**avant** rechargement `FundedNext / Stellar 2-Step / Funded / $6K`, **après**
+`Personal`. Le discriminant est net — la **langue** et le **thème** survivent,
+le **plan**, la **taille**, la **phase** et le **type de compte** non. Or les
+premiers passent par `GlobalVariableSet` direct, les seconds par `GVSetLogin`,
+la variante par login. `GlobalVariableSet` rend un booléen que ce code
+**ignorait** : un échec d'écriture — MT5 en a plusieurs causes silencieuses,
+dont un magasin de variables globales saturé (4096 au maximum, et **depuis la
+v3.53 ce produit en crée une par ticket**) — ne laissait aucune trace. Le
+réglage semblait pris, l'écran le montrait, et il disparaissait au rechargement.
+**On ne devine pas la cause : on la rend visible.** L'écriture est vérifiée et
+un échec s'écrit au journal avec sa clé et son code d'erreur.
+
+**Gate : 22 contrôles, 0 en échec. Contrôles positifs : 20/20. Compilation :
+0 erreur, 0 avertissement.**
+
 ### v3.63.75 — ne pas proposer ce qui n'existe pas
 
 Trois demandes de JR, à l'usage, sur la même idée.

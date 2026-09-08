@@ -201,7 +201,12 @@ enum ERCZone {
    RZ_PANEL_CLOSE, RZ_PANEL_PIN,
    // navbar
    RZ_NAV_LOGO, RZ_NAV_SYM, RZ_NAV_TF, RZ_NAV_VITALS, RZ_NAV_HEALTH,
-   RZ_NAV_PALETTE, RZ_NAV_MODE, RZ_NAV_FIT, RZ_NAV_CLOCK, RZ_NAV_KILL,
+   RZ_NAV_PALETTE, RZ_NAV_MODE, RZ_NAV_FIT, RZ_NAV_CLOCK,
+   // v3.66 : les trois pastilles partageaient RZ_NAV_VITALS - la zone de
+   // l equity - donc survoler « ROOM » repondait « Vitals ». Les trois chiffres
+   // que la barre existe pour donner avaient une aide qui parlait d autre chose.
+   RZ_NAV_ROOMC, RZ_NAV_LOTC, RZ_NAV_NEWSC,
+   RZ_NAV_KILL,
    // hover-only info zones (click = swallowed no-op, never collapses a section)
    RZ_TIP_LIM_ROOM, RZ_TIP_LIM_FLOOR, RZ_TIP_LIM_M0, RZ_TIP_LIM_M1,
    RZ_TIP_LIM_M2, RZ_TIP_LIM_M3,
@@ -329,10 +334,14 @@ struct RCZone { int x, y, w, h, id; };
 #define RCS_TIP_H       58    // 2 description lines : one line was truncating
 #define RCS_MENU_W     120
 #define RCS_BAND_H      26      // full-width blocking banner (hard lock / SL guard / tilt)
-#define RCS_FLT_W      256      // floating positions table (shown while trades are open)
-#define RCS_FLT_HEAD    24
-#define RCS_FLT_ROW     30
-#define RCS_FLT_QUICK   28      // quick-access strip (room / lot / news)
+// v3.65 : cette geometrie datait des polices de 7 a 9 points. La v3.63 les a
+// toutes montees d un point - environ 13 px de haut au lieu de 12 - et la table
+// ne suivait pas : la valeur de la bande rapide mordait sur la ligne du dessous,
+// et « +2.68 » touchait « CLOSE × ». On donne la place, rien d autre ne change.
+#define RCS_FLT_W      296      // floating positions table (shown while trades are open)
+#define RCS_FLT_HEAD    28
+#define RCS_FLT_ROW     38
+#define RCS_FLT_QUICK   34      // quick-access strip (room / lot / news)
 
 //--- font scale (POINTS) ----------------------------------------------------
 // v3.63 : JR, a l usage : « la taille des polices est trop petite ». Chaque
@@ -698,13 +707,13 @@ private:
             const color rc = LimStatC();
             cx = NavChip(cx, L(RCL_NAV_ROOM, "ROOM"),
                          (m_d.roomMoney < 0.0 ? "N/A" : MoneyShort(m_d.roomMoney)),
-                         rc, RZ_NAV_VITALS);
+                         rc, RZ_NAV_ROOMC);
          }
          if(midW >= 340) {
             const color lc2 = (m_d.lotZero ? m_t.red : (m_d.lotCapped ? m_t.warn : m_t.accent));
             cx = NavChip(cx, L(RCL_NAV_LOT, "LOT"),
                          (m_d.sugLot > 0.0 ? DoubleToString(m_d.sugLot, m_d.lotDigits) : "--"),
-                         lc2, RZ_NAV_VITALS);
+                         lc2, RZ_NAV_LOTC);
          }
          if(midW >= 430) {
             const color nc2 = (!m_d.newsHasEvt ? m_t.dim
@@ -712,7 +721,7 @@ private:
                                   : (m_d.newsMins <= 60 ? m_t.warn : m_t.text)));
             cx = NavChip(cx, L(RCL_NAV_NEWS, "NEWS"),
                          (m_d.newsHasEvt ? IntegerToString(m_d.newsMins) + "m" : "--"),
-                         nc2, RZ_NAV_VITALS);
+                         nc2, RZ_NAV_NEWSC);
          }
          if(midW >= 560) {
             string vit = "$" + DoubleToString(m_d.equity, 2) + "  " +
@@ -1817,6 +1826,9 @@ private:
          case RZ_NAV_PALETTE:t = "Theme";        d = "Emerald / Indigo / Slate.";                     return true;
          case RZ_NAV_MODE:   t = "Mode";         d = "Dark / light.";                                  return true;
          case RZ_NAV_FIT:    t = "Fit";          d = "Re-centre the chart with free room above and below."; return true;
+         case RZ_NAV_ROOMC:  t = "Room";        d = "Dollars left before the closest loss limit."; return true;
+         case RZ_NAV_LOTC:   t = "Advised lot"; d = "Size for your risk rule and the room left.";  return true;
+         case RZ_NAV_NEWSC:  t = "News";        d = "Minutes to the next rule-bound event.";       return true;
          case RZ_NAV_CLOCK:  t = "Clock";      d = "Broker server time.";                         return true;
          case RZ_NAV_KILL:   t = "Remove";      d = "Removes RiskCockpit from this chart.";              return true;
          case RZ_TIP_LIM_ROOM:  t = "Room";     d = "Dollars before the nearest active limit.";   return true;
@@ -2007,12 +2019,12 @@ private:
       // header : grip + count + total P&L + hide
       m_float.GradientVFill(1, 1, W - 2, RCS_FLT_HEAD, 11,
                             Mix(m_t.surface, m_t.accent, 0.16), Mix(m_t.surface, clrBlack, 0.05));
-      m_float.Text(12, 5, ShortToString((ushort)0x2261), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
-      m_float.Text(28, 5, IntegerToString(m_d.posCount) + " " + L(RCL_SEC_POS, "OPEN POSITIONS"),
+      m_float.Text(12, 6, ShortToString((ushort)0x2261), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
+      m_float.Text(28, 6, IntegerToString(m_d.posCount) + " " + L(RCL_SEC_POS, "OPEN POSITIONS"),
                    A(m_d.posCount > 0 ? m_t.accent : m_t.dim), RCS_F_LABEL, "Segoe UI",
                    TA_LEFT | TA_TOP, FW_BOLD);
       const color tc = (m_d.posPnl >= 0.0 ? m_t.ok : m_t.red);
-      m_float.Text(W - 30, 5, (m_d.posPnl >= 0.0 ? "+" : "") + DoubleToString(m_d.posPnl, 2),
+      m_float.Text(W - 32, 6, (m_d.posPnl >= 0.0 ? "+" : "") + DoubleToString(m_d.posPnl, 2),
                    A(tc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, FW_BOLD);
       m_float.Text(W - 13, 4, ShortToString((ushort)0x00D7), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP);
       ZAdd(m_fltX, m_fltY, W - 24, RCS_FLT_HEAD, RZ_FLT_GRIP);      // drag surface
@@ -2026,18 +2038,18 @@ private:
          // an 80 px column and ran into its neighbour : the strip needs its own word
          m_float.Text(8 + cw / 2, qy, L(RCL_ROOM_SHORT, "ROOM"), A(m_t.dim), RCS_F_SMALL,
                       "Segoe UI", TA_CENTER | TA_TOP);
-         m_float.Text(8 + cw / 2, qy + 11,
+         m_float.Text(8 + cw / 2, qy + 15,
                       (m_d.roomMoney >= 0.0 ? DoubleToString(m_d.roomMoney, 0) + " $" : "--"),
                       A(rc2), RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
          m_float.Text(8 + cw + cw / 2, qy, L(RCL_NAV_LOT, "LOT"), A(m_t.dim), RCS_F_SMALL,
                       "Segoe UI", TA_CENTER | TA_TOP);
-         m_float.Text(8 + cw + cw / 2, qy + 11,
+         m_float.Text(8 + cw + cw / 2, qy + 15,
                       (m_d.sugLot > 0.0 ? DoubleToString(m_d.sugLot, m_d.lotDigits) : "--"),
                       A(m_d.lotZero ? m_t.red : (m_d.lotCapped ? m_t.warn : m_t.accent)),
                       RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
          m_float.Text(8 + 2 * cw + cw / 2, qy, "NEWS", A(m_t.dim), RCS_F_SMALL,
                       "Segoe UI", TA_CENTER | TA_TOP);
-         m_float.Text(8 + 2 * cw + cw / 2, qy + 11,
+         m_float.Text(8 + 2 * cw + cw / 2, qy + 15,
                       (m_d.newsHasEvt ? (m_d.newsActive ? "ON" : IntegerToString(m_d.newsMins) + "m") : "--"),
                       A(m_d.newsHasEvt ? (m_d.newsHigh ? m_t.red : m_t.warn) : m_t.dim),
                       RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
@@ -2059,7 +2071,7 @@ private:
          const color pc = (m_d.posRowPnl[i] >= 0.0 ? m_t.ok : m_t.red);
          m_float.Text(W - 12, y, (m_d.posRowPnl[i] >= 0.0 ? "+" : "") + DoubleToString(m_d.posRowPnl[i], 2),
                       A(pc), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP, FW_BOLD);
-         y += 14;
+         y += 18;                                  // v3.65 : l interligne des polices v3.63
          string sub = IntegerToString(m_d.posAge[i] / 60) + " min";
          color slc2 = m_t.dim;                     // v3.39 : same grace countdown
          if(!m_d.posHasSl[i]) {
@@ -2075,13 +2087,13 @@ private:
          // CLOSE, drawn DISABLED (JR) : an indicator cannot send an order, and
          // this product never will. The button says where closing lives - it is
          // wired to a message, never to a trade call.
-         m_float.CapsuleStroke(W - 60, y - 3, 48, 15, Mix(m_t.surface, m_t.dim, 0.22),
+         m_float.CapsuleStroke(W - 66, y - 3, 54, 17, Mix(m_t.surface, m_t.dim, 0.22),
                                Mix(m_t.surface, clrBlack, 0.12));
-         m_float.Text(W - 36, y - 2, "CLOSE " + ShortToString((ushort)0x00D7), A(m_t.dim),
+         m_float.Text(W - 39, y - 1, "CLOSE " + ShortToString((ushort)0x00D7), A(m_t.dim),
                       RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP);
-         ZAdd(m_fltX + W - 60, m_fltY + y - 3, 48, 15, RZ_FLT_CLOSE0 + i);
-         ZAdd(m_fltX + 8, m_fltY + y - 14, W - 70, RCS_FLT_ROW - 4, RZ_FLT_ROW0 + i);
-         y += 16;
+         ZAdd(m_fltX + W - 66, m_fltY + y - 3, 54, 17, RZ_FLT_CLOSE0 + i);
+         ZAdd(m_fltX + 8, m_fltY + y - 18, W - 76, RCS_FLT_ROW - 4, RZ_FLT_ROW0 + i);
+         y += 20;
       }
       if(m_d.posCount > m_d.posN)
          m_float.Text(12, y, "+" + IntegerToString(m_d.posCount - m_d.posN) + " " + L(RCL_POS_MORE, "more"),
@@ -2517,6 +2529,13 @@ public:
          if(inFlt)  return true;                                            // inside the floating table
          if(inMenu) return true;                                            // inside the menu, off an item
          if(m_menuOpen) { m_menuOpen = false; OnChartChange(); return false; } // click away closes it
+         // v3.64 : un clic DANS le panneau qui ne touchait aucune zone le
+         // refermait. Or un panneau est plein d espace mort - entre deux lignes,
+         // sur un titre de section, dans une marge. On vise une valeur, on manque
+         // de trois pixels, et la surface disparait : on apprend a cliquer avec
+         // precaution dans un outil fait pour etre consulte vite. Le repli
+         // automatique n a de sens que pour un clic AILLEURS - sur le graphique.
+         if(inSide) return true;
          if(m_state == 1) { m_state = 0; OnChartChange(); return false; }   // auto-collapse
          return false;
       }
@@ -2676,6 +2695,16 @@ public:
       if(hit == RZ_FLT_QLIM || hit == RZ_FLT_QLOT || hit == RZ_FLT_QNEWS) {
          m_state = 1;
          m_sec   = (hit == RZ_FLT_QLIM ? RZ_RAIL_LIM : (hit == RZ_FLT_QLOT ? RZ_RAIL_LOT : RZ_RAIL_NEWS));
+         OnChartChange(); return true;
+      }
+      // v3.66 : les trois pastilles de la barre du haut font le meme geste que
+      // les trois cellules de la table flottante - du chiffre au detail qui est
+      // derriere. Elles etaient dessinees sans etre traitees : le gate l a vu.
+      if(hit == RZ_NAV_ROOMC || hit == RZ_NAV_LOTC || hit == RZ_NAV_NEWSC) {
+         m_state = 1;
+         m_sec   = (hit == RZ_NAV_ROOMC ? RZ_RAIL_LIM
+                    : (hit == RZ_NAV_LOTC ? RZ_RAIL_LOT : RZ_RAIL_NEWS));
+         m_scrollY = 0;
          OnChartChange(); return true;
       }
       switch(hit) {
