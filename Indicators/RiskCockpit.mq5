@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.46"
+#property version "3.48"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.46"
+#define RC_VERSION_STR "3.48"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -802,7 +802,6 @@ int g_max_parallel = 5; // runtime-mutable; init from InpMaxParallelPositions
 // LOT A : per-row LIVE status mirror. RefreshPositionsList (and the SL>REC override in
 // RefreshSlLinesForChart) write it ; RepaintCanvas reads it to tint the row's status
 // pill on the canvas. OnTimer order (RefreshPanel THEN RepaintCanvas) keeps it fresh.
-ENUM_RC_STATUS g_pos_status[RC_MAX_POSITIONS];
 // FINAL (mockup .chip) : SWAP / Split chip rects, PANEL-RELATIVE offsets. ONE geometry
 // source : DrawAccountStrip computes + stores them (and centers its labels on them) ;
 // RepaintCanvas paints the tinted pill faces from the SAME offsets -> drag-proof,
@@ -3317,9 +3316,6 @@ bool Live_InNewsWindow(void) {
     if (!CalendarValueHistory(values, t_from, t_to, NULL, NULL))
         return false;
 
-    const string base = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE);
-    const string quote = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
-
     for (int i = 0; i < ArraySize(values); ++i) {
         MqlCalendarEvent ev;
         if (!CalendarEventById(values[i].event_id, ev))
@@ -3333,7 +3329,13 @@ bool Live_InNewsWindow(void) {
         MqlCalendarCountry country;
         if (!CalendarCountryById(ev.country_id, country))
             continue;
-        if (country.currency == base || country.currency == quote)
+        // v3.48 : this used to be `currency == base || currency == quote`, a test
+        // so naive that it broke on indices - which is why the COUNTDOWN below
+        // dropped its filter entirely, leaving state and countdown answering two
+        // different questions. NewsCcyAffectsSymbol is the matcher the FF path
+        // always used : it knows US30 and NAS trade on USD news, that gold is
+        // filed under USD, AUD and CAD, and so on.
+        if (NewsCcyAffectsSymbol(_Symbol, country.currency))
             return true;
     }
     return false;
@@ -3352,10 +3354,13 @@ datetime Live_NextNewsEvt(void) {
     MqlCalendarValue values[];
     if (!CalendarValueHistory(values, now - win_sec, now + 3600 + win_sec, NULL, NULL))
         return 0;
-    // V1.29 FN fix (BUG 1) : NO currency filter here - the "News window" row must
-    // match the on-chart news VLINEs, which show ALL currencies. The old symbol
-    // base/quote filter broke the row on indices (US30 : base/quote != the news
-    // currencies shown) -> the row never filled/activated.
+    // v3.48 : this used to have NO currency filter at all. The reason was sound
+    // at the time - the base/quote test above broke on indices, so the row never
+    // filled - but the cure left the STATE filtering and the COUNTDOWN not, so
+    // the panel could count down to an event and then call the window inactive.
+    // Both now use NewsCcyAffectsSymbol, which handles indices and metals. The
+    // on-chart markers keep showing every currency : that surface is an overview
+    // of the calendar, not a statement about THIS symbol's rule.
     datetime best = 0;
     for (int i = 0; i < ArraySize(values); ++i) {
         MqlCalendarEvent ev;
@@ -3365,6 +3370,9 @@ datetime Live_NextNewsEvt(void) {
         // trade profit in the ±window ; MEDIUM has NO rule -> vigilance helper below).
         if (ev.importance != CALENDAR_IMPORTANCE_HIGH) continue;
         if (!g_eff_news_high) continue;
+        MqlCalendarCountry ctry;
+        if (!CalendarCountryById(ev.country_id, ctry)) continue;
+        if (!NewsCcyAffectsSymbol(_Symbol, ctry.currency)) continue;
         const datetime te = values[i].time;
         if (now >= te - 3600 && now <= te + win_sec) {
             if (best == 0 || te < best) best = te;
@@ -3393,6 +3401,9 @@ datetime Live_NextMedNewsEvt(void) {
         if (!CalendarEventById(values[i].event_id, ev))
             continue;
         if (ev.importance != CALENDAR_IMPORTANCE_MODERATE) continue;
+        MqlCalendarCountry ctry2;                       // v3.48 : same matcher
+        if (!CalendarCountryById(ev.country_id, ctry2)) continue;
+        if (!NewsCcyAffectsSymbol(_Symbol, ctry2.currency)) continue;
         const datetime te = values[i].time;
         if (now >= te - 3600 && now <= te + win_sec) {
             if (best == 0 || te < best) best = te;
@@ -3771,15 +3782,12 @@ void RefreshSlLinesForChart(const long chart_id) {
                 ObjectSetInteger(chart_id, txt_id, OBJPROP_HIDDEN, true);
             }
 
-            // Panel-side chip override (HOST chart only). LOT A : label-only chip - red
-            // semantic text + the canvas pill follows via g_pos_status (bounds-guarded :
-            // this loop walks ALL positions, the panel only has RC_MAX_POSITIONS rows).
-            if (user_over_budget) {
-                const string row_id = RC_PREFIX + "pos_" + IntegerToString(i);
-                if (i >= 0 && i < RC_MAX_POSITIONS) g_pos_status[i] = RC_STATUS_RED;
-                ObjectSetString(0, row_id + "_chip_txt", OBJPROP_TEXT, Tr("sl_over_chip"));
-                ObjectSetInteger(0, row_id + "_chip_txt", OBJPROP_COLOR, g_theme.red);
-            }
+            // v3.47 : the block that used to sit here wrote into g_pos_status[] -
+            // an array nothing reads any more - and into a chip of the panel
+            // deleted in v3.06. Both writes had done nothing since. The chart
+            // LINE above is the live signal, and the information is not lost :
+            // since v3.35 a position whose risk exceeds the per-trade budget turns
+            // its row amber, computed from the risk itself.
         }
 
         // --- Recommended TP : scalping default, skip if user placed one ---
@@ -3974,21 +3982,11 @@ void TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status) {
             PlaySound(InpSoundOK);
     }
 
-    // --- Telegram (remote, rate-limited per rule) ---
-    // WebRequest is unavailable in an indicator : attempting the send only fills
-    // the journal with err=4014 on every alert. The code stays for the EA build.
-    if (false && g_eff_telegram && (new_status == RC_STATUS_WARN || new_status == RC_STATUS_RED)) {
-        const datetime now = TimeCurrent();
-        if (now - g_last_telegram_alert[idx] >= RC_TELEGRAM_COOLDOWN_SEC) {
-            g_last_telegram_alert[idx] = now;
-            const string tag = (new_status == RC_STATUS_RED ? "[RED]" : "[WARN]");
-            string msg;
-            StringConcatenate(msg, tag, " RiskCockpit - ", g_rows[idx].label,
-                              " : ", g_rows[idx].value_text,
-                              "  (Acc #", AccountInfoInteger(ACCOUNT_LOGIN), ")");
-            SendTelegramMessage(msg);
-        }
-    }
+    // v3.47 : the Telegram alert block that sat here was guarded by
+    // `if (false && ...)` and composed a message carrying the ACCOUNT LOGIN.
+    // Unreachable is not the same as absent : this is a PUBLIC repository, and a
+    // dormant path that formats an account number into an outgoing message has
+    // no reason to be in it. MQL5 forbids WebRequest in an indicator anyway.
 }
 
 //+------------------------------------------------------------------+
@@ -4010,39 +4008,13 @@ string EscapeJson(const string s) {
 //|   to include https://api.telegram.org                            |
 //| Returns true on HTTP 2xx, false otherwise (token / URL / net).   |
 //+------------------------------------------------------------------+
+// v3.47 : a stub, on purpose. MQL5 FORBIDS WebRequest inside an INDICATOR -
+// it returns -1 / err 4014 even when the URL is whitelisted - so this build
+// can never send anything, and forty lines of HTTP plus a credentials-shaped
+// URL had no reason to sit in a PUBLIC repository. The toggle stays, drawn
+// locked with its reason : the setting is real and the EA build uses it.
 bool SendTelegramMessage(const string text) {
-    if (!g_eff_telegram)
-        return false;
-    if (true)   // v3.26 : the token inputs are gone - see the note on InpEnableTelegram
-        return false;
-
-    const string url = "https://api.telegram.org/bot" + "" + "/sendMessage";
-    string body;
-    StringConcatenate(body,
-                      "{\"chat_id\":\"", "",
-                      "\",\"text\":\"", EscapeJson(text), "\"}");
-
-    char post[], result[];
-    string result_headers = "";
-    const string headers = "Content-Type: application/json\r\n";
-
-    const int body_len = StringLen(body);
-    ArrayResize(post, body_len);
-    StringToCharArray(body, post, 0, body_len, CP_UTF8);
-
-    ResetLastError();
-    const int res = WebRequest("POST", url, headers, 5000, post, result, result_headers);
-    if (res == -1) {
-        const int err = GetLastError();
-        if (err == 4014) {
-            Print("RiskCockpit : Telegram disabled - URL not whitelisted. ",
-                  "Add 'https://api.telegram.org' in Tools > Options > Expert Advisors.");
-        } else {
-            Print("RiskCockpit : Telegram WebRequest failed err=", err);
-        }
-        return false;
-    }
-    return (res >= 200 && res < 300);
+    return false;
 }
 
 //+------------------------------------------------------------------+
@@ -6226,7 +6198,6 @@ void InitI18n(void) {
     // --- V1.25 G4 : on-chart SL/TP recommendation annotations ---
     AddTr("sl_rec",        "SL rec",                     "SL reco",                    "SL reco");
     AddTr("tp_rec",        "TP rec",                     "TP reco",                    "TP reco");
-    AddTr("sl_over_chip",  "SL>REC",                     "SL>REC",                     "SL>REC");
     AddTr("over",          "OVER",                       "DÉPASSE",                    "EXCEDE");
     // --- V1.26 G4 : Advanced (discipline) settings tab ---
     AddTr("set_tiltn",     "Tilt trades :",              "Trades tilt :",              "Trades tilt :");

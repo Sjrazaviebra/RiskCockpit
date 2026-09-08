@@ -86,6 +86,54 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.47.59 / v3.48.60 — deux chemins morts retires, et la news qui se contredisait
+
+**v3.47 — du code mort dans un depot PUBLIC.**
+
+- **La puce « SL > recommande » ecrivait dans un panneau detruit.** Quand le stop
+  de l'utilisateur est PLUS LARGE que le stop conseille, la ligne du graphique
+  est tracee en rouge avec le suffixe OVER — cette partie est vivante et utile.
+  Mais le meme bloc ecrivait aussi dans `g_pos_status[]`, un tableau que plus
+  rien ne lit, et dans un objet du panneau **supprime en v3.06**. Les deux
+  ecritures ne faisaient rien depuis. Et l'information n'est plus absente :
+  **depuis la v3.35** une position dont le risque depasse le budget par trade
+  passe deja sa ligne en ambre, calculee sur le risque lui-meme.
+- 🔴 **Le bloc d'alerte Telegram composait le NUMERO DE COMPTE.** Il etait garde
+  par `if (false && ...)` et l'envoyeur retournait `false` des sa premiere ligne
+  depuis la v3.26 — mais **inatteignable n'est pas absent**. C'est un depot
+  PUBLIC, et un chemin dormant qui formate un numero de compte dans un message
+  sortant n'a rien a y faire. Le bloc est retire, l'envoyeur devient un stub de
+  deux lignes qui dit pourquoi, et quarante lignes de HTTP disparaissent. La
+  bascule reste, dessinee verrouillee avec sa raison : le reglage est reel, la
+  version EA s'en sert, et un indicateur ne peut simplement pas envoyer.
+
+**v3.48 — l'ETAT news et le COMPTE A REBOURS news repondaient a deux questions
+differentes.** Sous calendrier MT5 :
+
+- `Live_InNewsWindow()` filtrait par devise, et **naivement** :
+  `currency == base || currency == quote`.
+- `Live_NextNewsEvt()` n'avait **AUCUN filtre de devise** — deliberement, et le
+  commentaire disait pourquoi : le test base/quote **cassait sur les indices**
+  (la base et la cotation de US30 ne sont pas les devises sous lesquelles ses
+  news sont classees), donc la ligne « ne se remplissait jamais ».
+
+Resultat : le panneau pouvait decompter jusqu'a un evenement — « dans 12 min » —
+et **en meme temps declarer la fenetre « inactive » une fois dedans**, parce que
+l'evenement echouait a un filtre que le compte a rebours n'appliquait pas.
+**Deux surfaces, une question, deux reponses.**
+
+Le chemin ForexFactory n'a jamais eu ce probleme : il utilise
+`NewsCcyAffectsSymbol()`, qui sait que US30 et NAS vivent sur les news USD, que
+l'or est classe sous USD, AUD et CAD, etc. **C'est exactement ce qui manquait au
+test base/quote — donc la raison d'avoir supprime le filtre a disparu.** Les
+trois balayages MT5 utilisent desormais ce meme matcher : l'etat et le compte a
+rebours repondent a la meme question sur le meme symbole, et les indices et
+metaux fonctionnent — ce que la suppression du filtre cherchait a obtenir.
+
+Les marqueurs sur le graphique continuent d'afficher toutes les devises : cette
+surface est un apercu du calendrier, pas une affirmation sur la regle de CE
+symbole.
+
 ### v3.44.56 -> v3.46.58 — la section AIDE devient le MANUEL
 
 JR : « dans la partie aide ajoute pour chaque menu et partie un onglet
