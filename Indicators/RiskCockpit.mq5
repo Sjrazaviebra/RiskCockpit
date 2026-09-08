@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.51"
+#property version "3.54"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.51"
+#define RC_VERSION_STR "3.54"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -527,6 +527,13 @@ struct PositionInitialSl {
     double initial_sl;
 };
 PositionInitialSl g_initial_sls[];
+// v3.53 : la cle par ticket ET par compte - deux comptes peuvent avoir le meme
+// numero de ticket, et un stop d'ouverture appartient a UN compte.
+// IslKey(0) rend le prefixe seul, ce qui sert au ramassage.
+string IslKey(const ulong ticket) {
+    const string pfx = "RC_isl_" + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)) + "_";
+    return (ticket == 0 ? pfx : pfx + IntegerToString((int)ticket));
+}
 // LOT 4 : current UI language (initialised from InpLang in OnInit ; a future
 // in-panel switcher in LOT 5 will let the user change it without re-opening
 // the Inputs dialog, persisted via GlobalVariable).
@@ -1614,7 +1621,15 @@ void BuildDeckData(RCDeckData &d) {
     d.tiltWinMin = g_eff_tilt_win;
     d.tradesToday = Live_TradesToday();
     d.tradesCap   = g_profile.hyperactivity_trades_per_day;
-    d.posWorst    = (d.posCount <= 0 ? 3 : (d.posNoSl ? 2 : (d.slGuard ? 1 : 0)));
+    // v3.54 : cette cellule pretend RESUMER les lignes de positions et ne les
+    // regardait pas. posStat[] porte depuis la v3.35 le risque REEL de chaque
+    // ligne : une position au-dela de son budget passait sa ligne en ambre
+    // pendant que le rail restait vert.
+    int pw = (d.posCount <= 0 ? 3 : (d.posNoSl ? 2 : (d.slGuard ? 1 : 0)));
+    if (d.posCount > 0)
+        for (int pi = 0; pi < d.posN && pi < 8; ++pi)
+            if (d.posStat[pi] != 3 && d.posStat[pi] > pw) pw = d.posStat[pi];
+    d.posWorst    = pw;
     d.pyrOn       = (InpEnablePyramidSafe && BuildPyramidLine(d.pyrText, d.pyrStat));
     // v3.06 : week-end hold. The legacy clock blinked it AND fired the alert ;
     // the shell had neither. The alert keeps its own once-per-window latch.
@@ -1815,7 +1830,12 @@ void BuildDeckData(RCDeckData &d) {
                        : (g_eff_acct_type == 1 ? "SWAP-FREE" : "SWAP"));
     d.login         = AccountInfoInteger(ACCOUNT_LOGIN);
     d.minDays       = g_profile.min_trading_days;
-    d.minDaysDone   = 0;                                   // filled by the strip logic when available
+    // v3.52 : ce zero attendait "the strip logic" - la strip est le PANNEAU
+    // LEGACY, supprime en v3.06. Live_TradingDaysCount() existe, marche et est
+    // deja throttled a 30 s : le panneau affichait "0 / 5" en permanence sur une
+    // regle qui BLOQUE le retrait, donc un compte pret a etre paye se montrait
+    // comme n'ayant jamais trade.
+    d.minDaysDone   = Live_TradingDaysCount();
     d.cycleLabel    = "";
     d.addonsLabel   = "";
     {   // active add-ons, short list (same mask the footer prints)
@@ -2150,7 +2170,10 @@ void ShellPushLabels(void) {
     for (int i = 0; i < 8; ++i) g_shell.SetTip(g_shell.ZidRail(i),
         Tr("tipr_" + IntegerToString(i)));
     g_shell.SetTip(g_shell.ZidChevron(), Tr("tipr_chev"));
-    for (int i = 0; i < 9; ++i) g_shell.SetTip(g_shell.ZidNav(i),
+    // v3.54 : cette boucle allait de 0 a 8 sur une barre qui en compte 10 depuis
+    // que CADR s'y est insere - le texte de l'horloge tombait sur CADR et
+    // « Retirer » sur l'horloge. Elle suit la BORNE de l'enum.
+    for (int i = 0; i < g_shell.ZidNavN(); ++i) g_shell.SetTip(g_shell.ZidNav(i),
         Tr("tipn_" + IntegerToString(i)));
     g_shell.SetTip(g_shell.ZidPanel(0), Tr("tipp_close"));
     g_shell.SetTip(g_shell.ZidPanel(1), Tr("tipp_pin"));
@@ -2985,12 +3008,34 @@ double Live_LockedRiskPct(void) {
                 break;
             }
         }
+        // v3.53 : le tableau est une globale MQL5 ordinaire, donc remise a zero
+        // a CHAQUE re-initialisation - changement de TF, de symbole,
+        // recompilation, redemarrage. Apres l'un de ces gestes le "premier" stop
+        // revu etait le stop COURANT : un trader qui avait remonte son stop
+        // voyait son risque verrouille CHUTER, alors que la firme continue de
+        // noter le stop d'origine. Toujours dans la direction optimiste.
+        // Le terminal, lui, garde ses variables globales par-dessus un
+        // redemarrage : la carte y vit maintenant, une entree par ticket.
+        if (!found) {
+            const string isl_key = IslKey(ticket);
+            if (GlobalVariableCheck(isl_key)) {
+                const double v = GlobalVariableGet(isl_key);
+                if (v > 0.0) { initial_sl = v; found = true; }
+            }
+            if (found) {   // remonte en memoire pour les tours suivants
+                const int sz0 = ArraySize(g_initial_sls);
+                ArrayResize(g_initial_sls, sz0 + 1);
+                g_initial_sls[sz0].ticket     = ticket;
+                g_initial_sls[sz0].initial_sl = initial_sl;
+            }
+        }
         if (!found && cur_sl > 0.0) {
             const int sz = ArraySize(g_initial_sls);
             ArrayResize(g_initial_sls, sz + 1);
             g_initial_sls[sz].ticket     = ticket;
             g_initial_sls[sz].initial_sl = cur_sl;
             initial_sl = cur_sl;
+            GlobalVariableSet(IslKey(ticket), cur_sl);   // survit au redemarrage
         }
         if (initial_sl <= 0.0)
             continue; // SL never posed -> handled (as 100 %) by Live_CumulativeRiskPct
@@ -3003,9 +3048,27 @@ double Live_LockedRiskPct(void) {
     // Cleanup : drop entries for positions that no longer exist (closed/cancelled).
     for (int i = ArraySize(g_initial_sls) - 1; i >= 0; --i) {
         if (!PositionSelectByTicket(g_initial_sls[i].ticket)) {
+            GlobalVariableDel(IslKey(g_initial_sls[i].ticket));   // rien ne s'accumule
             for (int k = i; k < ArraySize(g_initial_sls) - 1; ++k)
                 g_initial_sls[k] = g_initial_sls[k + 1];
             ArrayResize(g_initial_sls, ArraySize(g_initial_sls) - 1);
+        }
+    }
+    // v3.53 : et les entrees persistees d'un ticket ferme pendant que l'outil
+    // etait ARRETE - la memoire ne les connait pas, donc la boucle ci-dessus ne
+    // peut pas les voir. Un balayage des globales, une fois par minute.
+    {
+        static datetime s_isl_gc = 0;
+        if (TimeCurrent() - s_isl_gc >= 60) {
+            s_isl_gc = TimeCurrent();
+            const string pfx = IslKey(0);   // "RC_isl_<login>_"
+            for (int g = GlobalVariablesTotal() - 1; g >= 0; --g) {
+                const string nm = GlobalVariableName(g);
+                if (StringFind(nm, pfx) != 0) continue;
+                const long tk = StringToInteger(StringSubstr(nm, StringLen(pfx)));
+                if (tk > 0 && !PositionSelectByTicket((ulong)tk))
+                    GlobalVariableDel(nm);
+            }
         }
     }
     return 100.0 * total_money / g_profile.initial_balance;
@@ -3920,9 +3983,75 @@ bool GVGetLogin(const string base, double &v) {
 void GVSetLogin(const string base, const double v) {
     GlobalVariableSet(LoginKey(base), v); // per-login only : the global stays frozen as the migration seed
 }
+// v3.52 : le point haut REEL de la balance realisee, reconstruit depuis
+// l'historique. La graine etait max(balance initiale, balance courante) : sur
+// un compte qui est MONTE PUIS REDESCENDU, le vrai pic est au-dessus de la
+// balance courante, et le plancher glissant vaut min(pic - permis, initial).
+// Un pic sous-estime donne un plancher sous-estime, donc le panneau annonce
+// PLUS de marge de perte que le compte n'en a - la seule direction interdite.
+//
+// On remonte a la balance de debut de fenetre en retirant tous les mouvements,
+// puis on les rejoue DANS L'ORDRE DU TEMPS en gardant le maximum. Une passe
+// bornee, une seule fois, a l'initialisation.
+double PeakBalanceFromHistory(const datetime from) {
+    const double bal_now = AccountInfoDouble(ACCOUNT_BALANCE);
+    if (!HistorySelect(from, TimeCurrent()))
+        return bal_now;
+    const int n = HistoryDealsTotal();
+    if (n <= 0)
+        return bal_now;
+    datetime dts[]; double mvs[];
+    ArrayResize(dts, n); ArrayResize(mvs, n);
+    int k = 0; double total = 0.0;
+    for (int i = 0; i < n; ++i) {
+        const ulong t = HistoryDealGetTicket(i);
+        if (t == 0) continue;
+        const long ty = HistoryDealGetInteger(t, DEAL_TYPE);
+        const long en = HistoryDealGetInteger(t, DEAL_ENTRY);
+        double mv = 0.0;
+        if (ty == DEAL_TYPE_BALANCE || ty == DEAL_TYPE_CREDIT ||
+            ty == DEAL_TYPE_CORRECTION || ty == DEAL_TYPE_BONUS) {
+            mv = HistoryDealGetDouble(t, DEAL_PROFIT);
+        } else if (en == DEAL_ENTRY_OUT || en == DEAL_ENTRY_INOUT ||
+                   en == DEAL_ENTRY_OUT_BY) {
+            mv = HistoryDealGetDouble(t, DEAL_PROFIT) +
+                 HistoryDealGetDouble(t, DEAL_SWAP) +
+                 HistoryDealGetDouble(t, DEAL_COMMISSION);
+        } else continue;
+        dts[k] = (datetime)HistoryDealGetInteger(t, DEAL_TIME);
+        mvs[k] = mv; total += mv; k++;
+    }
+    if (k <= 0)
+        return bal_now;
+    // tri par temps : le MAXIMUM d'une somme courante depend de l'ordre
+    for (int a = 1; a < k; ++a) {
+        const datetime dt = dts[a]; const double mv = mvs[a];
+        int b = a - 1;
+        while (b >= 0 && dts[b] > dt) { dts[b + 1] = dts[b]; mvs[b + 1] = mvs[b]; b--; }
+        dts[b + 1] = dt; mvs[b + 1] = mv;
+    }
+    double running = bal_now - total;   // la balance au debut de la fenetre
+    double peak = running;
+    for (int i = 0; i < k; ++i) {
+        running += mvs[i];
+        if (running > peak) peak = running;
+    }
+    return peak;
+}
+
 void LoadOrSeedPeakBalance(void) {
     const string k_pb = PeakBalGV(), k_sd = PeakSeedGV();
-    const double seed = MathMax(g_profile.initial_balance, AccountInfoDouble(ACCOUNT_BALANCE));
+    // la reconstruction ne peut que RELEVER la graine, jamais l'abaisser.
+    datetime win = TimeCurrent() - 180 * 86400;
+    {
+        string cs0 = (g_eff_cycle_ymd > 0 ? YmdToIso(g_eff_cycle_ymd) : InpCycleStartIso);
+        StringReplace(cs0, "-", ".");
+        const datetime cs1 = StringToTime(cs0);
+        if (cs1 > 0 && cs1 < TimeCurrent()) win = cs1;
+    }
+    const double seed = MathMax(MathMax(g_profile.initial_balance,
+                                        AccountInfoDouble(ACCOUNT_BALANCE)),
+                                PeakBalanceFromHistory(win));
     if (GlobalVariableCheck(k_pb)) {
         g_peak_balance = GlobalVariableGet(k_pb);
         // v3.38 : this value is an UNAUTHENTICATED GlobalVariable - any script,
@@ -6076,10 +6205,13 @@ void InitI18n(void) {
                     "Thème|Émeraude / Indigo / Ardoise.",
                     "Tema|Esmeralda / Indigo / Pizarra.");
     AddTr("tipn_6", "Mode|Dark / light.", "Mode|Sombre / clair.", "Modo|Oscuro / claro.");
-    AddTr("tipn_7", "Clock|Broker server time.",
+    AddTr("tipn_7", "Fit|Re-centres the chart with free room above and below.",
+                    "Cadrer|Recadre le graphique avec de l'air en haut et en bas.",
+                    "Ajustar|Reencuadra el gráfico con aire arriba y abajo.");
+    AddTr("tipn_8", "Clock|Broker server time.",
                     "Horloge|Heure serveur du broker.",
                     "Reloj|Hora del servidor del broker.");
-    AddTr("tipn_8", "Remove|Takes RiskCockpit off this chart.",
+    AddTr("tipn_9", "Remove|Takes RiskCockpit off this chart.",
                     "Retirer|Retire RiskCockpit de ce graphique.",
                     "Quitar|Quita RiskCockpit de este gráfico.");
     AddTr("tipp_close", "Close|Closes the panel, the rail stays.",

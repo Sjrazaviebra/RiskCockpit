@@ -44,6 +44,13 @@ def mut_ver(b):    return re.sub(rb'#property version "[\d.]+"',
                                  b'#property version "9.99"', b, count=1)  # source ahead of the binary
 
 
+def mut_serie(b):
+    # Retirer une cle de la serie de la barre du haut : tous les textes suivants
+    # tombent sur le controle d a cote, sans un mot du compilateur. C est
+    # exactement la regression posee en v3.27 par l insertion du bouton CADR.
+    return b.replace(b'AddTr("tipn_9"', b'AddTr("tipn_x9"', 1)
+
+
 def mut_lmax(b):
     # 187 ids de libelles : un plafond de 32 en jetterait la plupart, chacun
     # avec un Print - et le libelle non pousse retomberait sur son defaut FR.
@@ -112,6 +119,7 @@ CASES = [
     ("plafond des libelles", SHELL, mut_lmax),
     ("plafond des infobulles", SHELL, mut_tipmax),
     ("3 langues par entree", IND, mut_lang),
+    ("series d infobulles alignees", IND, mut_serie),
 ]
 
 # Ce que le harnais NE couvre pas, et pourquoi. Un self-test qui tait sa
