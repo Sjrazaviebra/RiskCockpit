@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.72"
+#property version "3.73"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.72"
+#define RC_VERSION_STR "3.73"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -3991,9 +3991,13 @@ void RefreshSlLinesForChart(const long chart_id) {
     const color tp_clr = g_theme.ok;
     const ENUM_TIMEFRAMES tf = (ENUM_TIMEFRAMES)ChartPeriod(chart_id);
     const int period_seconds = PeriodSeconds(tf);
-    // A2 : cap the SL/TP label offset at 4 h so it never lands far off-screen on
-    // high timeframes (20 bars × period, but never more than 4 hours ahead).
-    const datetime anchor_time = TimeCurrent() + (datetime)MathMin(20 * period_seconds, 4 * 3600);
+    // v3.73 : « 20 bougies, plafonne a 4 h » mettait l etiquette QUATRE HEURES
+    // dans le futur sur un M15 - au-dela du bord droit du graphique, ou derriere
+    // le rail du panneau. Le montant que porte cette etiquette etait donc
+    // calcule, ecrit, et invisible : vu a l ecran sur la v3.72. Huit bougies,
+    // plafonnees a deux heures, tombent dans la marge libre a droite de la
+    // derniere bougie - la ou l oeil va deja pour lire le prix.
+    const datetime anchor_time = TimeCurrent() + (datetime)MathMin(8 * period_seconds, 2 * 3600);
 
     int drawn = 0;
     for (int i = 0; i < n; ++i) {

@@ -2060,14 +2060,19 @@ private:
          // v3.72 : une famille de traits, un bouton. TP montre la cible de chaque
          // position, SL le stop que le budget autorise - allume, la pastille prend
          // la couleur de sa famille, comme PM.
+         // v3.73 : je teintais la pastille avec la couleur de la FAMILLE - vert,
+         // rouge - a 18 % sur un fond deja sombre : allumees, les deux pastilles
+         // avaient l air eteintes (vu a l ecran). PM se teinte a l accent et se
+         // voit. Les trois parlent la meme langue : l accent dit « allumee », le
+         // TEXTE garde la couleur de sa famille.
          m_float.CapsuleStroke(8 + cw, qy, cw - 4, bh,
-                               Mix(m_t.surface, tpon ? m_t.ok : m_t.dim, 0.45),
-                               Mix(m_t.surface, tpon ? m_t.ok : clrBlack, tpon ? 0.18 : 0.10));
+                               Mix(m_t.surface, tpon ? m_t.accent : m_t.dim, 0.45),
+                               Mix(m_t.surface, tpon ? m_t.accent : clrBlack, tpon ? 0.18 : 0.10));
          m_float.Text(8 + cw + (cw - 4) / 2, qy + 4, "TP", A(tpon ? m_t.ok : m_t.dim),
                       RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
          m_float.CapsuleStroke(8 + 2 * cw, qy, cw - 4, bh,
-                               Mix(m_t.surface, slon ? m_t.red : m_t.dim, 0.45),
-                               Mix(m_t.surface, slon ? m_t.red : clrBlack, slon ? 0.18 : 0.10));
+                               Mix(m_t.surface, slon ? m_t.accent : m_t.dim, 0.45),
+                               Mix(m_t.surface, slon ? m_t.accent : clrBlack, slon ? 0.18 : 0.10));
          m_float.Text(8 + 2 * cw + (cw - 4) / 2, qy + 4, "SL", A(slon ? m_t.red : m_t.dim),
                       RCS_F_LABEL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
          m_float.Hairline(8, RCS_FLT_HEAD + RCS_FLT_QUICK - 3, W - 8, LineC());
