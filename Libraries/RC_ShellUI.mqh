@@ -1982,7 +1982,15 @@ private:
       // nothing and explains nothing reads as a bug.
       if(m_lockBlocked && m_d.discLocked)
          msg = L(RCL_LOCK_BLOCKED, "LOCKED - this control is disabled until the lock ends");
-      m_band.Text(W / 2, 6, msg, Mix(m_t.bg, clrBlack, 0.25), RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      // v3.54 : l'encre etait derivee du FOND DU THEME. Sur un theme sombre cela
+      // donne du sombre sur un bandeau rouge, ce qui marche ; sur les trois
+      // themes clairs le fond est clair, donc l'encre est claire - texte pale
+      // sur bandeau ambre. Le message le plus urgent etait le moins lisible.
+      // Elle suit maintenant la luminance du BANDEAU.
+      const int lum = (int)((((bc >> 16) & 0xFF) * 114 + ((bc >> 8) & 0xFF) * 587
+                             + (bc & 0xFF) * 299) / 1000);
+      m_band.Text(W / 2, 6, msg, (lum > 140 ? (uint)0xFF101418 : (uint)0xFFF4F7F9),
+                  RCS_F_BODY, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(0, 0, W, RCS_BAND_H, RZ_BAND);
       m_band.Commit();
    }
@@ -2174,7 +2182,13 @@ public:
    //--- zone ids the host needs to address its tooltips (no enum leak needed) --
    int ZidRail(const int i)  const { return RZ_RAIL_LIM + i; }        // 0..7 = the 8 cells
    int ZidChevron(void) const { return RZ_RAIL_CHEVRON; }
-   int ZidNav(const int i)   const { return RZ_NAV_LOGO + i; }        // 0..7 navbar chips
+   //--- v3.54 : l'hote poussait ses infobulles de 0 a 8 sur une barre qui en
+   //--- compte 10 depuis que CADR s'est insere au milieu - le texte de
+   //--- l'HORLOGE est tombe sur CADR, et « Retirer » sur l'horloge. Il boucle
+   //--- desormais jusqu'a cette BORNE : une insertion ne peut plus decaler la
+   //--- serie en silence.
+   int ZidNav(const int i)   const { return RZ_NAV_LOGO + i; }        // 0..ZidNavN()-1
+   int ZidNavN(void)         const { return RZ_NAV_KILL - RZ_NAV_LOGO + 1; }
    int ZidPanel(const int i) const { return RZ_PANEL_CLOSE + i; }     // 0 close, 1 pin
    int ZidLimTip(const int i) const { return RZ_TIP_LIM_ROOM + i; }   // 0..5 limits rows
    int ZidLotTip(const int i) const { return RZ_TIP_LOT_BUD + i; }    // 0..2

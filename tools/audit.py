@@ -234,6 +234,28 @@ def run(root):
                if len(re.findall(r'\b' + m.group(1) + r'\b', code)) <= 1]
     report("reglages actifs", not dead_in, "" if not dead_in else "morts : " + " ".join(dead_in))
 
+    # 8a. Les series d infobulles poussees PAR INDICE sur une plage contigue.
+    #     Inserer un id au milieu de la plage decale toute la serie en silence :
+    #     chaque texte tombe sur le controle suivant et rien ne se plaint. C est
+    #     arrive en v3.27 avec le bouton CADR - le texte de l horloge est tombe
+    #     sur lui, et "Retirer : retire RiskCockpit de ce graphique" sur
+    #     l horloge, le libelle le plus dangereux pose sur le mauvais controle.
+    SERIES = [("tipn_", "RZ_NAV_LOGO", "RZ_NAV_KILL", "barre du haut"),
+              ("tipr_", "RZ_RAIL_LIM", "RZ_RAIL_HELP", "rail")]
+    zorder = re.findall(r'\b(RZ_\w+)\b',
+                        re.search(r'enum ERCZone \{(.*?)\};', shell, re.S).group(1))
+    serie_bad = []
+    for pfx, first, last, quoi in SERIES:
+        if first not in zorder or last not in zorder:
+            serie_bad.append("%s : bornes introuvables" % quoi)
+            continue
+        span = zorder.index(last) - zorder.index(first) + 1
+        keys = len(set(re.findall(r'AddTr\("' + pfx + r'(\d+)"', host)))
+        if keys != span:
+            serie_bad.append("%s : %d cles %s pour %d ids" % (quoi, keys, pfx, span))
+    report("series d infobulles alignees", not serie_bad,
+           ("%d series" % len(SERIES)) if not serie_bad else " | ".join(serie_bad))
+
     # 8b. A CACHED SNAPSHOT IS A CONTRACT. The news block computes its fields
     #     once and serves them from s_newsCache for 15 s. Every field the fresh
     #     branch fills must be readable OUT of the cache and writable INTO it.

@@ -86,6 +86,74 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.52.64 -> v3.54.66 — 3e lot : deux chiffres impossibles, une carte volatile, une regression a moi
+
+**v3.52 — deux chiffres qui ne pouvaient pas etre justes.**
+
+- **Le compteur de jours minimum etait cable a ZERO.** `d.minDaysDone = 0;` avec
+  le commentaire « filled by the strip logic when available » — la strip est le
+  PANNEAU LEGACY, supprime en v3.06. `Live_TradingDaysCount()` existe, marche,
+  est deja limitee a un balayage toutes les 30 s et est appelee ailleurs. Le
+  panneau affichait donc **« 0 / 5 » en permanence** sur une regle FundedNext qui
+  **bloque le retrait** : un compte pret a etre paye se montrait comme n'ayant
+  jamais trade. **Cinq des quatorze dimensions l'ont trouve independamment.**
+- 🔴 **Le pic de balance etait seme trop bas.** La graine etait
+  `max(balance initiale, balance courante)`. Sur un compte deja trade qui est
+  **monte puis redescendu**, le vrai pic est au-dessus de la balance courante —
+  et le plancher glissant vaut `min(pic − permis, initial)`. Un pic sous-estime
+  donne un plancher sous-estime, donc le panneau annonce **plus de marge de perte
+  que le compte n'en a**. Le pic est desormais **reconstruit depuis
+  l'historique** : on remonte a la balance de debut de cycle, on rejoue les
+  mouvements dans l'ordre du temps, on garde le maximum. Une passe bornee, une
+  seule fois, a l'initialisation, et le resultat ne peut que **relever** la
+  graine.
+
+**v3.53 — la carte des SL D'OUVERTURE vivait en memoire seule.** FundedNext
+verrouille la regle des 3 % sur le stop pose **a l'ouverture**. Pour le savoir,
+l'outil retient le premier stop non nul vu sur chaque ticket — dans un tableau
+global MQL5 ordinaire, donc **remis a zero a chaque re-initialisation** :
+changement d'unite de temps, de symbole, recompilation, redemarrage. Apres l'un
+de ces gestes, le « premier » stop revu etait le stop COURANT. Un trader qui
+avait remonte son stop voyait son risque verrouille **chuter**, alors que la
+firme continue de noter le stop d'origine — encore la direction optimiste, et
+depuis la v3.49 ce chiffre pilote aussi le score et l'alarme. La carte est
+persistee par ticket **et par compte** dans les variables globales du terminal,
+qui survivent au redemarrage, avec un ramassage des tickets fermes — y compris
+ceux fermes pendant que l'outil etait arrete.
+
+**v3.54 — trois defauts d'affichage, dont une regression que j'ai posee.**
+
+- 🔴 **Les infobulles de la barre du haut etaient decalees d'un cran, et c'est MA
+  faute.** La v3.27 a insere le bouton CADR dans l'enum des zones, entre MODE et
+  CLOCK ; l'hote poussait ses textes **par indice**, de 0 a 8, sur une barre qui
+  en compte desormais 10. Le bouton CADR portait le texte de l'**horloge**, et
+  l'horloge portait **« Retirer : retire RiskCockpit de ce graphique »** — le
+  libelle le plus dangereux de l'interface, pose sur le mauvais controle. Les
+  textes sont remis en face, un dixieme est ajoute, et l'hote boucle desormais
+  jusqu'a la **borne de l'enum**, pas jusqu'a un nombre ecrit a la main.
+  ⭐ **Et le gate a appris cette classe** : il compare, pour chaque serie
+  d'infobulles poussee par indice, le nombre de cles a la taille de la plage
+  d'ids. Une insertion au milieu ne peut plus decaler la serie en silence.
+- **La cellule POS du rail ignorait les lignes qu'elle pretend resumer.**
+  `posWorst` regardait le nombre de positions, l'absence de stop et le garde-SL —
+  jamais `posStat[]`, qui porte depuis la v3.35 le risque reel de chaque ligne.
+  Lignes ambre, rail vert.
+- **Le texte du bandeau d'alerte etait encre a partir du FOND DU THEME.** Sur un
+  theme sombre cela donne du sombre sur un bandeau rouge, ce qui marche ; sur les
+  **trois themes clairs**, le fond est clair donc l'encre est claire — texte pale
+  sur bandeau ambre. Le message le plus urgent de l'interface etait le moins
+  lisible. L'encre suit desormais la **luminance du bandeau**.
+
+⚖️ **Un constat de la revue REFUTE par lecture** : « le plafond de marge cumulee
+70 % de FundedNext est impose a FTMO / E8 / The5ers / Seacrest ». Faux — chacun de
+ces profils pose `margin_max_cumulative_pct = 100.0`, ce qui rend le compteur
+inactif, et le seul chemin qui pourrait l'ecraser est ferme sur un profil non
+restreignable. Deuxieme constat ecarte apres verification, apres la fausse course
+sur les steppers.
+
+**Gate : 18 controles, 0 en echec. Self-test : 16/16 + 2 non-couvertures
+declarees.**
+
 ### v3.50.62 / v3.51.63 — le GATE : six trous, deux plafonds silencieux, et un verdict plus large que la mesure
 
 Deuxieme lot de la 3e revue. Cette fois la cible est **mon propre instrument**.
