@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.66"
+#property version "3.67"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.66"
+#define RC_VERSION_STR "3.67"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -7041,13 +7041,15 @@ int ValidSizesForPlan(const ENUM_FN_PLAN p, double &out[]) {
             out[0]=5000; out[1]=10000; out[2]=25000; out[3]=50000; out[4]=100000;
             return 5;
         case FN_PLAN_PERSONAL:
-            // Personal/demo : Auto (real balance) + 5K..50K by 5K, then 100K, 200K.
-            ArrayResize(out, 13);
-            out[0]=0;      // 0 = "Auto" -> use the real account balance (item 7)
-            out[1]=5000;   out[2]=10000;  out[3]=15000;  out[4]=20000;  out[5]=25000;
-            out[6]=30000;  out[7]=35000;  out[8]=40000;  out[9]=45000;  out[10]=50000;
-            out[11]=100000; out[12]=200000;
-            return 13;
+            // v3.67 : cette ligne proposait TREIZE tailles sur un compte personnel -
+            // Auto, puis 5K, 10K... jusqu a 200K. Un compte personnel n a pas de
+            // palier : il a le capital qu on y a mis. Choisir « 25K » sur un compte
+            // qui en contient 10 000 ne decrit rien, ca fabrique des plafonds faux.
+            // Il ne reste que Auto, donc la cascade n affiche plus de fleches sur
+            // cette ligne : la valeur est une CONSTATATION, pas un choix.
+            ArrayResize(out, 1);
+            out[0] = 0;    // 0 = "Auto" -> le capital reellement depose
+            return 1;
     }
     // Truly-unknown plan fallback : the standard preset list.
     ArrayResize(out, 8);
@@ -7093,25 +7095,36 @@ void SnapPhaseToPlan(const ENUM_FN_PLAN p) {
     GVSetLogin("RC_phase", (double)g_eff_phase); // v2.13 C : per-login
 }
 // V1.28 : size label, with the Personal "Auto" sentinel (g_eff_size <= 0).
+// v3.67 : « Auto » ne disait pas de QUOI. Sur un profil personnel, ce montant est
+// la reference dont TOUS les plafonds decoulent - il faut pouvoir le lire la ou
+// on le cherche, c est-a-dire sur la ligne meme.
 string SizeLabel(void) {
-    if (g_eff_size <= 0.0) return "Auto";
+    if (g_eff_size <= 0.0)
+        return "Auto " + IntegerToString((int)MathRound(DetectStartingBalance())) + " $";
     return "$" + IntegerToString((int)MathRound(g_eff_size / 1000.0)) + "K";
 }
 // V1.28 (item 7) : a Personal account has no fixed challenge size -> derive the
 // reference balance. Prefer the initial deposit (first balance deal) for a true
 // "starting balance", fall back to the current real balance.
+// v3.67 : cette fonction rendait le PREMIER mouvement de balance positif et
+// s arretait la. Un compte alimente en deux fois - 10 000 puis 5 000 - etait
+// donc traite comme un compte de 10 000, avec des plafonds calcules sur les deux
+// tiers du capital reel ; et un RETRAIT n etait pas compte du tout. Sur un profil
+// personnel, TOUTES les limites decoulent de ce chiffre. On somme desormais les
+// mouvements de balance - depots moins retraits - c est-a-dire le capital
+// reellement engage sur le compte.
 double DetectStartingBalance(void) {
+    double net = 0.0;
     if (HistorySelect(0, TimeCurrent())) {
         const int n = HistoryDealsTotal();
         for (int i = 0; i < n; ++i) {
             const ulong tk = HistoryDealGetTicket(i);
             if (tk == 0) continue;
-            if ((ENUM_DEAL_TYPE)HistoryDealGetInteger(tk, DEAL_TYPE) == DEAL_TYPE_BALANCE) {
-                const double amt = HistoryDealGetDouble(tk, DEAL_PROFIT);
-                if (amt > 0.0) return amt; // earliest deposit = starting balance
-            }
+            if ((ENUM_DEAL_TYPE)HistoryDealGetInteger(tk, DEAL_TYPE) == DEAL_TYPE_BALANCE)
+                net += HistoryDealGetDouble(tk, DEAL_PROFIT);   // depot > 0, retrait < 0
         }
     }
+    if (net > 0.0) return net;
     const double bal = AccountInfoDouble(ACCOUNT_BALANCE);
     return (bal > 0.0 ? bal : 1.0);
 }

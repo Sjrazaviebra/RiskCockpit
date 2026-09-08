@@ -151,6 +151,33 @@ première ligne et le bouton CLOSE à droite de la seconde — à 14 px d'écart
 et les lignes gagnent leur interligne. Aucune couleur, aucun texte, aucun
 comportement ne change : c'est de la place, rien d'autre.
 
+### v3.67.79 — un compte personnel n'a pas de taille à choisir : il a des dépôts
+
+JR : *« le compte réel de perso n'a pas de size prédéfini donc c'est auto, en gros
+il faut voir les dépôts sur le compte, parce que je ne vois pas le compte réel
+sur perso »*. Trois choses, la même idée que la v3.63 poussée jusqu'au bout.
+
+- **La ligne « Taille » proposait treize valeurs sur un compte personnel** —
+  Auto, puis 5K, 10K, 15K… jusqu'à 200K. Un compte personnel n'a pas de palier :
+  il a le capital qu'on y a mis. **Choisir « 25K » sur un compte qui en contient
+  10 000 ne décrit rien, ça fabrique des plafonds faux.** Il ne reste qu'Auto,
+  donc plus de flèches : la valeur est une **constatation**, pas un choix.
+- **On ne voyait pas le compte réel.** « Auto » ne disait pas de quoi. La ligne
+  affiche maintenant le montant détecté — **« Auto 10000 $ »** — la référence
+  dont *tous* les plafonds du profil personnel découlent.
+- 🔴 **Et la détection ne voyait que le PREMIER dépôt.** `DetectStartingBalance`
+  rendait le premier mouvement de balance positif et s'arrêtait là : un compte
+  alimenté en deux fois — 10 000 puis 5 000 — était traité comme un compte de
+  **10 000**, donc avec des plafonds calculés sur les **deux tiers** du capital
+  réel ; et un **retrait** n'était pas compté du tout. On somme désormais tous
+  les mouvements de balance, dépôts moins retraits : le capital réellement
+  engagé.
+
+**Vérifié à l'écran** : `Size : Auto 10000 $`, sans flèches, sur le profil
+Personnel.
+
+**Gate : 22 contrôles, 0 en échec. Compilation : 0 erreur, 0 avertissement.**
+
 ### v3.66.78 — « c'est quoi ROOM et comment c'est calculé ? »
 
 JR a écrit le produit et ne sait pas ce que dit **le chiffre le plus en vue de
