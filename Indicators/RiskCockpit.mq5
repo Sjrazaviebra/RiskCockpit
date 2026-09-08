@@ -26,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.70"
+#property version "3.71"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.70"
+#define RC_VERSION_STR "3.71"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -3924,8 +3924,16 @@ void RefreshSlLinesForChart(const long chart_id) {
     // and InpMaxParallelPositions changes from the panel.
     ObjectsDeleteAll(chart_id, "RC_SL_");
     ObjectsDeleteAll(chart_id, "RC_TP_");
-    if (!g_eff_risktools) // V1.29 J : risk-tools OFF -> lines cleared above, draw none (covers all call-sites)
-        return;
+    // v3.71 : il y avait ici un second verrou - « trousse de risque OFF, on ne
+    // dessine rien » (V1.29 J). Or ResolveRiskTools force la trousse a ON sur tout
+    // plan prop : ce verrou ne pouvait donc se declencher QUE sur un profil
+    // PERSONNEL, ou il est a OFF par defaut. Le seul cas ou il agissait etait le
+    // seul ou aucune regle exterieure ne tient le trader - et il rendait MORT le
+    // bouton « TP / SL » de la bande : on clique, rien ne se dessine, rien ne dit
+    // pourquoi. La trousse garde ce pour quoi elle est faite - verrou de
+    // discipline, detecteur de tilt, alertes. Un repere pose sur UNE position n en
+    // fait pas partie : il ne vient d aucun programme, il dit « pas de stop » ou
+    // « ton stop est plus large que ton budget ».
     if (g_profile.initial_balance <= 0.0)
         return;
 
