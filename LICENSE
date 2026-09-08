@@ -6,11 +6,14 @@ PORTFOLIO / DEMONSTRATION purposes ONLY.
 You MAY:
   - View, read, and study the source code.
   - Clone the repository for personal, non-commercial evaluation.
+  - USE the compiled tool on your own trading accounts, including funded and
+    prop-firm accounts, at no cost. RiskCockpit is published free on the MQL5
+    Market (product 180509) and this repository is its source.
 
 You MAY NOT, without prior written permission from the author:
   - Copy, reproduce, or redistribute the source code, in whole or in part.
   - Modify, adapt, or create derivative works from it.
-  - Use the code, or any portion of it, in any product or service.
+  - Reuse the code, or any portion of it, inside another product or service.
   - Sell, sublicense, or otherwise commercially exploit it in any way.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
