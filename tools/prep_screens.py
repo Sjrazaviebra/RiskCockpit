@@ -83,7 +83,7 @@ def main() -> int:
     for f in fichiers:
         print("  " + traite(os.path.join(DOSSIER, f)))
     print("\n⚠️ Verification qui reste A L'OEIL : le texte doit etre en ANGLAIS.")
-    print("   Les scripts « SB_* » sont les copies internes et sont en FRANCAIS.")
+    print("   RiskCockpit retient la langue PAR COMPTE : la basculer AVANT la seance.")
     return 0
 
 
