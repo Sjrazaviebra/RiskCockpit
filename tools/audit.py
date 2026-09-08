@@ -305,6 +305,32 @@ def run(root):
            ("%d temporisations comparees" % len(guard_names)) if not guard_dead
            else "jamais comparees : " + " ".join(guard_dead))
 
+    # 8d. UN GLOBAL ECRIT EST, POUR LE COMPILATEUR, UN GLOBAL UTILISE. Il ne
+    #     dira jamais rien d une ancre de journee posee a chaque attache et lue
+    #     par personne, ni de miettes de diagnostic remplies a chaque appel pour
+    #     une ligne de debug supprimee. Ce sont des reperes qui MENTENT : on les
+    #     lit comme le mecanisme qu ils nomment. Dix vivaient dans ce fichier.
+    hbare = re.sub(r'/\*.*?\*/', '', hcode, flags=re.S)
+    hbare = re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', hbare)
+    TY = r'(?:datetime|double|int|bool|string|ulong|long|uint|uchar|color|float|short)'
+    g_decl = set(re.findall(r'^\s*' + TY + r'\s+(g_\w+)\s*(?:\[[^\]]*\])?\s*(?:=|;)',
+                            hbare, re.M))
+    g_dead = []
+    for g in sorted(g_decl):
+        reads = 0
+        for mm in re.finditer(r'\b' + g + r'\b', hbare):
+            tail = hbare[mm.end():mm.end() + 40]
+            if re.match(r'\s*(?:\[[^\]]*\])?\s*=(?!=)', tail):
+                continue                      # ecriture pure
+            if re.search(TY + r'\s+$', hbare[max(0, mm.start() - 30):mm.start()]):
+                continue                      # la declaration elle-meme
+            reads += 1
+        if reads == 0:
+            g_dead.append(g)
+    report("etat global relu", not g_dead,
+           ("%d globaux, tous relus" % len(g_decl)) if not g_dead
+           else "ecrits et jamais lus : " + " ".join(g_dead))
+
     # 9. PUBLIC repo : nothing personal, in the sources or in the binary.
     #    The binary check needs its positive control first.
     # One or TWO backslashes : source code escapes them, markdown and comments

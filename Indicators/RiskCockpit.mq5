@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.55"
+#property version "3.56"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.55"
+#define RC_VERSION_STR "3.56"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -243,9 +243,9 @@ ThemeColors g_theme;
 // its opaque glow lives in a margin band around the panel edge (over the chart).
 // Named "RC_fx" -> dragged by MovePanelBy, cleared by DestroyAllObjects, and the
 // GPU resource is freed in OnDeinit / before every re-create.
-bool    g_fx_was_breach = false;   // gate idle GPU updates (only redraw while breaching / on clear)
-int     g_fx_w  = 0;
-int     g_fx_h  = 0;
+// v3.56 : g_fx_was_breach / g_fx_w / g_fx_h lived here - the last three globals
+// of the legacy full-screen breach overlay, replaced by the shell's band. They
+// were declared, initialised, and touched by nothing.
 #define RC_FX_MARGIN 12
 
 // v1.4 MODERN : the panel body is drawn in ONE CCanvasKit bitmap (rounded card,
@@ -455,7 +455,12 @@ int g_addons_mask = FN_ADDON_NONE;
 CPyramidEngine g_pyramid_engine;
 
 // Live-state caches (T7)
-datetime g_day_start = 0;
+// v3.56 : g_day_start lived here - a day anchor set to server midnight at every
+// OnInit and read by NOBODY. Its twin g_equity_at_day_start had already been
+// removed as dead code ; this one stayed, a named landmark in the very block
+// where the deadliest rule of the product is computed, suggesting the daily DD
+// is measured from it and therefore reset on each timeframe switch. It is not :
+// Live_DailyDdPct rebuilds the day from the deal history, every time.
 double g_peak_balance = 0.0; // v2.02.05 FIX 1 : REALIZED-balance high-water mark (FN Instant trailing
                              // floor follows the balance, not equity) ; persisted per login (RC_ins_pb_<login>)
 
@@ -510,6 +515,9 @@ bool g_margin_violation_active = false;
 bool g_risk_violation_active   = false;
 
 // M1b : throttle for the max-lot margin debug Print (avoid Experts-log spam).
+// v3.56 : that Print had disappeared, so this throttle - like the three
+// breadcrumbs it guards - was written on every call and read by nobody. See
+// MaxLotDbg : they say again what their comments promise.
 datetime g_maxlot_dbg_last = 0;
 // FIX (LOT 1) : caches throttlent les scans lourds dans OnTimer pour eviter que
 // OBJECT_CLICK ne soit affame (le panel update mais les boutons ne repondent plus).
@@ -568,11 +576,9 @@ int    g_maxlot_err  = 0;
 double   g_comm_per_lot = -1.0;  // -1 = unknown (no recent deal on this symbol)
 datetime g_comm_scan    = 0;
 string   g_comm_sym      = "";
-// V1.24 G3 B-COPY : raw lot numbers exposed in read-only OBJ_EDIT fields so the
-// trader can click + Ctrl+C them into the native order panel (no clipboard DLL).
-double   g_maxlot_copy  = 0.0;   // broker max lot for the active symbol
-int      g_maxlot_digits = 2;    // display digits derived from SYMBOL_VOLUME_STEP
-double   g_suglot_copy  = 0.0;   // suggested lot
+// v3.56 : the three V1.24 G3 copy globals lived here. The copy boxes moved to
+// the shell in v3.25 and own their own values ; one of these was still being
+// written on every lot computation, for a reader that no longer existed.
 double MarginPerLot(const string sym);
 double MaxLotAllowed(const string sym, double cap_pct, double balance);
 
@@ -639,13 +645,7 @@ void InitEffectiveSettings(void) {
     // toolkit cannot be disabled) ; Personal defaults OFF and its RC_risktools
     // toggle decides. Resolved here (seed + GV folded) so a Personal "OFF" GV
     // can never leak onto a prop account.
-    if (PlanIsPersonal()) {
-        g_eff_risktools = false;
-        if (GlobalVariableCheck("RC_risktools"))
-            g_eff_risktools = (GlobalVariableGet("RC_risktools") != 0.0);
-    } else {
-        g_eff_risktools = true; // PROP : always ON, ignores input + GV
-    }
+    ResolveRiskTools();   // v3.56 : one function, re-run on every plan change
     // V1.29 I : Personal type auto-detected (Demo if the broker account is a demo).
     g_eff_personal_demo = (AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_DEMO) ? 1 : 0;
     // v2.13 FEATURE C : account-profile settings load PER LOGIN (legacy global =
@@ -790,6 +790,8 @@ double EffectiveMarginCap(void);
 double EffectiveRiskCap(void);
 bool   ProfileCanBeRestricted(void);
 void PersistViolationFlags(void);
+void LoadViolationFlags(void);
+void ResolveRiskTools(void);
 
 // V2 (this revision) - profit metrics + suggested lot + editable max parallel
 double SumClosedDealsPnL(const datetime from, const datetime to);
@@ -977,29 +979,6 @@ int OnInit(void) {
     else
         g_max_parallel = MathMax(1, InpMaxParallelPositions);
 
-    // Post-violation flags (B7) : input is the default, GlobalVariable (set by
-    // a previous click) wins so the tightened caps survive a reattach.
-    g_margin_violation_active = InpMarginViolationActive;
-    g_risk_violation_active   = InpRiskViolationActive;
-    if (GlobalVariableCheck("RC_margin_violation"))
-        g_margin_violation_active = (GlobalVariableGet("RC_margin_violation") != 0.0);
-    {   // A 2nd strike belongs to ONE account, like size / phase / plan. Stored
-        // globally, it followed the trader onto every other login.
-        //
-        // v3.49 : the two twin flags were NOT read in the same order. Margin was
-        // global-then-per-login, so the per-login value won - correct. Risk was
-        // per-login-THEN-GLOBAL, so the GLOBAL won and the per-login read was
-        // dead. A trader clearing the box on a clean account wiped the
-        // restriction off every OTHER account : EffectiveRiskCap went back to
-        // 3 % instead of 1 %, and that cap feeds the LIM meter, every position's
-        // status, the SL lines and above all the LOT ADVISOR'S BUDGET - three
-        // times the risk advised on an account where the next violation ends it.
-        // The global lines that followed are gone : GVGetLogin already falls back
-        // to the un-suffixed key, so no migration is lost.
-        double mv = 0.0, rv = 0.0;
-        if (GVGetLogin("RC_margin_violation", mv)) g_margin_violation_active = (mv != 0.0);
-        if (GVGetLogin("RC_risk_violation",   rv)) g_risk_violation_active   = (rv != 0.0);
-    }
 
     // v3 : mouse-move events feed the shell (drag of the floating table +
     // hover-intent tooltips). The legacy panel anchor died with the panel.
@@ -1066,25 +1045,15 @@ int OnInit(void) {
         Print("RiskCockpit: combination not in catalog - using fallback profile ",
               g_profile.profile_id);
 
-    // FIX 4 (V1.0.1) : challenge / free profiles have no 2nd-strike restriction
-    // concept. Never let a flag persisted by a previous FUNDED/Instant session
-    // silently tighten their caps - force the violation flags off here (now that
-    // the profile is resolved). Funded / Instant keep whatever was set above.
-    if (!ProfileCanBeRestricted()) {
-        g_margin_violation_active = false;
-        g_risk_violation_active   = false;
-    }
+    // v3.56 : the two 2nd-strike flags are loaded HERE and nowhere else, now
+    // that the profile is resolved. They used to be read only at attach, and
+    // ApplySettingsChange erased them with no symmetric reload.
+    LoadViolationFlags();
 
     // Live-state baseline
     // v2.02.05 FIX 1 : realized-balance high-water mark, persisted PER LOGIN (GV name
     // carries the login, so switching accounts NEVER destroys another login's peak).
     LoadOrSeedPeakBalance();
-    MqlDateTime mdt;
-    TimeToStruct(TimeCurrent(), mdt);
-    mdt.hour = 0;
-    mdt.min = 0;
-    mdt.sec = 0;
-    g_day_start = StructToTime(mdt);
     ArrayResize(g_last_tickets, 0);
     for (int i = 0; i < RC_RULE_COUNT; ++i) {
         g_last_status[i] = RC_STATUS_NA;
@@ -2254,11 +2223,22 @@ void ShellApplyCfg(const int id) {
         // - which also writes the PER-LOGIN copy the loader reads first - existed,
         // was declared, and was called by nothing : the flag leaked from one
         // account to the next and was never saved where it is looked for.
-        g_margin_violation_active = !g_margin_violation_active;
-        PersistViolationFlags();
+        // v3.56 : the shell draws these two DISABLED whenever the profile cannot
+        // be restricted - and the host took the click anyway, PERSISTING a
+        // violation onto an account that has no such concept. The damage was
+        // masked (the RAM copy was wiped right after) but the STORED value
+        // stayed : the day the trader came back to a funded phase, a violation
+        // he never had came back with it, and a 1 % cap instead of 3 %.
+        // A control drawn refused must be refused.
+        if (ProfileCanBeRestricted()) {
+            g_margin_violation_active = !g_margin_violation_active;
+            PersistViolationFlags();
+        }
     } else if (id == g_shell.CfgIdViolRisk()) {
-        g_risk_violation_active = !g_risk_violation_active;
-        PersistViolationFlags();
+        if (ProfileCanBeRestricted()) {
+            g_risk_violation_active = !g_risk_violation_active;
+            PersistViolationFlags();
+        }
     } else if (id == g_shell.CfgIdBe()) {
         g_be_visible = !g_be_visible;
         PersistBE();
@@ -2300,7 +2280,20 @@ void ShellApplyCycle(const int field, const int dir) {
     else                 dd = ((dd - 1 + dir) % 31 + 31) % 31 + 1;
     const int dim = DaysInMonth(y, m);      // shared with RC_Math : leap years included
     if (dd > dim) dd = dim;                 // never build an impossible date
-    g_eff_cycle_ymd = (double)(y * 10000 + m * 100 + dd);
+    // v3.56 : the SHAPE was validated, the POSITION IN TIME never was. One click
+    // too many on the year cycler put the cycle start in the FUTURE, and the
+    // value is persisted per login - so it survived detach, timeframe switch and
+    // restart. From then on HistorySelect(future, now) returns an empty range :
+    // Quick Strike showed 0.00 % on an empty GREEN meter while the trader could
+    // be past the FN violation threshold, and the news card showed 0 trades. Two
+    // rules whose only witness is this screen went from "watched" to "always
+    // clean", with no message and no n/a. A cycle cannot start tomorrow.
+    MqlDateTime tdy;
+    TimeToStruct(TimeCurrent(), tdy);       // broker server time : the same clock
+    const int today = tdy.year * 10000 + tdy.mon * 100 + tdy.day;
+    int ymd_new = y * 10000 + m * 100 + dd;
+    if (ymd_new > today) ymd_new = today;
+    g_eff_cycle_ymd = (double)ymd_new;
     GVSetLogin("RC_cycle_ymd", g_eff_cycle_ymd);
 }
 // v3.04 : arm the self-lock (the shell already asked for confirmation twice).
@@ -3328,7 +3321,6 @@ double Live_MaxLot(double &pct_disp, string &tag, int &ld,
     if (lot < vmin) lot = 0.0;
     else if (vmax > 0.0 && lot > vmax) lot = vmax;
     ld = LotDigits(step);
-    g_maxlot_copy = (lot > 0.0 ? lot : 0.0); g_maxlot_digits = ld;   // V1.24 G3 copy
     // which cap binds ? (tie -> target, then cumulative room, then free margin)
     if (tgt_money <= room_money + 1e-6 && tgt_money <= free_m + 1e-6) { tag = "marg"; pct_disp = tgt_pct; }
     else if (room_money <= free_m + 1e-6)                            { tag = "room"; pct_disp = room_pct; }
@@ -4002,6 +3994,9 @@ double ComputePositionRiskMoney(const string sym, const int type,
 
 // A1 : UpdateDayStartEquity + g_equity_at_day_start removed (dead code - the
 // daily-DD figure is reconstructed live via SumClosedDealsPnL, never from these).
+// v3.56 : g_day_start, the last survivor of that pair, is gone too. It was set
+// at every attach and read nowhere - a landmark pointing at a mechanism that
+// does not exist.
 
 // v2.02.05 FIX 1 : the FN Instant trailing floor follows the realized BALANCE
 // high (floating equity spikes do NOT raise the FN floor). Persist on increase
@@ -5210,6 +5205,21 @@ double CcyToDepositRate(const string ccy) {
 //| SYMBOL_TRADE_CALC_MODE - indices = CFDINDEX cs*px*(tv/ts)*ri,    |
 //| NOT the leverage formula. Returns 0.0 only if all paths fail.    |
 //+------------------------------------------------------------------+
+// v3.56 : path / err / dbg2 were filled on EVERY call - including a six-part
+// concatenation with five DoubleToString - and printed by nobody : the debug
+// line they were written for is gone. They are not deleted, they are wired
+// back. This fires only where OrderCalcMargin has already refused, which is
+// exactly when the trader reads "n/a" on the max-lot line with no reason
+// given, and these four values are the reason. Verbose flag + 60 s throttle,
+// symbol properties only - nothing about the account.
+void MaxLotDbg(const string sym) {
+    if (!InpVerboseLog) return;
+    if (TimeCurrent() - g_maxlot_dbg_last < 60) return;
+    g_maxlot_dbg_last = TimeCurrent();
+    Print("RiskCockpit : margin-per-lot fallback on ", sym, " - path=", g_maxlot_path,
+          " ocm_err=", g_maxlot_err, (g_maxlot_dbg2 == "" ? "" : " " + g_maxlot_dbg2));
+}
+
 double MarginPerLot(const string sym) {
     g_maxlot_path = "none";
     g_maxlot_m1 = 0.0;
@@ -5223,7 +5233,7 @@ double MarginPerLot(const string sym) {
     if (px <= 0.0) px = SymbolInfoDouble(sym, SYMBOL_ASK);
     if (px <= 0.0) px = SymbolInfoDouble(sym, SYMBOL_BID);
     if (px <= 0.0) px = SymbolInfoDouble(sym, SYMBOL_LAST);
-    if (px <= 0.0) { g_maxlot_path = "no_price"; return 0.0; }
+    if (px <= 0.0) { g_maxlot_path = "no_price"; MaxLotDbg(sym); return 0.0; }
 
     double m = 0.0; // (3) PRIMARY = OrderCalcMargin (the broker truth)
     ResetLastError();
@@ -5277,6 +5287,7 @@ double MarginPerLot(const string sym) {
     r *= fx; // FIX 2 : margin-currency -> deposit currency (no-op when fx = 1.0)
     g_maxlot_path = (r > 0.0 ? "calcmode" : "fail");
     g_maxlot_m1 = r;
+    MaxLotDbg(sym);
     return r;
 }
 
@@ -6694,6 +6705,60 @@ bool ProfileCanBeRestricted(void) {
     return false; // Futures placeholders + Free Trial + Free Competition
 }
 
+// v3.56 : the 2nd-strike flags used to be read ONCE, at attach. Every step of
+// the settings cascade calls ApplySettingsChange, which forced them to false
+// whenever the CURRENT profile cannot be restricted - with nothing to reload
+// them when it can again. Stepping the PHASE cycler onto "Challenge P1" to see
+// what it would give, then back onto "Funded", was enough : the panel then
+// showed a 3 % cap on an account carrying a 1 % restriction, the lot advisor
+// TRIPLED its budget, and the "Risk violation" box drew itself unticked and
+// enabled - it looked like a faithful mirror of a state it contradicted. The
+// GlobalVariable still held 1, so a mere timeframe switch flipped back to the
+// 1 % cap : two answers for the same account at the same moment.
+// ONE loader, called wherever the profile moves. It never WRITES the flags -
+// only PersistViolationFlags does - so a non-restrictable phase hides them
+// without destroying them.
+void LoadViolationFlags(void) {
+    // input = the default, the per-login GlobalVariable (set by a click) wins.
+    g_margin_violation_active = InpMarginViolationActive;
+    g_risk_violation_active   = InpRiskViolationActive;
+    // A 2nd strike belongs to ONE account, like size / phase / plan. v3.49 : the
+    // twins were not read in the same order and the GLOBAL won for risk, so
+    // clearing the box on a clean account wiped the restriction off every OTHER
+    // account. GVGetLogin falls back to the un-suffixed legacy key on its own,
+    // so the migration seed is not lost.
+    double mv = 0.0, rv = 0.0;
+    if (GVGetLogin("RC_margin_violation", mv)) g_margin_violation_active = (mv != 0.0);
+    if (GVGetLogin("RC_risk_violation",   rv)) g_risk_violation_active   = (rv != 0.0);
+    // FIX 4 (V1.0.1) : challenge / free profiles have no 2nd-strike concept.
+    // Never let a flag persisted by a FUNDED/Instant session silently tighten
+    // their caps. RAM only : the stored value stays intact for the way back.
+    if (!ProfileCanBeRestricted()) {
+        g_margin_violation_active = false;
+        g_risk_violation_active   = false;
+    }
+}
+
+// V1.29 J / M : the risk toolkit is PERSONAL-ONLY. Prop accounts are ALWAYS ON
+// (the toolkit is the product) ; Personal defaults OFF and its RC_risktools
+// toggle decides. Folded here so a Personal "OFF" can never leak onto a prop
+// account.
+// v3.56 : this used to be resolved ONCE, at attach - but the plan is editable
+// HOT from the cascade. Going from Personal to a prop plan mid-session left the
+// toolkit OFF : no rule alert at all, no discipline lock, no tilt banner, while
+// the gauges kept painting amber and red exactly as usual - so nothing on
+// screen said the alarms were mute. And there was no way back : on a prop plan
+// the toggle refuses the click, under a sentence that says it is "always on".
+void ResolveRiskTools(void) {
+    if (PlanIsPersonal()) {
+        g_eff_risktools = false;
+        if (GlobalVariableCheck("RC_risktools"))
+            g_eff_risktools = (GlobalVariableGet("RC_risktools") != 0.0);
+    } else {
+        g_eff_risktools = true; // PROP : always ON, ignores input + GV
+    }
+}
+
 void PersistViolationFlags(void) {
     // v3.49 : this used to write the GLOBAL variable too, which made the last
     // account touched dictate the value for every other one through GVGetLogin's
@@ -6907,10 +6972,11 @@ void ApplySettingsChange(void) {
     if (g_eff_split >= 0.0) g_profile.profit_split_pct = g_eff_split; // V1.27 : manual split override
     if (EffectivePlan() == FN_PLAN_PERSONAL && g_eff_size <= 0.0)
         g_profile.initial_balance = DetectStartingBalance(); // V1.28 : Personal "Auto" -> real balance
-    if (!ProfileCanBeRestricted()) {
-        g_margin_violation_active = false;
-        g_risk_violation_active   = false;
-    }
+    // v3.56 : these three lines used to ERASE the 2nd-strike flags with no way
+    // back, and the risk toolkit was never re-resolved at all. Both now follow
+    // the plan, in both directions.
+    LoadViolationFlags();
+    ResolveRiskTools();
     LoadOrSeedPeakBalance(); // v2.02.05 : self-heal a poisoned first seed after a size/plan change
     DestroyAllObjects();
     // v3 SHELL : DestroyAllObjects wipes the WHOLE "RC_" namespace - the shell's

@@ -113,6 +113,15 @@ def mut_guard(b):
         b'    if (false)', 1)
 
 
+def mut_deadglob(b):
+    # Poser un global que rien ne relit : c est l etat exact dans lequel
+    # g_day_start a vecu, ancre de journee initialisee a minuit a chaque
+    # attache, lue nulle part, au milieu du bloc ou se calcule la regle la
+    # plus meurtriere du produit. Le compilateur ne dit rien.
+    return b.replace(b'bool g_alerts_armed = false;',
+                     b'bool g_alerts_armed = false;\r\ndatetime g_dead_anchor = 0;', 1)
+
+
 CASES = [
     ("BOM unique", IND, mut_bom),
     ("reglages actifs", IND, mut_input),
@@ -132,6 +141,7 @@ CASES = [
     ("3 langues par entree", IND, mut_lang),
     ("series d infobulles alignees", IND, mut_serie),
     ("garde-fous branches", IND, mut_guard),
+    ("etat global relu", IND, mut_deadglob),
 ]
 
 # Ce que le harnais NE couvre pas, et pourquoi. Un self-test qui tait sa

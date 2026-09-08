@@ -86,6 +86,71 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.56.68 — 5e lot : l'état, ce qui est chargé une fois et jamais rechargé
+
+- 🔴 **Un aller-retour de phase effaçait le 2e strike, définitivement.**
+  `ApplySettingsChange` — appelée à la fin de **chaque pas** de la cascade —
+  remettait les deux drapeaux de violation à `false` dès que le profil courant
+  ne peut pas être restreint. **Sans symétrique** : rien ne les rechargeait au
+  retour, et ils n'étaient lus qu'à l'attache. Faire un clic sur le sélecteur de
+  phase pour regarder ce que donnerait « Challenge P1 », puis revenir sur
+  « Funded », suffisait. Le panneau affichait alors **3 % de plafond sur un
+  compte qui en porte 1**, le conseiller de lot **triplait son budget**, et la
+  case « Violation risque » se dessinait décochée **et active** : elle avait
+  l'air d'être le reflet fidèle d'un état qu'elle contredisait. La variable
+  globale, elle, valait toujours 1 — donc un simple changement d'unité de temps
+  rebasculait au plafond de 1 %. **Deux réponses pour le même compte au même
+  instant**, au gré du dernier événement de cycle de vie. Un seul chargeur
+  désormais (`LoadViolationFlags`), appelé partout où le profil bouge ; une
+  phase non restreignable **masque** les drapeaux, elle ne les détruit plus.
+- 🔴 **Et le clic que l'écran refusait, l'hôte l'acceptait.** Le shell dessine
+  ces deux cases désactivées dès que le profil ne peut pas être restreint —
+  l'hôte, lui, prenait le clic et **écrivait** la violation dans la variable du
+  compte. Le dégât était masqué par l'effacement ci-dessus ; la valeur stockée,
+  elle, restait. Un contrôle dessiné refusé est maintenant refusé.
+- 🔴 **Un changement de plan à chaud laissait la boîte à outils de risque sur
+  OFF.** `g_eff_risktools` n'était résolu qu'à l'attache, alors que le plan est
+  modifiable **à chaud** depuis la cascade. En passant de Personal à un plan
+  prop en cours de session : **plus une seule alerte de règle**, plus de verrou
+  discipline, plus de bandeau tilt — pendant que les jauges continuaient à
+  peindre l'ambre et le rouge **exactement comme d'habitude**, donc sans que
+  rien à l'écran ne dise que les alarmes étaient muettes. Et le retour arrière
+  était impossible : sur un plan prop la bascule refuse le clic, sous une phrase
+  qui affirme qu'elle est « toujours active », au-dessus d'un interrupteur
+  dessiné OFF. La résolution est une fonction, rejouée à chaque changement.
+- **La date de début de cycle pouvait être posée dans le FUTUR en un clic.** La
+  *forme* était validée (jamais de 31 février) — la *position dans le temps*
+  jamais. Et la valeur est persistée par login : elle survit au détachement, au
+  changement d'unité de temps et au redémarrage. À partir de là,
+  `HistorySelect(futur, maintenant)` rend un intervalle vide : **Quick Strike
+  affiche 0,00 % sur un mètre vide et VERT** alors que le trader peut être
+  au-delà du seuil de violation FN, et la carte news affiche 0 trade. Deux
+  règles dont l'écran est le seul témoin passent de « surveillées » à
+  « toujours propres », sans un message et sans un « n/a ». Plafonnée à
+  aujourd'hui.
+- **Dix globaux écrits et lus par personne.** Mesure faite **avant** de
+  construire l'instrument : 89 globaux, **10 jamais relus**. `g_day_start` —
+  une ancre de journée posée à minuit heure serveur à chaque attache, au milieu
+  du bloc où se calcule **la règle la plus meurtrière du produit**, suggérant
+  que la perte journalière est mesurée à partir de là et donc remise à zéro à
+  chaque changement d'unité de temps. Elle ne l'est pas. Son jumeau avait déjà
+  été retiré comme code mort ; celui-là avait survécu au nettoyage. Idem pour
+  les trois restes de la surcouche plein écran et les trois anciennes boîtes de
+  copie. Les **quatre miettes de diagnostic de la marge**, elles, ne sont pas
+  supprimées : elles reprennent le rôle écrit dessus — une ligne verbeuse,
+  limitée à une par minute, sur le **seul** chemin où le trader lit « n/a » sans
+  raison. Elles coûtaient une concaténation de six morceaux à chaque appel pour
+  un lecteur inexistant.
+
+⭐ **Deux classes de défaut apprises par le gate** (20 contrôles) :
+*un garde-fou doit garder quelque chose* — toute temporisation, constante ou
+horodatage, doit apparaître dans une **comparaison** ; et *un état global doit
+être relu* — un global écrit est, pour le compilateur, un global « utilisé ».
+Les deux contrôles ont leur contrôle positif : on débranche, le gate dit NON.
+
+**Gate : 20 contrôles, 0 en échec. Contrôles positifs : 18/18 + 2 non-couvertures
+déclarées. Compilation : 0 erreur, 0 avertissement.**
+
 ### v3.55.67 — 4e lot : le chemin sonore, de bout en bout
 
 Cinq constats de la revue, tous sur la meme fonction : **l'alarme**. Le panneau
