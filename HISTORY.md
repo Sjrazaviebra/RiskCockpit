@@ -86,6 +86,64 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.55.67 — 4e lot : le chemin sonore, de bout en bout
+
+Cinq constats de la revue, tous sur la meme fonction : **l'alarme**. Le panneau
+sait depuis longtemps CALCULER le danger ; ce lot repare ce qu'il en DIT a voix
+haute.
+
+- 🔴 **Le limiteur d'alertes ne limitait rien.** Le fichier declarait, depuis
+  toujours, un tableau d'horodatages avec son role ecrit dessus — *« 15-second
+  cooldown per rule prevents spam on flapping transitions »*. Ce limiteur
+  n'etait branche que sur le chemin Telegram, **mort depuis la v3.26**. Le son,
+  lui, tournait sans bride : une regle qui respire autour de son seuil — un DD
+  journalier a 870 $ pour une bande d'avertissement a 875 — faisait **alterner
+  deux sons deux fois par seconde, sans fin**, exactement au moment ou la regle
+  compte. Le compilateur ne voyait rien : la variable etait ecrite, donc
+  « utilisee ». Elle garde desormais le SON, et la redescente gagne une
+  **hysteresis** : on ne repasse en vert qu'a 5 % sous la bande, jamais des
+  qu'on la frole. L'hysteresis ne joue que du **cote sur** — un outil de risque
+  peut s'attarder en ambre, jamais en vert.
+- **Plusieurs sons partaient a la suite, sans priorite.** Le declencheur jouait
+  lui-meme, **a l'interieur de la boucle du registre**. Quand deux regles
+  changeaient d'etat dans le meme rafraichissement, les sons s'enchainaient dans
+  l'ordre du registre : **le son d'une BRECHE pouvait etre couvert par celui
+  d'un simple avertissement declenche apres lui**. Le declencheur rend maintenant
+  la GRAVITE de la transition, la boucle en garde le maximum, et **un seul son
+  part**, le plus grave.
+- 🔴 **Quick Strike avait deux seuils — et c'est moi qui les ai separes.** La
+  v3.31 avait pose l'invariant *« une seule source pour le son et pour
+  l'ecran »* ; la v3.39 a donne a l'**ecran** la bande du profil (avertir a
+  20 %, violer a 25 %, soit 0,80 de la bande) en laissant le **son** sur le 0,80
+  **generique**, calcule sur autre chose. Entre les deux valeurs, la ligne
+  passait en ambre **et l'alarme se taisait**. La bande du profil vit desormais
+  dans la fonction que les deux consommateurs lisent.
+- **Le tilt et les verrous n'ont JAMAIS eu de son.** Le bloc d'en-tete de la
+  section discipline promet *« a soft amber banner + sound »*, et la variable de
+  temporisation porte *« tilt sound/Telegram throttle »* depuis le jour de sa
+  declaration — mais **aucun `PlaySound` n'a jamais existe sur ce chemin**. Un
+  bandeau ambre en haut d'un graphique qu'on ne regarde pas est un avertissement
+  que personne ne recoit. Les deux transitions sonnent, sous la temporisation
+  ecrite pour elles.
+- 🔴 **L'alerte de tenue de week-end arrivait APRES la cloture.** Elle demandait
+  d'aplatir a partir de **vendredi 22:00 UTC** — une heure **apres** la
+  fermeture du forex, quand aplatir n'est plus possible. Un avertissement qui
+  arrive apres l'echeance n'est pas un avertissement. Elle previent maintenant
+  des **18:00 UTC** en ambre, de quoi travailler une sortie, et passe en
+  **rouge a 20:30**, la derniere fenetre ou un ordre passe encore — avec son
+  propre texte, et une annonce **par niveau** pour que l'escalade s'entende
+  meme quand l'ambre a deja sonne.
+
+⭐ **Le gate a appris la classe de defaut** (19e controle) : *un garde-fou doit
+garder quelque chose*. Toute temporisation — constante `#define` ou horodatage
+global — doit apparaitre dans une **comparaison**. Une variable ecrite mais
+jamais confrontee a une horloge est une promesse non tenue, et le compilateur la
+declare « utilisee ». Deux l'etaient dans ce seul fichier. Le controle positif
+correspondant debranche la comparaison et verifie que le gate dit NON.
+
+**Gate : 19 controles, 0 en echec. Controles positifs : 17/17 + 2 non-couvertures
+declarees. Compilation : 0 erreur, 0 avertissement.**
+
 ### v3.52.64 -> v3.54.66 — 3e lot : deux chiffres impossibles, une carte volatile, une regression a moi
 
 **v3.52 — deux chiffres qui ne pouvaient pas etre justes.**

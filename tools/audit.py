@@ -285,6 +285,26 @@ def run(root):
                ("%d champs, lus et ecrits" % len(fresh)) if not missing
                else "absents du cache : " + " ".join(missing))
 
+    # 8c. UN GARDE-FOU DOIT GARDER QUELQUE CHOSE. Une temporisation peut etre
+    #     declaree, commentee, remise a zero a chaque attache - et ne proteger
+    #     rien du tout : le compilateur voit une variable ECRITE, donc utilisee.
+    #     `g_last_telegram_alert[]` a porte « prevents spam on flapping
+    #     transitions » pendant vingt-neuf versions sans jamais etre comparee a
+    #     une horloge, et le son qu elle devait proteger a tourne a 2 Hz.
+    #     Ici : tout nom de temporisation doit apparaitre dans une COMPARAISON.
+    guard_names = set(re.findall(r'#define\s+(RC_\w*(?:COOLDOWN|THROTTLE)\w*)', hcode))
+    guard_names |= set(re.findall(r'\bdatetime\s+(g_\w*(?:alert|throttle|cooldown)\w*)\s*[\[=;]',
+                                  hcode, re.I))
+    guard_dead = []
+    for g in sorted(guard_names):
+        cmp_hit = [ln for ln in hcode.split("\n")
+                   if re.search(r'\b' + g + r'\b', ln) and re.search(r'[<>]=?', ln)]
+        if not cmp_hit:
+            guard_dead.append(g)
+    report("garde-fous branches", not guard_dead,
+           ("%d temporisations comparees" % len(guard_names)) if not guard_dead
+           else "jamais comparees : " + " ".join(guard_dead))
+
     # 9. PUBLIC repo : nothing personal, in the sources or in the binary.
     #    The binary check needs its positive control first.
     # One or TWO backslashes : source code escapes them, markdown and comments

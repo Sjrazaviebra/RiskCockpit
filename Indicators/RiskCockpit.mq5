@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.54"
+#property version "3.55"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.54"
+#define RC_VERSION_STR "3.55"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -493,10 +493,14 @@ ulong g_last_tickets[];
 // Suppress sound alerts during the very first refresh (OnInit, timeframe switch).
 bool g_alerts_armed = false;
 
-// Telegram per-rule rate limiter : last alert timestamp per rule index.
-// 15-second cooldown per rule prevents spam on flapping transitions.
-datetime g_last_telegram_alert[RC_RULE_COUNT];
-#define RC_TELEGRAM_COOLDOWN_SEC 15
+// v3.55 : per-rule SOUND rate limiter : last alert timestamp per rule index.
+// It was declared for the Telegram path with exactly this comment - "prevents
+// spam on flapping transitions" - and that path died in v3.26, so the limiter
+// guarded nothing while the sound it was meant to protect ran unthrottled : a
+// rule breathing across its band alternated two sounds at 2 Hz, without end,
+// precisely when the rule matters. It guards the SOUND.
+datetime g_last_sound_alert[RC_RULE_COUNT];
+#define RC_SOUND_COOLDOWN_SEC 15
 
 // Post-violation tightening (B7). Runtime-mutable via clickable checkboxes
 // in front of the Margin / Risk rows; persisted across reattach via
@@ -770,7 +774,7 @@ datetime FFNextEvt(const bool restricted_class);
 bool FFInNewsWindow(void);
 string FormatAge(int seconds);
 string PositionStatusLabel(ENUM_RC_STATUS s, int age, bool sl_missing);
-void TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status);
+int  TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status);
 bool PositionListChanged(void);
 void SnapshotPositionList(void);
 
@@ -1084,7 +1088,7 @@ int OnInit(void) {
     ArrayResize(g_last_tickets, 0);
     for (int i = 0; i < RC_RULE_COUNT; ++i) {
         g_last_status[i] = RC_STATUS_NA;
-        g_last_telegram_alert[i] = 0;
+        g_last_sound_alert[i] = 0;
     }
 
     // Telegram setup hint (B1) - cheap one-time message at attach time.
@@ -1521,13 +1525,9 @@ void BuildDeckData(RCDeckData &d) {
     d.warnRisk    = RuleWarnRatio("rule_risk_cum",   d.trailing);
     d.warnDaily   = RuleWarnRatio("rule_daily_dd",   d.trailing);
     d.warnOverall = RuleWarnRatio("rule_overall_dd", d.trailing);
-    // v3.39 : the catalogue carries Quick Strike's OWN warning band
-    // (warn_pct / violate_pct) and the legacy row used it. Use it when the
-    // profile defines one ; fall back to the generic threshold otherwise.
-    d.warnQuick   = ((g_profile.quick_strike_warn_pct > 0.0 &&
-                      g_profile.quick_strike_violate_pct > 0.0)
-                     ? g_profile.quick_strike_warn_pct / g_profile.quick_strike_violate_pct
-                     : RuleWarnRatio("rule_qs", d.trailing));
+    // v3.55 : the Quick Strike band now lives INSIDE RuleWarnRatio, where the
+    // sound reads it too. It was computed here only, so the two disagreed.
+    d.warnQuick   = RuleWarnRatio("rule_qs",        d.trailing);
     d.warnHyper   = RuleWarnRatio("rule_hyper",      d.trailing);
     // worst = raw consumption (what a BAR must show) ; sev = consumption
     // measured against each rule's OWN warning threshold (what a COLOUR must
@@ -1633,11 +1633,13 @@ void BuildDeckData(RCDeckData &d) {
     d.pyrOn       = (InpEnablePyramidSafe && BuildPyramidLine(d.pyrText, d.pyrStat));
     // v3.06 : week-end hold. The legacy clock blinked it AND fired the alert ;
     // the shell had neither. The alert keeps its own once-per-window latch.
-    d.weekendHold = IsWeekendHoldRisk();
+    d.weekendLvl  = WeekendHoldLevel();
+    d.weekendHold = (d.weekendLvl > 0);
     // v3.11 : say which controls the host will refuse to act on
     d.rtoolsLocked = !PlanIsPersonal();          // prop plan : toolkit forced ON
     d.violLocked   = !ProfileCanBeRestricted();  // the flags would be reset at once
-    if (d.weekendHold) FireWeekendAlert(); else g_weekend_warned = false;
+    if (d.weekendHold) FireWeekendAlert(d.weekendLvl); else g_weekend_warned = 0;
+    FireDisciplineAlerts(d);   // v3.55 : tilt and hard locks finally have a voice
     // --- lot advisor (cell LOT) -------------------------------------------
     SuggestedLot s;
     if (Live_ComputeSuggestedLot(s)) {
@@ -2158,6 +2160,7 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_SECS_RESIZE,   Tr("shl_secsize"));
     g_shell.SetLabel(RCL_RTOOLS_OFF,    Tr("shl_rtoolsoff"));
     g_shell.SetLabel(RCL_BAND_WKND,     Tr("shl_bandwknd"));
+    g_shell.SetLabel(RCL_BAND_WKNDNOW,  Tr("shl_bandwkndnow"));
     g_shell.SetLabel(RCL_MINS_LEFT,     Tr("shl_minsleft"));
     g_shell.SetLabel(RCL_BAND_RAISE,    Tr("shl_bandraise"));
     g_shell.SetLabel(RCL_BAND_SLLOW,    Tr("shl_bandsllow"));
@@ -2565,6 +2568,14 @@ void ShellEditsTopmost(void) {
 // on a green panel : the corrected threshold had no voice. One function, both
 // consumers - the sound and the deck the shell paints from.
 double RuleWarnRatio(const string key, const bool trailing) {
+    // v3.55 : Quick Strike carries its OWN band in the catalogue (warn at 20 %,
+    // violate at 25 %). v3.39 handed that band to the SCREEN and left the SOUND
+    // on the generic 0.80, i.e. 24 % : between the two the row is amber and the
+    // alarm stays silent. That is the v3.31 invariant - ONE source for both -
+    // broken by me. It lives here, so both consumers read it.
+    if (key == "rule_qs" && g_profile.quick_strike_warn_pct > 0.0 &&
+        g_profile.quick_strike_violate_pct > 0.0)
+        return g_profile.quick_strike_warn_pct / g_profile.quick_strike_violate_pct;
     if (key == "rule_risk_cum" || key == "rule_daily_dd") return 0.70;
     if (key == "rule_overall_dd") return (trailing ? 0.50 : 0.70);   // trailing = account killer
     if (key == "rule_hyper" || key == "rule_msgs")        return 0.75;
@@ -2572,6 +2583,7 @@ double RuleWarnRatio(const string key, const bool trailing) {
 }
 void ShellRuleAlerts(const RCDeckData &d) {
     if (!g_eff_risktools) return;
+    int worst_evt = 0;   // v3.55 : 0 none, 1 back to OK, 2 warn, 3 breach
     for (int i = 0; i < RC_RULE_COUNT; ++i) {
         double used = -1.0, cap = 0.0;
         string txt = "";
@@ -2601,9 +2613,25 @@ void ShellRuleAlerts(const RCDeckData &d) {
         // hyper / msgs at 75 %. Flattening everything to 80 % made every alert
         // fire later than it used to - a risk tool must not warn later.
         const double warn = RuleWarnRatio(k, d.trailing);   // v3.31 : ONE source
-        g_rows[i].status     = ComputeRangeStatus(used, cap, warn, 1.00);
-        TryFireSoundAlert(i, g_rows[i].status);
+        // v3.55 : hysteresis on the DESCENT only. A value sitting on its band -
+        // 870 against a warning line at 875 - flipped amber / green on every
+        // frame, exactly when the rule matters. Coming DOWN, a rule keeps its
+        // amber until it is 5 % clear of the band ; going UP it changes at once.
+        // A risk tool may linger on the safe side, never on the loose one.
+        ENUM_RC_STATUS st = ComputeRangeStatus(used, cap, warn, 1.00);
+        if (st == RC_STATUS_OK && g_last_status[i] == RC_STATUS_WARN &&
+            used > warn * cap * 0.95)
+            st = RC_STATUS_WARN;
+        g_rows[i].status     = st;
+        const int ev = TryFireSoundAlert(i, g_rows[i].status);
+        if (ev > worst_evt) worst_evt = ev;
     }
+    // v3.55 : ONE sound per pass, at the WORST severity seen. They used to play
+    // INSIDE the loop, in registry order and with no priority : the sound of a
+    // breach could be drowned by a plain warning that transitioned after it.
+    if (worst_evt == 3)      PlaySound(InpSoundRed);
+    else if (worst_evt == 2) PlaySound(InpSoundWarn);
+    else if (worst_evt == 1) PlaySound(InpSoundOK);
 }
 
 void ShellRefresh(void) {
@@ -2688,30 +2716,58 @@ void RefreshPanel(void) {
 //+------------------------------------------------------------------+
 //| B5 : next HIGH-impact news + B4 : weekend-hold warning state      |
 //+------------------------------------------------------------------+
-bool     g_weekend_warned = false; // weekend alert already fired this window
+int      g_weekend_warned = 0;    // highest weekend level already announced
 
 // B5 : time of the next HIGH-impact event (any currency) within 24h, 0 if none.
 // V1.29 P/R : next HIGH **or** MEDIUM news (respecting the level toggles), and
 // reports whether it is HIGH via out_high. (Name kept for minimal churn.)
 
-// B4 : weekend-hold risk = weekend hold NOT allowed (funded) + Friday >= 22:00
+// B4 : weekend-hold risk = weekend hold NOT allowed (funded) + Friday evening
 // UTC + at least one open position.
-bool IsWeekendHoldRisk(void) {
-    if (g_profile.weekend_hold_allowed) return false;
-    if (PositionsTotal() <= 0) return false;
+// v3.55 : this asked the user to "flatten before the weekend" from Friday
+// 22:00 UTC - an HOUR AFTER the forex weekly close, when flattening is no
+// longer possible. A warning that arrives after the deadline is not a warning.
+// It now warns from 18:00 UTC, with time to work an exit, and turns red at
+// 20:30 - the last window in which an order still goes through.
+// Returns 0 = nothing, 1 = amber (warn), 2 = red (act now).
+int WeekendHoldLevel(void) {
+    if (g_profile.weekend_hold_allowed) return 0;
+    if (PositionsTotal() <= 0) return 0;
     MqlDateTime g;
     TimeToStruct(TimeGMT(), g);
-    return (g.day_of_week == 5 && g.hour >= 22);
+    if (g.day_of_week != 5) return 0;          // Friday only
+    const int mins = g.hour * 60 + g.min;
+    if (mins >= 20 * 60 + 30) return 2;        // 20:30 UTC : the last useful window
+    if (mins >= 18 * 60)      return 1;        // 18:00 UTC : room to exit calmly
+    return 0;
 }
 
-void FireWeekendAlert(void) {
-    if (g_weekend_warned) return;
-    g_weekend_warned = true;
-    if (g_eff_sound) PlaySound(InpSoundRed);
-    if (g_eff_telegram)
-        SendTelegramMessage("[RED] RiskCockpit - WEEKEND HOLD risk : Friday 22:00+ UTC with " +
-                            IntegerToString(PositionsTotal()) +
-                            " open position(s). Funded accounts must flatten before the weekend.");
+// One announcement per LEVEL : the escalation to red must be heard even when
+// the amber one already fired.
+void FireWeekendAlert(const int lvl) {
+    if (lvl <= g_weekend_warned) return;
+    g_weekend_warned = lvl;
+    if (g_eff_sound) PlaySound(lvl >= 2 ? InpSoundRed : InpSoundWarn);
+}
+
+// v3.55 : the header block of the discipline section promises "a soft amber
+// banner + sound", and g_disc_last_alert has carried the comment "tilt
+// sound/Telegram throttle" since the day it was declared - but NO PlaySound
+// has ever existed on this path. A banner at the top of a chart nobody is
+// looking at is a warning nobody receives. Both transitions now sound, under
+// the throttle that was written for them.
+void FireDisciplineAlerts(const RCDeckData &d) {
+    static bool s_tilt = false;
+    static int  s_lock = 0;
+    const bool tilt_up = (d.discTilt && !s_tilt);
+    const bool lock_up = (d.lockKind != 0 && d.lockKind != s_lock);
+    s_tilt = d.discTilt;                       // recorded even while disarmed,
+    s_lock = d.lockKind;                       // so the first pass never fires
+    if (!g_alerts_armed || !g_eff_sound) return;
+    if (!tilt_up && !lock_up) return;
+    if (TimeCurrent() - g_disc_last_alert < RC_SOUND_COOLDOWN_SEC) return;
+    g_disc_last_alert = TimeCurrent();
+    PlaySound(lock_up ? InpSoundRed : InpSoundWarn);
 }
 
 //+------------------------------------------------------------------+
@@ -4110,33 +4166,43 @@ string PositionStatusLabel(ENUM_RC_STATUS s, int age, bool sl_missing) {
 //+------------------------------------------------------------------+
 //| Alert dispatcher on status transitions (sound + Telegram, B1)    |
 //+------------------------------------------------------------------+
-void TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status) {
+// v3.55 : this dispatcher used to PLAY the sound itself, from inside the rule
+// loop. It now RETURNS the severity of the transition - 0 nothing, 1 back to
+// OK, 2 warning, 3 breach - and the caller plays ONE sound, the worst, after
+// the loop. It also honours the per-rule cooldown that had been declared for
+// the dead Telegram path and never applied to the sound.
+int TryFireSoundAlert(int idx, ENUM_RC_STATUS new_status) {
     if (idx < 0 || idx >= RC_RULE_COUNT)
-        return;
+        return 0;
     // FIX 3 (V1.0.1) : the Profit Target row is a PROGRESS meter - its amber/green
     // transitions are informational (you're doing well), never warnings. Cache the
     // status so the chip colour still updates, but never fire sound / Telegram.
     if (g_rows[idx].key == "rule_target") {
         g_last_status[idx] = new_status;
-        return;
+        return 0;
     }
     const ENUM_RC_STATUS prev = g_last_status[idx];
     g_last_status[idx] = new_status;
     if (!g_alerts_armed) // first refresh after OnInit / timeframe switch
-        return;
+        return 0;
     if (new_status == prev)
-        return;
+        return 0;
+    if (!g_eff_sound)
+        return 0;
+    // the limiter finally guards what its own comment always promised
+    if (TimeCurrent() - g_last_sound_alert[idx] < RC_SOUND_COOLDOWN_SEC)
+        return 0;
+    g_last_sound_alert[idx] = TimeCurrent();
 
-    // --- Sound (local) ---
-    if (g_eff_sound) {
-        if (new_status == RC_STATUS_WARN && prev != RC_STATUS_RED)
-            PlaySound(InpSoundWarn);
-        if (new_status == RC_STATUS_RED)
-            PlaySound(InpSoundRed);
-        // back under the limit : the setting existed but nothing ever played it
-        if (new_status == RC_STATUS_OK && (prev == RC_STATUS_WARN || prev == RC_STATUS_RED))
-            PlaySound(InpSoundOK);
-    }
+    // --- Severity of the transition ; the caller does the playing ---
+    if (new_status == RC_STATUS_RED)
+        return 3;
+    if (new_status == RC_STATUS_WARN && prev != RC_STATUS_RED)
+        return 2;
+    // back under the limit : the setting existed but nothing ever played it
+    if (new_status == RC_STATUS_OK && (prev == RC_STATUS_WARN || prev == RC_STATUS_RED))
+        return 1;
+    return 0;
 
     // v3.47 : the Telegram alert block that sat here was guarded by
     // `if (false && ...)` and composed a message carrying the ACCOUNT LOGIN.
@@ -6126,6 +6192,10 @@ void InitI18n(void) {
         "OPEN POSITIONS INTO THE WEEKLY CLOSE - consider flattening",
         "POSITIONS OUVERTES AVANT LA CLÔTURE HEBDO - envisage de solder",
         "POSICIONES ABIERTAS ANTES DEL CIERRE SEMANAL - considera cerrar");
+    AddTr("shl_bandwkndnow",
+        "WEEKLY CLOSE IMMINENT - flatten now or you hold over the weekend",
+        "CLÔTURE HEBDO IMMINENTE - solde maintenant ou tu tiens tout le week-end",
+        "CIERRE SEMANAL INMINENTE - cierra ahora o aguantas todo el fin de semana");
     AddTr("shl_minsleft",
         "min left",
         "min restantes",

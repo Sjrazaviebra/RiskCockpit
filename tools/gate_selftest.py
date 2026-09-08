@@ -102,6 +102,17 @@ def mut_snapshot(b):
 
 
 # (libelle attendu, fichier a muter, mutation)
+def mut_guard(b):
+    # Debrancher la temporisation du son : la variable reste declaree,
+    # commentee et remise a zero a l attache - mais plus rien ne la compare
+    # a une horloge. C est l etat exact dans lequel g_last_telegram_alert[]
+    # a passe vingt-neuf versions, en promettant de brider un son qu il ne
+    # bridait pas. Le compilateur ne voit rien : la variable est ECRITE.
+    return b.replace(
+        b'    if (TimeCurrent() - g_last_sound_alert[idx] < RC_SOUND_COOLDOWN_SEC)',
+        b'    if (false)', 1)
+
+
 CASES = [
     ("BOM unique", IND, mut_bom),
     ("reglages actifs", IND, mut_input),
@@ -120,6 +131,7 @@ CASES = [
     ("plafond des infobulles", SHELL, mut_tipmax),
     ("3 langues par entree", IND, mut_lang),
     ("series d infobulles alignees", IND, mut_serie),
+    ("garde-fous branches", IND, mut_guard),
 ]
 
 # Ce que le harnais NE couvre pas, et pourquoi. Un self-test qui tait sa

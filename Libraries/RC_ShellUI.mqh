@@ -125,6 +125,7 @@ struct RCDeckData {
    string pyrText;                      // the advisor line, already formatted
    int    pyrStat;                      // 0 ok, 1 warn, 2 neutral
    bool   weekendHold;                  // open positions into the week-end close
+   int    weekendLvl;                   // v3.55 : 1 = amber (warn), 2 = red (act now)
    bool   unlockArmed;                  // a release click is armed (5 s window)
    // v3.11 : controls the host CANNOT act on in the current state. They stay
    // visible (the setting exists) but are drawn disabled, with the reason.
@@ -298,7 +299,7 @@ enum ERCLabel {
    RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
    RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
    RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE, RCL_HELP_MANUAL,
-   RCL_NEWS_SRCDOWN
+   RCL_NEWS_SRCDOWN, RCL_BAND_WKNDNOW
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -1957,7 +1958,11 @@ private:
       if(!m_bandOn) { m_band.Commit(); return; }          // empty = transparent
       const bool hard = (m_d.discLocked || m_d.slGuard);
       const bool wknd = (!hard && !m_d.discTilt && m_d.weekendHold);
-      const color bc  = (hard ? m_t.red : m_t.warn);
+      // v3.55 : le week-end passait sa derniere demi-heure en AMBRE, la meme
+      // couleur que trente minutes plus tot. Au niveau 2 il reste moins d une
+      // demi-heure pour solder : la couleur doit le dire.
+      const bool  wred = (wknd && m_d.weekendLvl >= 2);
+      const color bc  = ((hard || wred) ? m_t.red : m_t.warn);
       const int   W   = m_chW;
       m_band.CapsuleGradient(0, 0, W, RCS_BAND_H, A(bc), Mix(bc, clrBlack, 0.35));
       string msg;
@@ -1973,7 +1978,9 @@ private:
                ? "  -  " + L(RCL_BAND_RAISE, "raise ") + m_d.slGuardSym + " >= " +
                  DoubleToString(m_d.slGuardPrice, (m_d.slGuardPrice >= 100.0 ? 2 : 5)) : "");
       else if(wknd)                                       // v3.06 : week-end hold
-         msg = L(RCL_BAND_WKND, "OPEN POSITIONS INTO THE WEEKLY CLOSE - consider flattening");
+         msg = (wred
+                ? L(RCL_BAND_WKNDNOW, "WEEKLY CLOSE IMMINENT - flatten now or you hold over the weekend")
+                : L(RCL_BAND_WKND, "OPEN POSITIONS INTO THE WEEKLY CLOSE - consider flattening"));
       else
          msg = "TILT - " + IntegerToString(m_d.tiltTrades) + " " +
                L(RCL_BAND_TRADES, "trades in") + " " +
