@@ -130,6 +130,12 @@ def mut_tiporph(b):
                      b'', 1)
 
 
+def mut_readme(b):
+    # Faire deriver le chiffre du README : c est exactement ce qui s est passe
+    # lot apres lot, sans que rien ne le dise. « Eleven » contre vingt et un.
+    return b.replace(b'2 static checks answer', b'9 static checks answer', 1)
+
+
 CASES = [
     ("BOM unique", IND, mut_bom),
     ("reglages actifs", IND, mut_input),
@@ -151,6 +157,7 @@ CASES = [
     ("garde-fous branches", IND, mut_guard),
     ("etat global relu", IND, mut_deadglob),
     ("infobulles traduisibles", IND, mut_tiporph),
+    ("compte du README", "README.md", mut_readme),
 ]
 
 # Ce que le harnais NE couvre pas, et pourquoi. Un self-test qui tait sa

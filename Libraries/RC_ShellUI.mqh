@@ -150,7 +150,10 @@ struct RCDeckData {
    int    lockKind;
    int    lossStreak;       // consecutive losing trades : what a cooldown is ABOUT
    // --- lot 2b : account card + config toggles --------------------------
-   string planLabel, phaseLabel, acctTypeLabel, addonsLabel, cycleLabel, sizeLabelFull;
+   // v3.58 : addonsLabel a ete retire - il etait calcule deux fois par seconde
+   // par l hote et lu par aucune surface. Le pied de panneau qui le lisait est
+   // mort en v3.06 ; le commentaire qui le nommait, lui, avait survecu.
+   string planLabel, phaseLabel, acctTypeLabel, cycleLabel, sizeLabelFull;
    long   login;
    int    minDays, minDaysDone;
    bool   cfgNewsHigh, cfgNewsMed, cfgSound, cfgTelegram, cfgComfort, cfgDiscipline;
@@ -425,7 +428,33 @@ private:
       return (color)((b << 16) | (g << 8) | r);
    }
    color LineC(void)  const { return MixC(m_t.surface, m_t.text, 0.16); }
-   color TrackC(void) const { return MixC(m_t.bg, clrBlack, 0.35); }
+   //--- v3.58 : cette recette - melanger le FOND vers le NOIR - ne produit une
+   //--- piste discrete que si le fond est sombre. Sur les trois themes CLAIRS le
+   //--- fond est clair, donc la piste est un gris moyen (#9CA4A2) ; et les
+   //--- remplissages des themes clairs sont des couleurs SOMBRES. Contraste
+   //--- rempli/vide mesure : ambre 1,19:1, vert 1,41:1, rouge 2,06:1 - le
+   //--- minimum pour un element graphique porteur d information est 3:1, et le
+   //--- MEME composant fait 10,2:1 en sombre. On perdait le NIVEAU, c est-a-dire
+   //--- precisement ce que la jauge existe pour dire - y compris sur la jauge
+   //--- verticale du rail, seule lecture permanente quand le panneau est ferme.
+   //--- En clair la piste devient donc la surface elle-meme (3,2 a 4,8:1 avec
+   //--- les trois remplissages) et un lisere la delimite du panneau.
+   bool  ThemeIsLight(void) const { return (StringSubstr(m_t.name, StringLen(m_t.name) - 1) == "L"); }
+   color TrackC(void) const { return (ThemeIsLight() ? m_t.surface
+                                                     : MixC(m_t.bg, clrBlack, 0.35)); }
+   color TrackRingC(void) const { return MixC(m_t.surface, m_t.text, 0.30); }
+   //--- une jauge horizontale : sur un theme clair, le lisere d abord, la jauge
+   //--- ensuite en retrait d un pixel - le trait reste visible tout autour.
+   void  MeterX(const int x, const int y, const int w, const int h,
+                const double ratio, const color fill) {
+      if(ThemeIsLight()) {
+         m_side.Capsule(x, y, w, h, A(TrackRingC()));
+         m_side.Meter(x + 1, y + 1, w - 2, h - 2, ratio, TrackC(), fill,
+                      MixC(fill, clrBlack, 0.25));
+      } else {
+         m_side.Meter(x, y, w, h, ratio, TrackC(), fill, MixC(fill, clrBlack, 0.25));
+      }
+   }
    color VerdictC(void) const {
       if(m_d.verdict >= 2) return m_t.red;
       if(m_d.verdict == 1) return m_t.warn;
@@ -566,7 +595,20 @@ private:
    //--- one navbar chip : LABEL then value, returns the next x -------------
    int NavChip(const int x, const string lab, const string val, const color vc,
                const int zid) {
-      const int w = 86;
+      // v3.58 : la largeur etait FIXE a 86 px et aucun texte n etait mesure -
+      // alors que le kit expose TextSizeGet. Le libelle part a x+7 vers la
+      // droite, la valeur finit a x+w-7 vers la gauche : 72 px utiles. En
+      // espagnol « MARGEN » + « $12.5K » en demandent 79, donc le « $1 » de la
+      // valeur s imprimait par-dessus le « EN » du libelle ; en francais les deux
+      // glyphes se touchaient. C est le chiffre que cette barre existe pour
+      // donner - « est-ce que je peux prendre ce trade » - illisible dans deux
+      // langues sur trois. On mesure. Plancher a 86 px : la barre anglaise ne
+      // bouge pas d un pixel.
+      int lw = 0, vw = 0, th = 0;
+      m_nav.TextSizeGet(lab, RCS_F_SMALL, "Segoe UI", lw, th, FW_BOLD);
+      m_nav.TextSizeGet(val, RCS_F_NUM,   "Consolas", vw, th, FW_BOLD);
+      int w = lw + vw + 22;                 // 7 a gauche + 8 de respiration + 7
+      if(w < 86) w = 86;
       m_nav.CapsuleStroke(x, 7, w, 20, Mix(m_t.surface, m_t.dim, 0.30),
                           Mix(m_t.surface, clrBlack, 0.10));
       m_nav.Text(x + 7, 12, lab, A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP, FW_BOLD);
@@ -693,6 +735,9 @@ private:
       if(ratio > 1.0) ratio = 1.0;
       const color rc = LimStatC();
       const int mx = W / 2 - 3, mh = 46;
+      // v3.58 : meme perte de contraste ici, sur la seule jauge visible quand le
+      // panneau est ferme. Lisere puis piste, 1 px de retrait.
+      if(ThemeIsLight()) m_rail.Capsule(mx - 1, cy + 1, 8, mh + 2, A(TrackRingC()));
       m_rail.Capsule(mx, cy + 2, 6, mh, A(TrackC()));
       const int fh = (int)(mh * ratio);
       if(fh > 1) m_rail.CapsuleGradient(mx, cy + 2 + (mh - fh), 6, fh, A(rc), Mix(rc, clrBlack, 0.25));
@@ -861,7 +906,7 @@ private:
       const string val = (applies ? DoubleToString(v, 2) + " / " + DoubleToString(cap, 1) + "%" : "N/A");
       m_side.Text(RCS_SIDE_W - 18, y, val, A(applies ? m_t.text : m_t.dim), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       y += 17;
-      m_side.Meter(18, y, RCS_SIDE_W - 36, 8, (ratio > 1.0 ? 1.0 : ratio), TrackC(), st, MixC(st, clrBlack, 0.25));
+      MeterX(18, y, RCS_SIDE_W - 36, 8, (ratio > 1.0 ? 1.0 : ratio), st);
       ZAdd(m_sideX + 18, m_sideY + y - 17, RCS_SIDE_W - 36, 26, zid);
       y += 18;
       return y;
@@ -1106,8 +1151,8 @@ private:
       y += 20;
       // v3.01 parity : the news-window METER (legacy row 8) - it fills over the
       // hour before the event and sits full while the window is open.
-      m_side.Meter(18, y, RCS_SIDE_W - 36, 8, m_d.newsMeterPct / 100.0, TrackC(),
-                   (m_d.newsActive ? m_t.red : m_t.warn), MixC((m_d.newsActive ? m_t.red : m_t.warn), clrBlack, 0.25));
+      MeterX(18, y, RCS_SIDE_W - 36, 8, m_d.newsMeterPct / 100.0,
+             (m_d.newsActive ? m_t.red : m_t.warn));
       y += 16;
       // v3.01 parity : news-trading stats (legacy row 10)
       y = KV(y, L(RCL_NEWSTRADES, "News trades"),
@@ -1388,8 +1433,8 @@ private:
                      A(tr >= 1.0 ? m_t.ok : m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
          ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_TARGET);
          y += 17;
-         m_side.Meter(18, y, RCS_SIDE_W - 36, 8, (tr > 1.0 ? 1.0 : tr), TrackC(),
-                      (tr >= 1.0 ? m_t.ok : m_t.accent), MixC(tr >= 1.0 ? m_t.ok : m_t.accent, clrBlack, 0.25));
+         MeterX(18, y, RCS_SIDE_W - 36, 8, (tr > 1.0 ? 1.0 : tr),
+                (tr >= 1.0 ? m_t.ok : m_t.accent));
          y += 16;
       }
       y += 6;
@@ -2108,7 +2153,7 @@ public:
       for(int li = 0; li < RCS_L_MAX; li++) m_L[li] = "";
       for(int ti = 0; ti < RCS_TIP_MAX; ti++) { m_tipT[ti] = ""; m_tipD[ti] = ""; }
       m_d.planLabel = "--"; m_d.phaseLabel = "--"; m_d.acctTypeLabel = "--";
-      m_d.addonsLabel = ""; m_d.cycleLabel = ""; m_d.sizeLabelFull = "--";
+      m_d.cycleLabel = ""; m_d.sizeLabelFull = "--";
       m_d.login = 0; m_d.minDays = 0; m_d.minDaysDone = 0;
       m_d.cfgNewsHigh = true; m_d.cfgNewsMed = true; m_d.cfgSound = true;
       m_d.cfgTelegram = false; m_d.cfgComfort = true; m_d.cfgDiscipline = true;

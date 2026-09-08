@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.57"
+#property version "3.58"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.57"
+#define RC_VERSION_STR "3.58"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -397,49 +397,36 @@ int RC_CapWidth(const string txt, const int h, const string font) {
 //+------------------------------------------------------------------+
 //| Rule row definition                                              |
 //+------------------------------------------------------------------+
+// v3.58 : five of the seven fields were written on EVERY refresh and read by
+// nobody, under a comment naming a consumer that no longer exists ("the ONE
+// source the Telegram message is built from" - that path died in v3.47).
+// `label` was worse : eleven English labels assigned once, while what the panel
+// actually draws comes from the i18n table - a second, contradictory list that
+// a reader could take for the source of truth. The registry now carries what it
+// is really for : the key the rule loop switches on, and the status the alarm
+// compares against its previous value.
 struct RuleRow {
     string key;        // internal id  (also used in object names)
-    string label;      // displayed left
-    double value_pct;  // 0..100 (or 0 if N/A)
-    double max_pct;    // upper bound for the bar
-    string value_text; // free-form ("35% / 70%" or "N/A")
     ENUM_RC_STATUS status;
-    bool applies; // false -> shown greyed
 };
 
 #define RC_RULE_COUNT 11
 RuleRow g_rows[RC_RULE_COUNT];
 
 void DefineRules(void) {
-    g_rows[0].key = "rule_margin_cum";
-    g_rows[0].label = "Cumulative Margin";
-    g_rows[1].key = "rule_margin_pt";
-    g_rows[1].label = "Max lot allowed"; // 1.1 : was "Per-Trade Margin" (bar hidden in indicator)
-    g_rows[2].key = "rule_risk_cum";
-    g_rows[2].label = "Cumulative Open Risk";
-    g_rows[3].key = "rule_daily_dd";
-    g_rows[3].label = "Daily DD";
-    g_rows[4].key = "rule_overall_dd";
-    g_rows[4].label = "Overall DD";
-    g_rows[5].key = "rule_target";
-    g_rows[5].label = "Profit Target";
-    g_rows[6].key = "rule_qs";
-    g_rows[6].label = "Quick Strike Ratio";
-    g_rows[7].key = "rule_hyper";
-    g_rows[7].label = "Hyperactivity (trades)";
-    g_rows[8].key = "rule_news";
-    g_rows[8].label = "News Window";
-    g_rows[9].key = "rule_msgs";
-    g_rows[9].label = "Server msgs (orders)";
-    g_rows[10].key = "rule_newsstats";          // V1.24 G2 : text-only News-Trading stats row
-    g_rows[10].label = "News Trades";
-    for (int i = 0; i < RC_RULE_COUNT; ++i) {
-        g_rows[i].value_pct = 0.0;
-        g_rows[i].max_pct = 100.0;
-        g_rows[i].value_text = "--";
+    g_rows[0].key  = "rule_margin_cum";
+    g_rows[1].key  = "rule_margin_pt";
+    g_rows[2].key  = "rule_risk_cum";
+    g_rows[3].key  = "rule_daily_dd";
+    g_rows[4].key  = "rule_overall_dd";
+    g_rows[5].key  = "rule_target";
+    g_rows[6].key  = "rule_qs";
+    g_rows[7].key  = "rule_hyper";
+    g_rows[8].key  = "rule_news";
+    g_rows[9].key  = "rule_msgs";
+    g_rows[10].key = "rule_newsstats";         // V1.24 G2 : text-only News-Trading stats row
+    for (int i = 0; i < RC_RULE_COUNT; ++i)
         g_rows[i].status = RC_STATUS_NA;
-        g_rows[i].applies = true;
-    }
 }
 
 //+------------------------------------------------------------------+
@@ -1808,17 +1795,10 @@ void BuildDeckData(RCDeckData &d) {
     // comme n'ayant jamais trade.
     d.minDaysDone   = Live_TradingDaysCount();
     d.cycleLabel    = "";
-    d.addonsLabel   = "";
-    {   // active add-ons, short list (same mask the footer prints)
-        string ad = "";
-        if ((g_addons_mask & FN_ADDON_LIFETIME_95) != 0) ad += "95% ";
-        if ((g_addons_mask & FN_ADDON_NO_MIN_DAYS) != 0) ad += "NoMinDays ";
-        if ((g_addons_mask & FN_ADDON_SWAP_FREE)   != 0) ad += "SwapFree ";
-        if ((g_addons_mask & FN_ADDON_10PCT_DD)    != 0) ad += "10%DD ";
-        if ((g_addons_mask & FN_ADDON_DOUBLE_UP)   != 0) ad += "DoubleUp ";
-        if ((g_addons_mask & FN_ADDON_BI_WEEKLY)   != 0) ad += "BiWeekly ";
-        d.addonsLabel = (StringLen(ad) > 0 ? ad : Tr("addons_none"));
-    }
+    // v3.58 : a six-branch add-on list was built here TWICE A SECOND and thrown
+    // away - its only reader, the footer of the legacy panel, died in v3.06. The
+    // list the panel really draws is built thirty lines below, from its own
+    // table. The comment ("same mask the footer prints") outlived the footer.
     d.cfgNewsHigh   = g_eff_news_high;
     d.cfgNewsMed    = g_eff_news_med;
     d.cfgSound      = g_eff_sound;
@@ -2596,7 +2576,6 @@ void ShellRuleAlerts(const RCDeckData &d) {
     int worst_evt = 0;   // v3.55 : 0 none, 1 back to OK, 2 warn, 3 breach
     for (int i = 0; i < RC_RULE_COUNT; ++i) {
         double used = -1.0, cap = 0.0;
-        string txt = "";
         const string k = g_rows[i].key;
         if (k == "rule_margin_cum")      { used = d.marginPct; cap = d.marginCap; }
         // rule_margin_pt was a TEXT row in the legacy panel (status N/A, never
@@ -2614,10 +2593,6 @@ void ShellRuleAlerts(const RCDeckData &d) {
         else if (k == "rule_msgs")       { used = (double)d.msgsToday;   cap = (double)d.msgsCap; }
         else continue;                   // target / news rows : informational, never alert
         if (used < 0.0 || cap <= 0.0) { g_last_status[i] = RC_STATUS_NA; continue; }
-        txt = FormatPct(used) + " / " + FormatPct(cap);
-        g_rows[i].value_pct  = used;     // the registry stays the ONE source the
-        g_rows[i].max_pct    = cap;      // Telegram message is built from
-        g_rows[i].value_text = txt;
         // The legacy rows did NOT share one threshold : risk / daily / overall
         // warned at 70 %, a TRAILING overall at 50 % (it is the account killer),
         // hyper / msgs at 75 %. Flattening everything to 80 % made every alert
@@ -3669,13 +3644,18 @@ void ComputeNewsStats(void) {
     // not at all, so the card counts HIGH+MEDIUM events gated by the official
     // table : conservative estimate, FN dashboard authoritative. Keep EVERY
     // event (any level) with name/importance for the DIAG journal lines below.
+    // v3.58 : les quatre tableaux etaient agrandis d UN cran par evenement, donc
+    // potentiellement quatre reallocations et quatre recopies a chaque tour d une
+    // boucle qui peut compter des centaines d evenements. On reserve une fois la
+    // borne connue - le nombre d entrees du calendrier - et on remplit.
     datetime evt[]; string evtccy[]; string evtname[]; int evtimp[]; int ne = 0;
-    for (int i = 0; i < ArraySize(cv); ++i) {
+    const int ncv = ArraySize(cv);
+    ArrayResize(evt, ncv); ArrayResize(evtccy, ncv);
+    ArrayResize(evtname, ncv); ArrayResize(evtimp, ncv);
+    for (int i = 0; i < ncv; ++i) {
         MqlCalendarEvent ev; if (!CalendarEventById(cv[i].event_id, ev)) continue;
         if (ev.importance == CALENDAR_IMPORTANCE_NONE) continue; // holidays etc.
         MqlCalendarCountry c; if (!CalendarCountryById(ev.country_id, c)) continue;
-        ArrayResize(evt, ne + 1); ArrayResize(evtccy, ne + 1);
-        ArrayResize(evtname, ne + 1); ArrayResize(evtimp, ne + 1);
         evt[ne] = cv[i].time; evtccy[ne] = c.currency;
         evtname[ne] = ev.name; evtimp[ne] = (int)ev.importance; ne++;
     }
@@ -3702,11 +3682,18 @@ void ComputeNewsStats(void) {
             const bool mapped = NewsCcyAffectsSymbol(dsym, evtccy[k]); // official FN instrument<->currency table
             const string impl = (evtimp[k] == (int)CALENDAR_IMPORTANCE_HIGH ? "HIGH" :
                                  (evtimp[k] == (int)CALENDAR_IMPORTANCE_MODERATE ? "MED" : "LOW"));
-            ArrayResize(diag, ndiag + 1);
-            diag[ndiag++] = dsym + " deal " + TimeToString(dt, TIME_DATE | TIME_SECONDS) +
+            // v3.58 : cette ligne etait CONSTRUITE a chaque rencontre deal x
+            // evenement - deux TimeToString et huit concatenations - pour un seul
+            // lecteur, derriere un drapeau dont la valeur par defaut est false.
+            // Le COMPTEUR, lui, sert a la signature du cache : il compte toujours.
+            if (InpVerboseLog) {
+                ArrayResize(diag, ndiag + 1);
+                diag[ndiag] = dsym + " deal " + TimeToString(dt, TIME_DATE | TIME_SECONDS) +
                             " ~ evt " + TimeToString(evt[k], TIME_DATE | TIME_MINUTES) + " " + evtccy[k] +
                             " " + impl + " '" + evtname[k] + "' (FN-table " + (mapped ? "y" : "n") + ") -> " +
                             (lvl_ok && mapped ? "COUNTED" : (!mapped ? "skipped (not FN-mapped)" : "skipped (not HIGH)"));
+            }
+            ndiag++;
             if (lvl_ok && mapped && !innews) { // count rule : HIGH event mapped per the FN-confirmed table (v2.02.05 FIX 2c)
                 innews = true;
                 minfo = dsym + " deal " + TimeToString(dt, TIME_DATE | TIME_SECONDS) +
@@ -3760,7 +3747,7 @@ void ComputeNewsStats(void) {
         s_news_sig = sig;
         PrintFormat("RC news-card : %d matched, %d winning, win-pnl %.2f, eligible %.2f (window +/-%d min, scan from %s, %d deal~event encounters)",
                     npos, win_n, win_pnl, g_news_eligible, g_profile.news_window_minutes, TimeToString(from, TIME_DATE), ndiag);
-        for (int k = 0; k < ndiag; ++k)
+        for (int k = 0; k < ArraySize(diag); ++k)
             Print("RC news-scan : ", diag[k]);
         for (int k = 0; k < npos; ++k)
             PrintFormat("RC news-trade %d/%d : %s  pnl %.2f%s", k + 1, npos, posinfo[k], pospnl[k],
@@ -7014,26 +7001,13 @@ double DetectStartingBalance(void) {
     return (bal > 0.0 ? bal : 1.0);
 }
 // V1.28 (item 6) : lot decimals from the symbol's volume step (up to 4).
-int VolDigits(const string sym) {
-    const double step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
-    if (step <= 0.0)   return 2;
-    if (step >= 1.0)   return 0;
-    if (step >= 0.1)   return 1;
-    if (step >= 0.01)  return 2;
-    if (step >= 0.001) return 3;
-    return 4;
-}
-// V1.28 (item 4) : short month name for the "chic" cycle-date display.
-string MonthShort(const int m) {
-    if (m < 1 || m > 12) return "?";
-    // V1.29 F3 : localized short month names (was EN-only on the FR/ES date picker).
-    string en[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-    string fr[12] = {"Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"};
-    string es[12] = {"Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"};
-    if (g_lang == 1) return fr[m - 1];
-    if (g_lang == 2) return es[m - 1];
-    return en[m - 1];
-}
+// v3.58 : VolDigits vivait ici - jamais appelee, et DOUBLON de LotDigits avec un
+// resultat DIFFERENT : sur un pas crypto de 0,00001 LotDigits rend 5 et celle-ci
+// rendait 4, ce qui affiche « 0.00 » a la place du lot. Deux reponses au meme
+// calcul dans le meme fichier, dont une fausse et morte.
+// v3.58 : MonthShort vivait ici - trois tableaux de douze mois traduits, pour un
+// selecteur de date « chic » qui n a jamais existe dans la coquille. Le cycle se
+// regle par trois compteurs annee / mois / jour, en chiffres.
 // V1.28 : days in a month (leap-aware) so the cycle-date picker never produces
 // an invalid date like "31 Feb".
 string PhaseLabelLocal(int ph) {

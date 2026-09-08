@@ -532,6 +532,21 @@ def run(root):
                ("%d sources comparees" % len(srcs)) if not stale
                else "plus recents que le .ex5 : " + " ".join(stale))
 
+    # 11. LE CHIFFRE DU README EST TENU PAR LE GATE. Il annoncait « Eleven
+    #     static checks » pendant que le gate en executait 21 : il a derive a
+    #     chaque lot, parce que rien ne le tenait. Un chiffre faux sur la
+    #     premiere page d un depot public est ce qui decide si le lecteur fait
+    #     confiance au reste. Ce controle est le DERNIER, et il se compte
+    #     lui-meme (d ou le +1).
+    rd = read(root, "README.md")
+    if rd is not None:
+        mm = re.search(r'^\s*(\d+)\s+static checks\b', rd, re.M)
+        want = len(results) + 1
+        report("compte du README", bool(mm) and int(mm.group(1)) == want,
+               ("%d controles annonces" % want) if mm and int(mm.group(1)) == want
+               else ("README : aucun « N static checks »" if not mm
+                     else "README dit %s, le gate en execute %d" % (mm.group(1), want)))
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

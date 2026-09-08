@@ -19,7 +19,7 @@ folder that holds the includes and the resource in those exact places.
 |---|---|
 | Build tree (MT5 data folder) | `%APPDATA%\MetaQuotes\Terminal\<TERMINAL-ID>\MQL5\` |
 | Compiled source | `…\MQL5\Indicators\mql5_market\RiskCockpit\RiskCockpit.mq5` |
-| Includes (all four) | `…\MQL5\Libraries\` : `CChallengeProfileCatalog.mqh`, `CPyramidEngine.mqh`, `JR_CanvasUI.mqh`, `RC_ShellUI.mqh` |
+| Includes (all five) | `…\MQL5\Libraries\` : `CChallengeProfileCatalog.mqh`, `CPyramidEngine.mqh`, `JR_CanvasUI.mqh`, **`RC_Math.mqh`**, `RC_ShellUI.mqh` |
 | Embedded resource | `RiskCockpit_logo.bmp`, next to the `.mq5` |
 | Output | `RiskCockpit.ex5`, same folder |
 | Companion service | `…\MQL5\Services\RCNewsFeeder.mq5` |
@@ -55,7 +55,13 @@ including the compile, the commit and the push.)
 | `Libraries/RC_ShellUI.mqh` | `MQL5\Libraries\RC_ShellUI.mqh` |
 | `Libraries/CChallengeProfileCatalog.mqh` | idem |
 | `Libraries/CPyramidEngine.mqh` | idem |
+| `Libraries/RC_Math.mqh` | idem |
+| `Scripts/RC_SelfTest.mq5` | `MQL5\Scripts\RC_SelfTest.mq5` |
 | `Services/RCNewsFeeder.mq5` | `MQL5\Services\RCNewsFeeder.mq5` |
+
+*(v3.58 : cette table en oubliait deux — `RC_Math.mqh`, qui porte les fonctions pures et
+le sixième `#include` de la source, et le script de self-test. Reconstruire l'arbre depuis
+l'ancienne table donnait un arbre qui ne compile pas.)*
 
 ### Compiling (autonomous, no keyboard F7)
 
@@ -85,6 +91,65 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 ## 2. Log
 
 ## 3.x — the v3 shell becomes the interface
+
+### v3.58.70 — 7e lot : la lisibilité des jauges, et le code qui tournait pour personne
+
+- 🔴 **Sur les trois thèmes CLAIRS, la piste des jauges rendait le niveau
+  illisible.** La recette était « mélanger le FOND vers le NOIR » — ce qui ne
+  donne une piste discrète que si le fond est sombre. Sur un thème clair la
+  piste devenait un gris moyen (#9CA4A2) pendant que les remplissages des
+  thèmes clairs sont, eux, des couleurs **sombres**. Contraste rempli/vide
+  mesuré : **ambre 1,19:1**, vert 1,41:1, rouge 2,06:1 — le minimum pour un
+  élément graphique porteur d'information est **3:1**, et le **même composant
+  fait 10,2:1 en sombre**. Une jauge à 15 % et la même à 85 % renvoyaient la
+  même impression : on perdait le **niveau**, c'est-à-dire exactement ce que la
+  jauge existe pour donner. La jauge verticale du rail — **la seule lecture
+  permanente quand le panneau est fermé** — subissait la même perte. En thème
+  clair, la piste est désormais la surface elle-même (3,2 à 4,8:1 avec les trois
+  remplissages) et un liseré la délimite du panneau.
+- **La pastille MARGE/ROOM de la barre du haut se chevauchait en FR et en ES.**
+  Largeur **fixe** à 86 px, **aucun texte mesuré** — alors que le kit expose
+  `TextSizeGet`. Le libellé part à gauche, la valeur finit à droite : 72 px
+  utiles. « MARGEN » + « $12.5K » en demandent 79 : le « $1 » de la valeur
+  s'imprimait **par-dessus** le « EN » du libellé ; en français, les deux
+  glyphes se touchaient. C'est le chiffre que cette barre existe pour donner —
+  *est-ce que je peux prendre ce trade* — illisible dans deux langues sur trois.
+  La pastille se mesure ; plancher à 86 px, donc la barre anglaise ne bouge pas.
+- **Cinq des sept champs du registre des règles étaient écrits à chaque
+  rafraîchissement et lus par personne**, sous un commentaire qui nommait un
+  consommateur supprimé en v3.47 (« la ONE source dont le message Telegram est
+  construit »). Pire, `label` portait onze libellés **anglais** — une seconde
+  liste, contradictoire avec la table i18n dont le panneau tire réellement ses
+  textes, qu'un relecteur pouvait prendre pour la source de vérité. Le registre
+  ne porte plus que ce à quoi il sert : la clé et le statut.
+- **Une liste d'add-ons était construite deux fois par seconde puis jetée** ; son
+  seul lecteur, le pied de l'ancien panneau, est mort en v3.06. Le commentaire
+  qui le nommait, lui, avait survécu.
+- **`VolDigits` et `MonthShort` : deux fonctions complètes, jamais appelées.**
+  La première **duplique** `LotDigits` avec un résultat **différent** : sur un
+  pas crypto de 0,00001 l'une rend 5 et l'autre 4 — c'est-à-dire « 0.00 » à la
+  place du lot. Deux réponses au même calcul dans le même fichier, dont une
+  fausse et morte.
+- **`ComputeNewsStats` réallouait quatre tableaux d'un cran par événement**
+  (des centaines par balayage) et **construisait une ligne de journal à chaque
+  rencontre deal × événement** — deux `TimeToString` et huit concaténations —
+  pour un unique lecteur, derrière un drapeau dont la valeur par défaut est
+  `false`. Réservation unique, journal construit seulement quand quelqu'un le lit.
+- **Deux chiffres de documentation avaient dérivé** : la section « Build
+  topology » — qui se présente comme *la première chose à lire après un clone* —
+  annonçait « Includes (all four) » pour **cinq** includes (`RC_Math.mqh`
+  manquait, ainsi que le self-test dans la table de synchronisation :
+  reconstruire l'arbre depuis cette table donnait un arbre qui **ne compile
+  pas**) ; et le README annonçait « Eleven static checks » quand le gate en
+  exécutait 21.
+
+⭐ **Le 22e contrôle tient ce dernier chiffre** : il compare le nombre écrit dans
+le README au nombre de contrôles réellement exécutés. Il se place en dernier et
+se compte lui-même. Un chiffre faux sur la première page d'un dépôt public est
+ce qui décide si le lecteur fait confiance au reste.
+
+**Gate : 22 contrôles, 0 en échec. Contrôles positifs : 20/20 + 2 non-couvertures
+déclarées. Compilation : 0 erreur, 0 avertissement.**
 
 ### v3.57.69 — 6e lot : ce que l'écran DIT
 

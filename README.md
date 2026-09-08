@@ -82,10 +82,13 @@ Published **free** on the MQL5 Market. More at **[javadrazavi.fr](https://javadr
 
 ## Checks
 
-Eleven static checks answer what the MQL5 compiler cannot: a click zone nobody
-handles, a label that can never be translated, a setting that no longer does
-anything, a personal account number left in a public file. None of those break
-a build.
+22 static checks answer what the MQL5 compiler cannot: a click zone nobody
+handles, a tooltip the host can never translate, a guard that guards nothing,
+a global written and read by no one, a setting that no longer does anything, a
+personal account number left in a public file. None of those break a build.
+
+That number is not maintained by hand: the last check compares it to the number
+of checks actually run, and fails when the two drift apart.
 
 ```
 python tools/audit.py           # one command, one verdict (exit 0 / 1)
