@@ -86,6 +86,75 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.57.69 — 6e lot : ce que l'écran DIT
+
+- 🔴 **La liste « À VENIR » annonçait « règle 40% » là où le profil VOIDE
+  100 % du profit.** Le libellé était **écrit en dur** alors que la même section
+  lit la vraie part du profil quinze pixels plus haut. Trois profils du
+  catalogue mettent cette part à **zéro** — FTMO 2-Step funded, E8, MFF : le
+  profit réalisé dans la fenêtre news est **entièrement annulé**. Le panneau
+  affichait donc simultanément, à dix-sept pixels d'écart : « ACTIVE - profit
+  éligible 0% », « elig +0.00 », « seuls 0% du profit comptent » — et, juste
+  en dessous, chaque événement rouge étiqueté **« règle 40% »**. Sur la surface
+  faite pour décider si on prend le trade, et **dans le sens qui minimise la
+  pénalité**. Le chiffre vient maintenant du profil.
+- **Un seul clic refusé effaçait définitivement l'identité du verrou.** Le
+  bandeau affiche « VERROU DISCIPLINE — Verrou journalier — 45 min restantes ».
+  Réflexe du débutant : cliquer la croix pour retirer l'outil. Le clic est
+  refusé — c'est voulu — mais le drapeau qui le note n'était remis à zéro **que
+  dans `Init()`**, donc à l'attache. À partir de ce clic, et pour le reste de la
+  session, le bandeau ne disait plus que « VERROUILLÉ — ce contrôle est
+  désactivé ». Le trader avait perdu **quel** verrou le tient et **combien** de
+  temps il reste, sur la seule surface conçue pour être impossible à manquer.
+  Un refus est un **accusé de réception** : il dure quatre secondes, puis le
+  bandeau redit ce qui compte.
+- **Le manuel garantissait que le son est « toujours actif sur un plan prop ».**
+  Ni la bascule (dessinée déverrouillée) ni l'hôte (qui l'inverse sans le
+  moindre test) ne le font. La phrase avait été reprise de l'entrée du dessous —
+  celle des outils de risque, où la promesse **est** tenue par un verrou — sans
+  reprendre le verrou. C'est la **documentation** qui est corrigée, pas le code :
+  imposer du son à quelqu'un qui a besoin de silence n'est pas le rôle d'un
+  outil consultatif, et les alertes à l'écran, elles, ne s'arrêtent jamais.
+- **Quatre chaînes échappaient à l'i18n.** Un `" en "` **français en dur** au
+  milieu de la ligne TILT — un anglophone lisait « 6 en 15 min » ; un `"perte"`
+  **français en dur** dans le conseiller de panier, à côté d'un `" add "`
+  **anglais en dur**, sur une ligne pourtant assemblée fragment par fragment
+  avec `Tr()` ; et « LOT » écrit en dur dans le rail et la table flottante là
+  où la navbar dit « LOTE » — pour **le même nombre**.
+- **L'annotation SL posée sur le graphique était anglaise en dur — mais son
+  suffixe d'alerte, lui, était traduit.** La seule ligne d'avertissement dessinée
+  sur le prix s'affichait donc **mi-anglaise mi-française**. Et la version
+  entièrement traduite existait déjà : elle était écrite dans la propriété
+  `OBJPROP_TEXT` d'une ligne horizontale **masquée**, que personne n'affiche
+  jamais.
+- 🔴 **Onze contrôles survolables n'avaient jamais eu de traduction poussée.**
+  La coquille porte un texte de repli **en anglais** par zone ; l'hôte pousse
+  les trois langues par-dessus. Onze zones n'avaient aucun accesseur : leur
+  aide restait en anglais en français comme en espagnol — dont **l'auto-verrou,
+  qui arme un STOP de plusieurs heures**, et sa libération. Un accesseur par
+  zone (jamais une plage : une insertion ne peut plus décaler la série).
+- **Deux orthographes espagnoles côte à côte.** « GUIA DE USO » se dessinait à
+  vingt-trois pixels de « GUÍA DE USO » — les deux mêmes mots, deux graphies,
+  l'une sous l'autre. Et l'onglet « AVANCE » (une progression) est devenu
+  « AVANCÉ », le nom que le manuel du même produit lui donne déjà.
+
+⭐ **Le gate a appris la classe** (21e contrôle) : *une infobulle que l'hôte ne
+peut pas atteindre reste en anglais, partout*. Il développe les accesseurs de la
+coquille et les boucles de l'hôte, puis exige que **chaque** zone de `TipText`
+soit poussée. Il a d'abord dit NON sur deux zones réellement poussées — par un
+indice littéral, une forme que mon motif ne lisait pas : **c'est l'instrument
+qui a été corrigé, pas le contrôle qui a été désactivé.**
+
+⚖️ **Ce que je n'ai PAS fait** : de contrôle automatique des accents. La sonde a
+mesuré 26 candidats sur les 364 entrées ; **24 étaient des faux positifs de mon
+propre dictionnaire** (« posiciones » et « operaciones » perdent leur accent au
+pluriel, « verrouille » est ici un verbe). Un contrôle dont je ne peux pas
+garantir le dictionnaire dirait NON à tort, et un gate qui crie au loup finit
+par être ignoré. Les deux vrais écarts sont corrigés à la main.
+
+**Gate : 21 contrôles, 0 en échec. Contrôles positifs : 19/19 + 2 non-couvertures
+déclarées. Compilation : 0 erreur, 0 avertissement.**
+
 ### v3.56.68 — 5e lot : l'état, ce qui est chargé une fois et jamais rechargé
 
 - 🔴 **Un aller-retour de phase effaçait le 2e strike, définitivement.**

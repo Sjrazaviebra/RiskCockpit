@@ -299,7 +299,7 @@ enum ERCLabel {
    RCL_COOLDOWN_T, RCL_LOSSES, RCL_LOCK_BLOCKED,
    RCL_LIM_LOCKED, RCL_LOT_BELOWMIN, RCL_LOT_OVERBUD, RCL_LOT_MARGBOUND,
    RCL_LOT_MARGSHORT, RCL_LOT_REDUCE, RCL_NEWS_NORULE, RCL_HELP_MANUAL,
-   RCL_NEWS_SRCDOWN, RCL_BAND_WKNDNOW
+   RCL_NEWS_SRCDOWN, RCL_BAND_WKNDNOW, RCL_TILT_IN
 };
 struct RCZone { int x, y, w, h, id; };
 
@@ -393,6 +393,7 @@ private:
    bool       m_pendUnlock;      // host consumes : RELEASE an active self-lock
    bool       m_lockArm;         // first click : the button asks for confirmation
    bool       m_lockBlocked;     // v3.34 : a click was refused because of the lock
+   datetime   m_lockBlockedAt;   // v3.57 : WHEN - the notice is transient
    bool       m_maxEditOn;       // second copy box (max lot)
    int        m_maxEditX, m_maxEditY;
    string     m_L[RCS_L_MAX];    // i18n slots (empty = the built-in FR default is used)
@@ -715,7 +716,9 @@ private:
       const color lc = (m_d.lotZero ? m_t.red : (m_d.lotCapped ? m_t.warn : m_t.accent));
       const string ls = (m_d.sugLot > 0.0 ? DoubleToString(m_d.sugLot, m_d.lotDigits) : "--");
       m_rail.Text(W / 2, cy + 6, ls, A(lc), RCS_F_BODY, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
-      m_rail.Text(W / 2, cy + 28, "LOT", A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
+      // v3.57 : la navbar dit « LOTE » en espagnol pour CE nombre, le rail disait
+      // « LOT ». Meme cle, un seul mot.
+      m_rail.Text(W / 2, cy + 28, L(RCL_NAV_LOT, "LOT"), A(m_t.dim), RCS_F_SMALL, "Segoe UI", TA_CENTER | TA_TOP, FW_BOLD);
       ZAdd(m_railX, m_railY + cy, W, ch, RZ_RAIL_LOT);
       // --- NEWS : minutes to the next RESTRICTED event + source tick ------
       cy = CellY(RZ_RAIL_NEWS); ch = CellH(RZ_RAIL_NEWS);
@@ -1122,7 +1125,16 @@ private:
          const color nc = (m_d.newsRestr[i] ? m_t.red : m_t.warn);
          m_side.Text(18, y, ShortToString((ushort)(m_d.newsRestr[i] ? 0x25BC : 0x25C6)), A(nc), RCS_F_SMALL, "Segoe UI", TA_LEFT | TA_TOP);
          m_side.Text(36, y, m_d.newsWhen[i] + "  " + m_d.newsCcy[i], A(m_t.text), RCS_F_NUM, "Consolas", TA_LEFT | TA_TOP);
-         m_side.Text(RCS_SIDE_W - 18, y, (m_d.newsRestr[i] ? L(RCL_RULE40, "40% rule") : L(RCL_CHECKFN, "check FN")),
+         // v3.57 : ce libelle etait EN DUR a « 40% rule » alors que la meme
+         // section lit la vraie part 15 px plus haut. Trois profils du catalogue
+         // mettent cette part a ZERO - FTMO / E8 / MFF funded ANNULENT le profit
+         // de la fenetre. Le trader lisait « regle 40% » sur la surface faite
+         // pour decider s il prend le trade, et croyait garder 40 % de son gain.
+         // Le sens de l erreur MINIMISAIT la penalite.
+         m_side.Text(RCS_SIDE_W - 18, y,
+                     (m_d.newsRestr[i]
+                      ? DoubleToString(m_d.newsSharePct, 0) + "% " + L(RCL_RULE40, "rule")
+                      : L(RCL_CHECKFN, "check FN")),
                      A(nc), RCS_F_SMALL, "Segoe UI", TA_RIGHT | TA_TOP);
          y += 17;
       }
@@ -1174,7 +1186,10 @@ private:
                   A(m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       y += 18;
       m_side.Text(18, y, L(RCL_TILT_WIN, "Tilt window"), A(m_t.dim), RCS_F_BODY, "Segoe UI", TA_LEFT | TA_TOP);
-      m_side.Text(RCS_SIDE_W - 18, y, IntegerToString(m_d.tiltTrades) + " en " +
+      // v3.57 : ce " en " etait un mot FRANCAIS en dur au milieu du chemin i18n -
+      // un utilisateur anglais ou espagnol lisait « 6 en 15 min ».
+      m_side.Text(RCS_SIDE_W - 18, y, IntegerToString(m_d.tiltTrades) +
+                  " " + L(RCL_TILT_IN, "in") + " " +
                   IntegerToString(m_d.tiltWinMin) + " min" + (m_d.tiltN > 0 ? "  (max " + IntegerToString(m_d.tiltN) + ")" : ""),
                   A(m_d.discTilt ? m_t.warn : m_t.text), RCS_F_NUM, "Consolas", TA_RIGHT | TA_TOP);
       ZAdd(m_sideX + 18, m_sideY + y - 2, RCS_SIDE_W - 36, 18, RZ_TIP_DISC_TILT);
@@ -1884,7 +1899,7 @@ private:
          m_float.Text(8 + cw / 2, qy + 11,
                       (m_d.roomMoney >= 0.0 ? DoubleToString(m_d.roomMoney, 0) + " $" : "--"),
                       A(rc2), RCS_F_NUM, "Consolas", TA_CENTER | TA_TOP, FW_BOLD);
-         m_float.Text(8 + cw + cw / 2, qy, "LOT", A(m_t.dim), RCS_F_SMALL,
+         m_float.Text(8 + cw + cw / 2, qy, L(RCL_NAV_LOT, "LOT"), A(m_t.dim), RCS_F_SMALL,
                       "Segoe UI", TA_CENTER | TA_TOP);
          m_float.Text(8 + cw + cw / 2, qy + 11,
                       (m_d.sugLot > 0.0 ? DoubleToString(m_d.sugLot, m_d.lotDigits) : "--"),
@@ -1987,7 +2002,12 @@ private:
                IntegerToString(m_d.tiltWinMin) + " " + L(RCL_BAND_SLOW, "min : slow down");
       // v3.34 : a refused click must SAY it was refused - a control that does
       // nothing and explains nothing reads as a bug.
-      if(m_lockBlocked && m_d.discLocked)
+      // v3.57 : this flag was cleared ONLY in Init(), i.e. at attach. One refused
+      // click during a lock replaced the band's message FOR GOOD : the trader
+      // lost WHICH lock holds him and HOW LONG is left, on the one surface built
+      // to be impossible to miss. A refusal is an ACKNOWLEDGEMENT - it shows for
+      // a few seconds, then the band says again what matters.
+      if(m_lockBlocked && m_d.discLocked && TimeCurrent() - m_lockBlockedAt <= 4)
          msg = L(RCL_LOCK_BLOCKED, "LOCKED - this control is disabled until the lock ends");
       // v3.54 : l'encre etait derivee du FOND DU THEME. Sur un theme sombre cela
       // donne du sombre sur un bandeau rouge, ce qui marche ; sur les trois
@@ -2074,7 +2094,7 @@ public:
       m_relayout = false;
       m_pendCfg = 0; m_cfgTab = 0; m_pendStepRow = -1; m_pendStepDir = 0; m_pendCas = -1;
       m_pendAddon = -1; m_pendCyc = -1; m_pendSelfLock = false; m_lockArm = false;
-      m_lockBlocked = false;
+      m_lockBlocked = false; m_lockBlockedAt = 0;
       m_pendUnlock = false;
       m_maxEditOn = false; m_maxEditX = 0; m_maxEditY = 0;
       m_d.addonN = 0; m_d.violMargin = false; m_d.violRisk = false; m_d.beLines = false;
@@ -2213,6 +2233,22 @@ public:
       return (i == 0 ? RZ_FLT_QLIM : (i == 1 ? RZ_FLT_QLOT : RZ_FLT_QNEWS));
    }
    int ZidCfg(const int i)   const { return RZ_CFG_PAL + i; }         // 0..9
+   //--- v3.57 : ONZE zones survolables avaient un repli anglais dans TipText et
+   //--- aucun accesseur : l hote ne pouvait PAS les traduire, donc leur aide
+   //--- restait en anglais en FR et en ES - dont l auto-verrou et sa liberation,
+   //--- les quatre onglets de reglages, et les deux cases de violation. Un id
+   //--- par accesseur : une insertion dans l enum ne peut pas decaler la serie.
+   int ZidCfgTab0(void) const { return RZ_CFG_TAB0; }
+   int ZidCfgTab1(void) const { return RZ_CFG_TAB1; }
+   int ZidCfgTab2(void) const { return RZ_CFG_TAB2; }
+   int ZidCfgTab3(void) const { return RZ_CFG_TAB3; }
+   int ZidSelfLock(void) const { return RZ_SELFLOCK; }
+   int ZidUnlock(void)   const { return RZ_UNLOCK; }
+   int ZidHyper(void)    const { return RZ_TIP_HYPER; }
+   int ZidMViol(void)    const { return RZ_CFG_MVIOL; }
+   int ZidRViol(void)    const { return RZ_CFG_RVIOL; }
+   int ZidBeTip(void)    const { return RZ_CFG_BE; }
+   int ZidMaxLotEdit(void) const { return RZ_MAXLOT_EDIT; }
    int ZidCptTip(void) const { return RZ_TIP_CPT; }
    int ZidHelpTip(void) const { return RZ_TIP_HELP; }
    //--- how many times the canvases have been (re-)created. The host watches
@@ -2391,14 +2427,16 @@ public:
       // stays live - rail navigation, folding, tooltips, the copy boxes - and
       // so does the release path, which is the lock's own legitimate exit.
       if(m_d.discLocked) {
-         if(hit == RZ_NAV_KILL) { m_lockBlocked = true; RenderAll(); return true; }
+         if(hit == RZ_NAV_KILL) { m_lockBlocked = true; m_lockBlockedAt = TimeCurrent();
+                                  RenderAll(); return true; }
          if((hit >= RZ_STEP_DEC0 && hit <= RZ_STEP_INC9) ||
             (hit >= RZ_CAS_PREV0 && hit <= RZ_CAS_NEXT4) ||
             (hit >= RZ_ADDON0    && hit <= RZ_ADDON6)    ||
             (hit >= RZ_CFG_PAL   && hit <= RZ_CFG_RTOOLS && hit != RZ_CFG_PAL &&
              hit != RZ_CFG_MODE  && hit != RZ_CFG_LANG)  ||
             hit == RZ_CFG_MVIOL  || hit == RZ_CFG_RVIOL   || hit == RZ_SELFLOCK) {
-            m_lockBlocked = true; RenderAll(); return true;
+            m_lockBlocked = true; m_lockBlockedAt = TimeCurrent();
+            RenderAll(); return true;
          }
       }
       // any click elsewhere disarms a pending lock confirmation : an armed

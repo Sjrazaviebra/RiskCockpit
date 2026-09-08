@@ -331,6 +331,64 @@ def run(root):
            ("%d globaux, tous relus" % len(g_decl)) if not g_dead
            else "ecrits et jamais lus : " + " ".join(g_dead))
 
+    # 8e. UNE INFOBULLE QUE L HOTE NE PEUT PAS ATTEINDRE RESTE EN ANGLAIS,
+    #     partout. La coquille porte un repli anglais EN DUR par zone ; l hote
+    #     pousse les trois langues par-dessus. Une zone sans accesseur, ou que
+    #     l hote ne pousse pas, garde ce repli comme SEUL texte - et rien ne le
+    #     dit : ni le compilateur, ni le controle des libelles, qui ne regarde
+    #     pas les infobulles. Onze zones etaient dans cet etat, dont l auto-
+    #     verrou, qui arme un STOP de plusieurs heures.
+    zorder2 = re.findall(r'\b(RZ_\w+)\b',
+                         re.sub(r'//[^\n]*', '',
+                                re.search(r'enum ERCZone \{(.*?)\};', shell, re.S).group(1)))
+    zpos = dict((n, i) for i, n in enumerate(zorder2))
+    # accesseurs : nom -> (base, "scalaire" | "plage") ou liste explicite
+    acc1 = dict(re.findall(r'int\s+(Zid\w+)\(void\)\s*const\s*\{\s*return\s+(RZ_\w+)\s*;', shell))
+    accN = dict(re.findall(r'int\s+(Zid\w+)\(const int i\)\s*const\s*\{\s*return\s+(RZ_\w+)\s*\+\s*i\s*;', shell))
+    accL = {}
+    for nm, body in re.findall(r'int\s+(Zid\w+)\(const int i\)\s*const\s*\{(.*?)\}', shell, re.S):
+        ids = re.findall(r'\b(RZ_\w+)\b', body)
+        if nm not in accN and ids:
+            accL[nm] = ids
+    covered = set()
+    for m in re.finditer(r'SetTip\(\s*g_shell\.(Zid\w+)\(\s*\)', host):
+        if m.group(1) in acc1:
+            covered.add(acc1[m.group(1)])
+    # indices litteraux : g_shell.SetTip(g_shell.ZidPanel(0), ...)
+    for m in re.finditer(r'SetTip\(\s*g_shell\.(Zid\w+)\(\s*(\d+)\s*\)', host):
+        nm, k = m.group(1), int(m.group(2))
+        if nm in accL and k < len(accL[nm]):
+            covered.add(accL[nm][k])
+        elif nm in accN:
+            b = zpos.get(accN[nm], -1)
+            if 0 <= b + k < len(zorder2):
+                covered.add(zorder2[b + k])
+    for m in re.finditer(r'for\s*\(int i = 0; i < ([^;]+); \+\+i\)\s*g_shell\.SetTip\('
+                         r'g_shell\.(Zid\w+)\(i\)', host):
+        bound, nm = m.group(1).strip(), m.group(2)
+        if nm in accL:
+            covered |= set(accL[nm])
+            continue
+        if nm not in accN:
+            continue
+        if bound.isdigit():
+            n = int(bound)
+        else:                                   # borne = un accesseur de l enum
+            mm = re.search(r'int\s+' + re.escape(bound.split('.')[-1].rstrip('()')) +
+                           r'\(void\)\s*const\s*\{\s*return\s+(RZ_\w+)\s*-\s*(RZ_\w+)', shell)
+            n = (zpos[mm.group(1)] - zpos[mm.group(2)] + 1) if mm else 0
+        b = zpos.get(accN[nm], -1)
+        for k in range(n):
+            if 0 <= b + k < len(zorder2):
+                covered.add(zorder2[b + k])
+    tip_body = re.search(r'bool\s+TipText\(.*?\n   \}', shell, re.S)
+    tip_cases = re.findall(r'case (RZ_\w+):', tip_body.group(0)) if tip_body else []
+    tip_orph = [c for c in tip_cases if c not in covered]
+    report("infobulles traduisibles", bool(tip_cases) and not tip_orph,
+           ("%d zones, toutes poussees" % len(tip_cases)) if tip_cases and not tip_orph
+           else ("TipText introuvable" if not tip_cases
+                 else "anglais force : " + " ".join(tip_orph)))
+
     # 9. PUBLIC repo : nothing personal, in the sources or in the binary.
     #    The binary check needs its positive control first.
     # One or TWO backslashes : source code escapes them, markdown and comments

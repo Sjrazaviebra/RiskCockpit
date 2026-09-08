@@ -122,6 +122,14 @@ def mut_deadglob(b):
                      b'bool g_alerts_armed = false;\r\ndatetime g_dead_anchor = 0;', 1)
 
 
+def mut_tiporph(b):
+    # Retirer la poussee d une infobulle : la zone garde le repli ANGLAIS code
+    # dans la coquille comme seul texte, en francais comme en espagnol, et rien
+    # ne le signale. Onze zones ont vecu comme ca.
+    return b.replace(b'g_shell.SetTip(g_shell.ZidSelfLock(),  Tr("tipz_selflock"));',
+                     b'', 1)
+
+
 CASES = [
     ("BOM unique", IND, mut_bom),
     ("reglages actifs", IND, mut_input),
@@ -142,6 +150,7 @@ CASES = [
     ("series d infobulles alignees", IND, mut_serie),
     ("garde-fous branches", IND, mut_guard),
     ("etat global relu", IND, mut_deadglob),
+    ("infobulles traduisibles", IND, mut_tiporph),
 ]
 
 # Ce que le harnais NE couvre pas, et pourquoi. Un self-test qui tait sa

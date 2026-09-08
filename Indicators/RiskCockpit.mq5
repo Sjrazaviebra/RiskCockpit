@@ -20,11 +20,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.56"
+#property version "3.57"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.56"
+#define RC_VERSION_STR "3.57"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict
@@ -2088,6 +2088,7 @@ void ShellPushLabels(void) {
     g_shell.SetLabel(RCL_IN_MIN,        Tr("shl_inmin"));
     g_shell.SetLabel(RCL_NEWS_NONE24,   Tr("shl_none24"));
     g_shell.SetLabel(RCL_RULE40,        Tr("shl_rule40"));
+    g_shell.SetLabel(RCL_TILT_IN,       Tr("shl_tiltin"));
     g_shell.SetLabel(RCL_CHECKFN,       Tr("shl_checkfn"));
     g_shell.SetLabel(RCL_SLG_ON,        Tr("shl_slgon"));
     g_shell.SetLabel(RCL_TILT_ON,       Tr("shl_tilton"));
@@ -2171,6 +2172,22 @@ void ShellPushLabels(void) {
         Tr("tipq_" + IntegerToString(i)));
     g_shell.SetTip(g_shell.ZidCptTip(),  Tr("tip_cpt"));
     g_shell.SetTip(g_shell.ZidHelpTip(), Tr("tip_help"));
+    // v3.57 : ces onze zones n avaient QUE le repli anglais code dans le shell -
+    // aucune traduction ne leur etait poussee, donc leur aide restait en anglais
+    // en FR et en ES, y compris l auto-verrou (qui arme un STOP de plusieurs
+    // heures) et sa liberation. Le repli anglais du shell n est plus le seul
+    // texte que ces controles savent dire.
+    g_shell.SetTip(g_shell.ZidCfgTab0(),   Tr("tipz_tab0"));
+    g_shell.SetTip(g_shell.ZidCfgTab1(),   Tr("tipz_tab1"));
+    g_shell.SetTip(g_shell.ZidCfgTab2(),   Tr("tipz_tab2"));
+    g_shell.SetTip(g_shell.ZidCfgTab3(),   Tr("tipz_tab3"));
+    g_shell.SetTip(g_shell.ZidSelfLock(),  Tr("tipz_selflock"));
+    g_shell.SetTip(g_shell.ZidUnlock(),    Tr("tipz_unlock"));
+    g_shell.SetTip(g_shell.ZidHyper(),     Tr("tipz_hyper"));
+    g_shell.SetTip(g_shell.ZidMViol(),     Tr("tipz_mviol"));
+    g_shell.SetTip(g_shell.ZidRViol(),     Tr("tipz_rviol"));
+    g_shell.SetTip(g_shell.ZidBeTip(),     Tr("tipz_be"));
+    g_shell.SetTip(g_shell.ZidMaxLotEdit(), Tr("tipz_maxlot"));
 }
 // v3 SHELL : a config toggle was clicked. The SHELL never mutates the model -
 // the change lands HERE, on the same globals + persistence the modal uses.
@@ -3907,8 +3924,14 @@ void RefreshSlLinesForChart(const long chart_id) {
                 ObjectCreate(chart_id, txt_id, OBJ_TEXT, 0, anchor_time, sl_price);
                 ObjectSetInteger(chart_id, txt_id, OBJPROP_TIME, anchor_time);
                 ObjectSetDouble(chart_id, txt_id, OBJPROP_PRICE, sl_price);
+                // v3.57 : la ligne HLINE - invisible, OBJPROP_HIDDEN - recevait la
+                // version TRADUITE, et le texte reellement DESSINE sur le graphique
+                // recevait une version anglaise en dur, dont seul le suffixe
+                // d avertissement etait traduit : la seule ligne d alerte posee sur
+                // le graphique s affichait mi-anglaise mi-francaise. La traduction
+                // existait deja - elle etait ecrite la ou personne ne la lit.
                 ObjectSetString(chart_id, txt_id, OBJPROP_TEXT,
-                                "SL " + DoubleToString(budget_pct, 2) + "% rec  " +
+                                Tr("sl_rec") + " " + DoubleToString(budget_pct, 2) + "%  " +
                                     type_str + " " + DoubleToString(vol, 2) + "  #" +
                                     IntegerToString((int)ticket) + status_suffix);
                 ObjectSetInteger(chart_id, txt_id, OBJPROP_COLOR, final_line_clr);
@@ -5410,7 +5433,7 @@ void InitI18n(void) {
     AddTr("pyr_nopos",
         "No position on",
         "Pas de position sur",
-        "Sin posicion en");
+        "Sin posición en");
     AddTr("pyr_hedged",
         "Hedged basket (BUY+SELL) : not supported",
         "Panier couvert (BUY+SELL) : non gere",
@@ -5439,6 +5462,14 @@ void InitI18n(void) {
         "locks",
         "verrouille",
         "asegura");
+    AddTr("pyr_add",
+        "add",
+        "ajoute",
+        "añade");
+    AddTr("pyr_loss",
+        "loss",
+        "perte",
+        "pérdida");
     AddTr("pyr_basket",
         "basket",
         "panier",
@@ -5448,10 +5479,12 @@ void InitI18n(void) {
         "Pause après pertes",
         "Pausa tras pérdidas");
     AddTr("shl_losses", "losses", "pertes", "pérdidas");
+    // v3.57 : « GUIA DE USO » se dessinait a 23 px de « GUÍA DE USO » (h_t0) -
+    // les deux memes mots, deux orthographes, l une sous l autre.
     AddTr("shl_manual",
         "USER GUIDE",
         "GUIDE D'UTILISATION",
-        "GUIA DE USO");
+        "GUÍA DE USO");
     AddTr("shl_newssrcdown",
         "SOURCE UNREADABLE",
         "SOURCE ILLISIBLE",
@@ -5824,10 +5857,15 @@ void InitI18n(void) {
         "News HIGH / MEDIUM|Which impact levels you want counted.",
         "News HIGH / MEDIUM|Les niveaux d'impact que tu veux voir comptés.",
         "News HIGH / MEDIUM|Qué niveles de impacto quieres que cuenten.");
+    // v3.57 : cette entree garantissait que le son est « toujours actif sur un
+    // plan prop » - le libelle de la ligne du DESSOUS (les outils de risque),
+    // repris sans son verrou : ni la bascule ni l hote n imposent quoi que ce
+    // soit ici. Le son est un reglage, les alertes visuelles ne s eteignent
+    // jamais. Le manuel dit maintenant ce que le code fait.
     AddTr("h9_5",
-        "Sound|A sound on every status change. Always on for a prop plan.",
-        "Son|Un son à chaque changement de statut. Toujours actif sur un plan prop.",
-        "Sonido|Un sonido en cada cambio de estado. Siempre activo en un plan prop.");
+        "Sound|A sound on every status change. Your choice - the on-screen alerts never stop.",
+        "Son|Un son à chaque changement de statut. À toi de voir - les alertes à l'écran, elles, ne s'arrêtent jamais.",
+        "Sonido|Un sonido en cada cambio de estado. Tú decides: las alertas en pantalla no se detienen nunca.");
     AddTr("h9_6",
         "Telegram|Locked : MQL5 forbids an INDICATOR from sending anything to the web. The EA build is what sends.",
         "Telegram|Verrouillé : MQL5 interdit à un INDICATEUR d'envoyer quoi que ce soit sur le web. C'est la version EA qui envoie.",
@@ -5971,9 +6009,11 @@ void InitI18n(void) {
         "DISCIPLINE",
         "DISCIPLINE",
         "DISCIPLINA");
+    // v3.57 : « AVANCE » est une progression ; l onglet s appelle « AVANCÉ », et
+    // c est deja le nom que le manuel lui donne (h9_2).
     AddTr("shl_tabadv",
         "ADVANCED",
-        "AVANCE",
+        "AVANCÉ",
         "AVANZADO");
     AddTr("shl_tabdisp",
         "DISPLAY",
@@ -6035,10 +6075,16 @@ void InitI18n(void) {
         "Nothing in the next 24 h.",
         "Rien dans les 24 h.",
         "Nada en las próximas 24 h.");
+    // v3.57 : ce libelle portait le 40 % EN DUR. Le chiffre vient desormais du
+    // profil actif, qui le met a ZERO sur FTMO / E8 / MFF funded.
     AddTr("shl_rule40",
-        "40% rule",
-        "règle 40%",
-        "regla 40%");
+        "rule",
+        "règle",
+        "regla");
+    AddTr("shl_tiltin",
+        "in",
+        "en",
+        "en");
     AddTr("shl_checkfn",
         "check FN",
         "vérifier FN",
@@ -6416,6 +6462,50 @@ void InitI18n(void) {
     AddTr("tip_cpt",    "Profile|The plan EVERY limit is derived from.",
                         "Profil|Le plan dont TOUTES les limites sont déduites.",
                         "Perfil|El plan del que salen TODOS los límites.");
+    AddTr("tipz_tab0",
+        "Risk|SL, TP, margin and risk per trade, planned trades.",
+        "Risque|SL, TP, marge et risque par trade, trades prévus.",
+        "Riesgo|SL, TP, margen y riesgo por operación, operaciones previstas.");
+    AddTr("tipz_tab1",
+        "Discipline|Tilt, cooldown, self-lock duration.",
+        "Discipline|Tilt, pause après pertes, durée de l'auto-verrou.",
+        "Disciplina|Tilt, pausa tras pérdidas, duración del autobloqueo.");
+    AddTr("tipz_tab2",
+        "Advanced|Comfort padding, refresh period, post-violation caps.",
+        "Avancé|Cadrage confort, période de rafraîchissement, plafonds après violation.",
+        "Avanzado|Encuadre, período de refresco, límites tras una violación.");
+    AddTr("tipz_tab3",
+        "Display|Theme, language, news, alerts.",
+        "Affichage|Thème, langue, news, alertes.",
+        "Pantalla|Tema, idioma, noticias, alertas.");
+    AddTr("tipz_selflock",
+        "Self-lock|Two clicks : arms a full STOP for the set duration.",
+        "Auto-verrou|Deux clics : arme un STOP complet pour la durée réglée.",
+        "Autobloqueo|Dos clics: arma un STOP completo durante la duración fijada.");
+    AddTr("tipz_unlock",
+        "Release|Two clicks within 5 s to end the self-lock early.",
+        "Libérer|Deux clics en moins de 5 s pour lever l'auto-verrou plus tôt.",
+        "Liberar|Dos clics en menos de 5 s para levantar el autobloqueo antes.");
+    AddTr("tipz_hyper",
+        "Hyperactivity|Trades today / the plan's daily cap.",
+        "Hyperactivité|Trades du jour / le plafond quotidien du plan.",
+        "Hiperactividad|Operaciones de hoy / el límite diario del plan.");
+    AddTr("tipz_mviol",
+        "Margin violation|Tightened margin cap after a violation.",
+        "Violation marge|Plafond de marge resserré après une violation.",
+        "Violación margen|Límite de margen reducido tras una violación.");
+    AddTr("tipz_rviol",
+        "Risk violation|Tightened risk cap after a violation.",
+        "Violation risque|Plafond de risque resserré après une violation.",
+        "Violación riesgo|Límite de riesgo reducido tras una violación.");
+    AddTr("tipz_be",
+        "Break-even|Draws the basket break-even line.",
+        "Point mort|Trace la ligne de point mort du panier.",
+        "Punto de equilibrio|Traza la línea de equilibrio de la cesta.");
+    AddTr("tipz_maxlot",
+        "Max lot|Select it then Ctrl+C to paste it.",
+        "Lot max|Sélectionne-le puis Ctrl+C pour le coller.",
+        "Lote máx|Selecciónalo y Ctrl+C para pegarlo.");
     AddTr("tip_help",   "Version|Current build + active news source.",
                         "Version|Build en cours + source des news active.",
                         "Versión|Build actual + fuente de noticias activa.");
@@ -7111,10 +7201,13 @@ bool BuildPyramidLine(string &line, int &stat) {
     StringConcatenate(line,
                       Tr("pyr_if"), " ", (is_buy ? ">=" : "<="), " ",
                       DoubleToString(step.trigger_price, _Digits),
-                      " add ", DoubleToString(step.add_lot, pld),
+                      " " + Tr("pyr_add") + " ", DoubleToString(step.add_lot, pld),
                       " " + Tr("pyr_moveall") + " ", DoubleToString(step.new_unified_stop, _Digits),
                       " = " + Tr("pyr_locks") + " ",
-                      (step.worst_case_money >= 0.0 ? "min +$" : "perte -$"),
+                      // v3.57 : « perte » etait un mot FRANCAIS en dur au milieu
+                      // d une ligne assemblee morceau par morceau avec Tr() - un
+                      // panier en perte affichait un mot francais en EN et en ES.
+                      (step.worst_case_money >= 0.0 ? "min +$" : Tr("pyr_loss") + " -$"),
                       DoubleToString(MathAbs(step.worst_case_money), 2),
                       "  [" + Tr("pyr_basket") + " ", DoubleToString(sum_vol, pld),
                       " @", DoubleToString(anchor_entry, _Digits), "]");
