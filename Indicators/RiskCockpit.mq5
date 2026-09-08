@@ -1,18 +1,24 @@
 ﻿//+------------------------------------------------------------------+
-//|                                          RiskCockpit.mq5   |
+//|                                                  RiskCockpit.mq5 |
 //|                                                JR Trading - 2026 |
-//|                                          https://javadrazavi.fr  |
+//|                                           https://javadrazavi.fr |
 //|                                                                  |
-//|  RiskCockpit Indicator                                     |
-//|  ---------------------------                                     |
-//|  Real-time rule-monitoring panel for prop-firm traders on        |
-//|  FundedNext (Stellar 1-Step / 2-Step / Lite / Instant).          |
-//|  No auto-actions: this is an ADVISOR. Trades stay in the user's  |
-//|  hands. The companion EA (V2) executes auto-fixes.               |
+//|  RiskCockpit - prop-firm rule dashboard                          |
+//|  --------------------------------------                          |
+//|  Real-time rule-monitoring panel for prop-firm traders. Built-in |
+//|  profiles for FundedNext (Stellar 1-Step / 2-Step / Lite /       |
+//|  Instant) plus FTMO / E8 / The5ers / MyFundedFX rule sets.       |
 //|                                                                  |
-//|  T6 (this commit): UI skeleton + panel rendering.                |
-//|  T7 (next commit): live rule evaluation hooked to MQL5 trade     |
-//|                    APIs and OnTradeTransaction events.           |
+//|  READ-ONLY BY CONSTRUCTION. There is no trading function in this |
+//|  file : it cannot open, close or modify a position. It reads the |
+//|  account, computes the distance to every limit that can end it,  |
+//|  and says what it finds. Every decision stays with the user.     |
+//|                                                                  |
+//|  News classification comes from the companion SERVICE            |
+//|  RCNewsFeeder : MQL5 forbids WebRequest inside an indicator, so  |
+//|  the service fetches the calendar and the indicator reads the    |
+//|  file. Without it, the MetaTrader calendar is used instead and   |
+//|  the panel says so on screen.                                    |
 //|                                                                  |
 //|  Color literals MUST use the hex form ((color)0x00BBGGRR) - the  |
 //|  clang-format auto-formatter on this workspace breaks the        |
@@ -20,11 +26,11 @@
 //+------------------------------------------------------------------+
 #property copyright "JR Trading - 2026 - javadrazavi.fr"
 #property link "https://javadrazavi.fr"
-#property version "3.59"
+#property version "3.60"
 // The HELP section showed a HARDCODED "3.02" while the build was 3.16 : the
 // panel lied about which binary was loaded - the one thing a user checks to
 // know whether the indicator reloaded. One constant now, next to the property.
-#define RC_VERSION_STR "3.59"
+#define RC_VERSION_STR "3.60"
 #property icon "RiskCockpit.ico"   // v1.4.1 : shown in the Navigator + the indicator properties dialog (embedded in the .ex5)
 #property description "RiskCockpit - real-time risk-monitoring dashboard for prop-firm traders. Compatible FundedNext / FTMO / E8 / The5ers / MyFundedFX challenges."
 #property strict

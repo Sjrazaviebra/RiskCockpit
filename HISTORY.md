@@ -92,6 +92,61 @@ ahead of it — the `v2.02.05` and `v2.13.05` commits are marked *git-only*, nev
 
 ## 3.x — the v3 shell becomes the interface
 
+### v3.60.72 — préparation de la mise en ligne Market
+
+**L'en-tête du fichier décrivait un autre logiciel.** Les vingt premières lignes
+sont ce qu'un validateur MQL5 lit en premier — et elles annonçaient
+*« T6 (this commit): UI skeleton + panel rendering »* pour un squelette remplacé
+deux fois depuis, *« T7 (next commit): live rule evaluation »* pour un travail
+fait depuis longtemps, et surtout **« The companion EA (V2) executes
+auto-fixes »** : une promesse de fonctionnalité, dans un dépôt **public** et dans
+la source soumise au Market, pour un EA qui n'existe pas. L'en-tête dit
+maintenant ce que le fichier fait — et ce qu'il ne peut pas faire : aucune
+fonction de trading n'y existe.
+
+**Les pièces de la fiche Market, préparées et vérifiées :**
+
+- `MARKET-DESCRIPTION.md` — la description en EN / FR / ES, écrite contre les
+  règles officielles Part IV : aucune garantie ni promesse de bénéfice, aucun
+  superlatif, aucun backtest, aucun lien externe.
+- **Les icônes 200 / 140 / 60** — et la ligne **« v1.30 » effacée du logo**. Le
+  logo publié portait une version de deux versions majeures en arrière, imprimée
+  dans l'image : c'est ce qu'un acheteur voit **avant** de lire quoi que ce soit,
+  et ça dit « abandonné ». Rien n'oblige à graver une version sur une icône — il
+  faudrait la redessiner à chaque mise à jour, c'est-à-dire recréer le problème.
+- `market_screens/SHOTLIST.md` — les onze prises, l'état de l'interface à
+  préparer pour chacune, et la règle qui ne se vérifie qu'à l'œil : **l'interface
+  doit être en anglais**, et RiskCockpit retient la langue par compte.
+- `tools/prep_screens.py` — met les captures aux spécifications (≥ 720 px sur un
+  côté, ≤ 1920×1080, ≤ 2 Mo) et **refuse** ce qui ne peut pas y passer, au lieu
+  de produire un fichier rejeté à la soumission.
+- `tools/build-market-music.py` — la piste, **synthétisée** : 47,7 s, ni
+  revendication Content ID possible, ni attribution à porter. Le script **mesure
+  le niveau seconde par seconde et refuse d'écrire** si un creux dépasse ce qui
+  est audible (mesuré : creux le plus bas à 81 % de la moyenne).
+- `tools/build-market-video.py` — le montage, sur la palette **échantillonnée sur
+  le produit** et non choisie. Il **refuse de tourner s'il manque une capture** :
+  on ne fabrique pas une vidéo avec des trous.
+- `RELEASE-3.60.md` — la séquence de mise en ligne, ce qui est prêt, et ce qui
+  ne l'est pas.
+
+⭐ **Le gate a attrapé une fuite dans MON propre outillage** : j'avais écrit en
+dur un chemin `C:\Users\<nom>\AppData\Local\...` dans le script de montage —
+exactement ce que le contrôle « fuite de données perso » existe pour trouver, et
+il l'a trouvé sur mon code. Le chemin est désormais construit à l'exécution
+depuis les variables d'environnement : le fichier ne porte plus aucun nom
+d'utilisateur.
+
+⚖️ **Ce qui n'est PAS fait, et pourquoi** : les captures. Elles demandent
+d'ouvrir chaque section dans MT5, donc de cliquer. Le 08/09/2026, une séance de
+vérification visuelle a coïncidé avec l'ouverture d'une position `SDRM-TEST` sur
+le compte démo — un commentaire que seul le bouton SELL de StrategyDeck produit,
+et qui n'est atteignable que par un clic. Sur un compte démo, StrategyDeck
+démarre **armé**. La séance de captures attend donc un désarmement, pour qu'un
+clic mal placé devienne un refus affiché et non un ordre envoyé.
+
+**Gate : 22 contrôles, 0 en échec. Compilation : 0 erreur, 0 avertissement.**
+
 ### v3.59.71 — le panneau défile : le guide d'utilisation devient atteignable
 
 🔴 **Le manuel était inatteignable sur un écran de portable.** La section AIDE
