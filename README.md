@@ -29,6 +29,10 @@
 - **Sound alerts** on every status change, with the file names you choose.
   *(Telegram alerts exist in the code but an indicator cannot send them — MQL5
   blocks `WebRequest` outside EAs and services, so the toggle is shown locked.)*
+- **Built-in manual** — the HELP section is the documentation: a step-by-step
+  user guide, then one fold-out per surface and per section listing every
+  element with what it means. 78 entries, in the three languages. Nothing to
+  read elsewhere before using the tool.
 - **Multi-language UI** — EN / FR / ES.
 
 ## The interface (v3)
